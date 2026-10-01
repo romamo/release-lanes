@@ -1,0 +1,137 @@
+name: release-lanes prepare
+
+# Called by a repository's release workflow (see `release-lanes init`). On a push it
+# first waits for the batch of merges to end; then it plans, and when a lane is due it writes
+# the release commit and pushes it to a work branch for the caller's CI. In dry-run it shows
+# the release commit in the run summary and pushes nothing.
+
+on:
+  workflow_call:
+    inputs:
+      lane:
+        description: "Release this lane by hand; empty follows the policy"
+        type: string
+        default: ""
+      dry-run:
+        type: boolean
+        default: false
+      hotfix-prs:
+        type: string
+        default: ""
+      hotfix-from:
+        type: string
+        default: ""
+      tool:
+        description: "Where uvx installs release-lanes from"
+        type: string
+        default: "git+https://github.com/romamo/release-lanes@v0"
+    outputs:
+      lane:
+        value: ${{ jobs.prepare.outputs.lane }}
+      version:
+        value: ${{ jobs.prepare.outputs.version }}
+      base:
+        value: ${{ jobs.prepare.outputs.base }}
+      sha:
+        description: "The release commit; empty when nothing releases or in dry-run"
+        value: ${{ jobs.prepare.outputs.sha }}
+
+permissions:
+  contents: read
+
+jobs:
+  # The only job a newer run may cancel: it holds no state, and cancelling it stops this
+  # run before anything is written
+  settle:
+    concurrency:
+      group: release-lanes-settle
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        if: github.event_name == 'push'
+
+      - uses: astral-sh/setup-uv@v10.2.0
+        if: github.event_name == 'push'
+
+      - name: Wait for the batch of merges to end
+        if: github.event_name == 'push'
+        env:
+          TOOL: ${{ inputs.tool }}
+        run: |
+          minutes="$(uvx --from "$TOOL" release-lanes settle-minutes)"
+          echo "Waiting ${minutes} min for more pushes; a newer push cancels this run"
+          sleep "$((minutes * 60))"
+
+  # From here on nothing is cancelled: a newer run queues behind this one
+  prepare:
+    needs: settle
+    concurrency:
+      group: release-lanes
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # pushes the release commit's work branch
+      issues: read # release-blocker issues and milestones
+      pull-requests: read # a hotfix's merge commits
+    outputs:
+      lane: ${{ steps.plan.outputs.lane }}
+      version: ${{ steps.plan.outputs.version }}
+      base: ${{ steps.plan.outputs.base }}
+      sha: ${{ steps.prepare.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Plan
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOOL: ${{ inputs.tool }}
+          LANE: ${{ inputs.lane }}
+          DRY_RUN: ${{ inputs.dry-run && '--dry-run' || '' }}
+          HOTFIX_PRS: ${{ inputs.hotfix-prs }}
+          HOTFIX_FROM: ${{ inputs.hotfix-from }}
+        run: |
+          args=(plan --github-output "$GITHUB_OUTPUT")
+          [ -n "$LANE" ] && args+=(--lane "$LANE")
+          [ -n "$DRY_RUN" ] && args+=(--dry-run)
+          [ -n "$HOTFIX_PRS" ] && args+=(--hotfix-prs "$HOTFIX_PRS")
+          [ -n "$HOTFIX_FROM" ] && args+=(--hotfix-from "$HOTFIX_FROM")
+          uvx --from "$TOOL" release-lanes "${args[@]}"
+
+      - name: Write the release commit
+        id: prepare
+        if: steps.plan.outputs.action == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOOL: ${{ inputs.tool }}
+          LANE: ${{ steps.plan.outputs.lane }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          BASE: ${{ steps.plan.outputs.base }}
+          MERGES: ${{ steps.plan.outputs.merges }}
+          PRS: ${{ steps.plan.outputs.prs }}
+          MODE: ${{ steps.plan.outputs.mode }}
+        run: |
+          args=(prepare --lane "$LANE" --version "$VERSION" --base "$BASE" --merges "$MERGES" --prs "$PRS")
+          if [ "$MODE" = release ]; then
+            args+=(--push --github-output "$GITHUB_OUTPUT")
+          fi
+          uvx --from "$TOOL" release-lanes "${args[@]}"
+          {
+            echo "### $LANE $VERSION ($MODE)"
+            echo
+            echo '```diff'
+            git diff "$BASE"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report a skip
+        if: steps.plan.outputs.action == 'skip'
+        env:
+          REASON: ${{ steps.plan.outputs.reason }} # may quote an issue title: never inline it
+        run: printf 'No release: %s\n' "$REASON" >> "$GITHUB_STEP_SUMMARY"

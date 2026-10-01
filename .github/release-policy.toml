@@ -1,0 +1,28 @@
+# release-lanes releases itself with its own bot
+name = "release-lanes"
+mode = "dry-run"
+branch = "main"
+version_files = "pyproject"
+after_stamp = ["uv lock --check"]
+
+[changelog]
+style = "keep-a-changelog"
+
+[bump]
+from = "headings"
+major = ["Breaking"]
+minor = ["Added", "Changed", "Deprecated", "Removed"]
+patch = ["Fixed", "Security"]
+
+[gates]
+blocker_label = "release-blocker"
+blocker_lanes = ["stable"]
+
+# A stable release after every batch of merges, and hotfixes by hand
+[lanes.stable]
+quiet_minutes = 30
+github_release = true
+dispatch = ["move-major-tag.yml"]
+
+[lanes.hotfix]
+github_release = true

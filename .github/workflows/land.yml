@@ -1,0 +1,81 @@
+name: release-lanes land
+
+# Called after the caller's CI ran on the release commit. When CI passed it lands the
+# release: main (a stable release on an unmoved main), release/X.Y (a hotfix), or the tag
+# alone (a pre-release, or a stable release promoted while main moved on, which then gets a
+# sync commit on main). It tags, publishes, and starts the lane's dispatch workflows.
+# Whatever happened, the work branch is deleted: a failed release is planned again.
+
+on:
+  workflow_call:
+    inputs:
+      ci-result:
+        type: string
+        required: true
+      lane:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+      sha:
+        type: string
+        required: true
+      base:
+        type: string
+        required: true
+      tool:
+        type: string
+        default: "git+https://github.com/romamo/release-lanes@v0"
+
+permissions:
+  contents: read
+
+jobs:
+  land:
+    if: inputs.ci-result == 'success'
+    concurrency:
+      group: release-lanes
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # main, release branches, tags, and releases
+      actions: write # starts dispatch workflows; a push with this token starts none
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Land, tag, and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOOL: ${{ inputs.tool }}
+          LANE: ${{ inputs.lane }}
+          VERSION: ${{ inputs.version }}
+          SHA: ${{ inputs.sha }}
+          BASE: ${{ inputs.base }}
+        run: |
+          uvx --from "$TOOL" release-lanes land --lane "$LANE" --version "$VERSION" --sha "$SHA" --base "$BASE" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
+  cleanup:
+    needs: land
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Delete the work branch
+        env:
+          TOOL: ${{ inputs.tool }}
+          VERSION: ${{ inputs.version }}
+        run: uvx --from "$TOOL" release-lanes cleanup --version "$VERSION"

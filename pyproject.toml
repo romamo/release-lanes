@@ -1,0 +1,43 @@
+[project]
+name = "release-lanes"
+version = "0.1.0"
+description = "Release lanes driven by a hand-written CHANGELOG: dev, rc, stable, and hotfix releases cut by policy in GitHub Actions"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Romamo" }]
+requires-python = ">=3.14"
+dependencies = []
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Software Development :: Version Control :: Git",
+    "Typing :: Typed",
+]
+
+[project.scripts]
+release-lanes = "release_lanes.cli:run"
+
+[project.urls]
+Repository = "https://github.com/romamo/release-lanes"
+Changelog = "https://github.com/romamo/release-lanes/blob/main/CHANGELOG.md"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = ["mypy>=1.18", "pytest>=8.4", "ruff>=0.13"]
+
+[tool.mypy]
+strict = true
+files = ["src", "tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "BLE"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

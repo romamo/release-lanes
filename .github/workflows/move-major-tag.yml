@@ -1,0 +1,35 @@
+name: Move the major tag
+
+# Callers pin `@v0`: after a stable release, point the major tag at it. The release bot
+# starts this workflow with the release's tag.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release tag, such as v0.2.0"
+        type: string
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  move:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Point the major tag at the release
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          if ! [[ "$TAG" =~ ^v([0-9]+)\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$TAG is not a stable vX.Y.Z tag"
+            exit 1
+          fi
+          major="v${BASH_REMATCH[1]}"
+          git tag -f "$major" "$TAG^{commit}"
+          git push -f origin "refs/tags/$major"
