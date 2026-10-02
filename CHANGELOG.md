@@ -7,6 +7,11 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- `doctor` fails a `[tool.uv.sources]` entry taken from a local path or installed
+  editable, and the setup skill covers a Python package's build and smoke test
+
 ## [0.1.0] - 2026-10-01
 
 ### Added
