@@ -8,6 +8,7 @@ From a GitHub issue to a published release, run by agents and one release bot:
 | Fix | `github-issue-resolve` skill | One issue: verify against main, fix with a regression test, open a PR |
 | Land | `github-pr-triage` skill | Review each PR in its own worktree, fix small problems, merge only on green CI |
 | Release | the release bot | Cut the release on its lane when the policy says one is due, run CI on it, tag, publish |
+| Watch | `github-ship-watch` skill | On a loop or schedule: catch a failed or stalled bot, a release missing from PyPI, unannounced fixes, and untriaged issues; finish what the policy decided |
 | Set up | `release-lanes-setup` skill | Wire a repository to the bot: package checks, CI, publishing, the policy, a dry run |
 
 [docs/flow.md](docs/flow.md) shows what to say to run each stage, alone or all at once.
