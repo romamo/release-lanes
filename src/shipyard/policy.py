@@ -10,9 +10,9 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from release_lanes.errors import ReleaseError
-from release_lanes.schedule import Freeze, Window
-from release_lanes.version import Part
+from shipyard.errors import ReleaseError
+from shipyard.schedule import Freeze, Window
+from shipyard.version import Part
 
 POLICY_PATH = Path(".github") / "release-policy.toml"
 _MAX_QUIET = 300  # a GitHub job runs at most 6 hours; leave room for the rest of the run

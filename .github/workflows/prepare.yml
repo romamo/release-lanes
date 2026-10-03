@@ -1,6 +1,6 @@
-name: release-lanes prepare
+name: shipyard prepare
 
-# Called by a repository's release workflow (see `release-lanes init`). On a push it
+# Called by a repository's release workflow (see `shipyard init`). On a push it
 # first waits for the batch of merges to end; then it plans, and when a lane is due it writes
 # the release commit and pushes it to a work branch for the caller's CI. In dry-run it shows
 # the release commit in the run summary and pushes nothing.
@@ -22,9 +22,9 @@ on:
         type: string
         default: ""
       tool:
-        description: "Where uvx installs release-lanes from"
+        description: "Where uvx installs shipyard from"
         type: string
-        default: "git+https://github.com/romamo/release-lanes@v0"
+        default: "git+https://github.com/romamo/shipyard@v0"
     outputs:
       lane:
         value: ${{ jobs.prepare.outputs.lane }}
@@ -44,7 +44,7 @@ jobs:
   # run before anything is written
   settle:
     concurrency:
-      group: release-lanes-settle
+      group: shipyard-settle
       cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:
@@ -59,7 +59,7 @@ jobs:
         env:
           TOOL: ${{ inputs.tool }}
         run: |
-          minutes="$(uvx --from "$TOOL" release-lanes settle-minutes)"
+          minutes="$(uvx --from "$TOOL" shipyard settle-minutes)"
           echo "Waiting ${minutes} min for more pushes; a newer push cancels this run"
           sleep "$((minutes * 60))"
 
@@ -67,7 +67,7 @@ jobs:
   prepare:
     needs: settle
     concurrency:
-      group: release-lanes
+      group: shipyard
       cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
@@ -102,7 +102,7 @@ jobs:
           [ -n "$DRY_RUN" ] && args+=(--dry-run)
           [ -n "$HOTFIX_PRS" ] && args+=(--hotfix-prs "$HOTFIX_PRS")
           [ -n "$HOTFIX_FROM" ] && args+=(--hotfix-from "$HOTFIX_FROM")
-          uvx --from "$TOOL" release-lanes "${args[@]}"
+          uvx --from "$TOOL" shipyard "${args[@]}"
 
       - name: Write the release commit
         id: prepare
@@ -121,7 +121,7 @@ jobs:
           if [ "$MODE" = release ]; then
             args+=(--push --github-output "$GITHUB_OUTPUT")
           fi
-          uvx --from "$TOOL" release-lanes "${args[@]}"
+          uvx --from "$TOOL" shipyard "${args[@]}"
           {
             echo "### $LANE $VERSION ($MODE)"
             echo

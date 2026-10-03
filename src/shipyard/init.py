@@ -5,12 +5,12 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from release_lanes.doctor import CALLER
-from release_lanes.errors import ReleaseError
-from release_lanes.gitrepo import Git
-from release_lanes.policy import POLICY_PATH, Style, VersionFiles
+from shipyard.doctor import CALLER
+from shipyard.errors import ReleaseError
+from shipyard.gitrepo import Git
+from shipyard.policy import POLICY_PATH, Style, VersionFiles
 
-BOT_REPO = "romamo/release-lanes"
+BOT_REPO = "romamo/shipyard"
 BOT_REF = "v0"
 
 
@@ -71,7 +71,7 @@ def policy_text(d: Detected) -> str:
             "\n# Commands run after the version is written, before the commit; a failure stops the release\n"
             'after_stamp = ["uv lock --check"]\n'
         )
-    return f'''# release-lanes reads this file on every run: https://github.com/{BOT_REPO}
+    return f'''# shipyard reads this file on every run: https://github.com/{BOT_REPO}
 name = "{d.name}"
 
 # off: do nothing; dry-run: show the release commit it would make; release: release
@@ -128,7 +128,7 @@ def caller_text(d: Detected, ci: str) -> str:
     uses = f"{BOT_REPO}/.github/workflows"
     return f"""name: Release
 
-# release-lanes: https://github.com/{BOT_REPO}. The policy in
+# shipyard: https://github.com/{BOT_REPO}. The policy in
 # .github/release-policy.toml decides what releases and when; this file only wires the
 # bot to this repository's CI.
 

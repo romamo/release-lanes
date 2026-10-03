@@ -1,0 +1,17 @@
+{
+  "name": "shipyard",
+  "owner": {
+    "name": "Roman Medvedev",
+    "email": "pypi@romavm.dev"
+  },
+  "metadata": {
+    "description": "The shipyard plugin: GitHub issue triage, PR landing, and release lanes"
+  },
+  "plugins": [
+    {
+      "name": "shipyard",
+      "source": "./",
+      "description": "Issue to release on GitHub: triage issues, review and land pull requests, and cut releases on lanes from a hand-written CHANGELOG"
+    }
+  ]
+}

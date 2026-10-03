@@ -6,12 +6,12 @@ import fnmatch
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from release_lanes.changelog import Changelog, Entry
-from release_lanes.errors import ReleaseError
-from release_lanes.github import GitHub
-from release_lanes.gitrepo import Git, Tag
-from release_lanes.policy import PRIORITY, BumpFrom, Lane, LaneRule, Mode, Policy
-from release_lanes.version import ZERO, Part, Version
+from shipyard.changelog import Changelog, Entry
+from shipyard.errors import ReleaseError
+from shipyard.github import GitHub
+from shipyard.gitrepo import Git, Tag
+from shipyard.policy import PRIORITY, BumpFrom, Lane, LaneRule, Mode, Policy
+from shipyard.version import ZERO, Part, Version
 
 
 class Event(StrEnum):

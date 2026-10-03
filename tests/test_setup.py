@@ -3,11 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from release_lanes.cli import main
-from release_lanes.doctor import doctor
-from release_lanes.errors import ReleaseError
-from release_lanes.init import init
-from release_lanes.policy import Policy
+from shipyard.cli import main
+from shipyard.doctor import doctor
+from shipyard.errors import ReleaseError
+from shipyard.init import init
+from shipyard.policy import Policy
 
 from .conftest import Repo
 
@@ -48,7 +48,7 @@ def test_init_writes_a_policy_doctor_accepts(repo: Repo) -> None:
     )
     caller = written[1].read_text(encoding="utf-8")
     assert "uses: ./.github/workflows/ci.yml" in caller
-    assert "romamo/release-lanes/.github/workflows/prepare.yml@v0" in caller
+    assert "romamo/shipyard/.github/workflows/prepare.yml@v0" in caller
     checks = {c.name: c.status for c in doctor(repo.root)}
     assert checks["policy"] == checks["workflow"] == checks["ci"] == checks["changelog"] == "PASS"
     with pytest.raises(ReleaseError, match="exists"):

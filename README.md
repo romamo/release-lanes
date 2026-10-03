@@ -1,4 +1,38 @@
-# release-lanes
+# shipyard
+
+From a GitHub issue to a published release, run by agents and one release bot:
+
+| Stage | Part | Does |
+|---|---|---|
+| Triage | `github-issue-triage` skill | A verdict on every issue (implement, postpone, clarify), a comment and labels, one PR per fix |
+| Fix | `github-issue-resolve` skill | One issue: verify against main, fix with a regression test, open a PR |
+| Land | `github-pr-triage` skill | Review each PR in its own worktree, fix small problems, merge only on green CI |
+| Release | the release bot | Cut the release on its lane when the policy says one is due, run CI on it, tag, publish |
+| Set up | `release-lanes-setup` skill | Wire a repository to the bot: package checks, CI, publishing, the policy, a dry run |
+
+[docs/flow.md](docs/flow.md) shows what to say to run each stage, alone or all at once.
+
+## Install the skills
+
+As a Claude Code plugin, which also reaches scheduled cloud sessions:
+
+```
+/plugin marketplace add romamo/shipyard
+/plugin install shipyard@shipyard
+```
+
+The skills are then `/shipyard:github-issue-triage` and so on. For a checkout you edit,
+or for Codex, link each skill folder into `~/.agents/skills` (Claude Code reads it through
+`~/.claude/skills`):
+
+```bash
+for s in ~/PycharmProjects/shipyard/skills/*/; do ln -sfn "$s" ~/.agents/skills/; done
+```
+
+The skills need `gh` signed in, and run their scripts with `uv run --no-project python`
+or Python 3.10+.
+
+## Release lanes
 
 Release lanes for projects that keep a hand-written CHANGELOG. Every pull request adds its
 own entry under Unreleased; a policy file decides when each lane releases, and a GitHub
@@ -14,7 +48,7 @@ Actions bot cuts the release, runs your CI on it, tags it, and publishes it.
 Installers skip `dev` and `rc` versions unless asked, so a client who needs a feature today
 pins the pre-release, and everyone else gets stable releases that real users already ran.
 
-## How a release works
+### How a release works
 
 Every release is a **stamp commit**: a base commit plus the version files, the policy's
 `version_lines`, and, for a stable release, the CHANGELOG section. CI runs on that commit
@@ -30,7 +64,7 @@ before anything is tagged.
   request's change, takes their CHANGELOG entries, releases `X.Y.(Z+1)`, and syncs main the
   same way
 
-### When something is wrong in a batch
+#### When something is wrong in a batch
 
 Escalate in this order:
 
@@ -39,11 +73,11 @@ Escalate in this order:
    revert pull request removes the bad change and its CHANGELOG entry, and the next rc soaks
 3. **Hotfix**: when only a stable release will do, ship feature A alone from `release/X.Y`
 
-## Quick start
+### Quick start
 
 ```bash
-uvx --from git+https://github.com/romamo/release-lanes@v0 release-lanes init --ci ci.yml
-uvx --from git+https://github.com/romamo/release-lanes@v0 release-lanes doctor
+uvx --from git+https://github.com/romamo/shipyard@v0 shipyard init --ci ci.yml
+uvx --from git+https://github.com/romamo/shipyard@v0 shipyard doctor
 ```
 
 `init` writes `.github/release-policy.toml` in `mode = "dry-run"` and
@@ -62,7 +96,7 @@ run summary, then set `mode = "release"`.
 An agent can do the whole setup with the skill in
 [`skills/release-lanes-setup`](skills/release-lanes-setup/SKILL.md).
 
-## The policy
+### The policy
 
 `.github/release-policy.toml`, read on every run:
 
@@ -121,7 +155,7 @@ also be started by hand from the Release workflow, which skips the triggers but 
 gates. One run releases one lane, in the order hotfix, stable, rc, dev; GitHub's cron only
 wakes the bot, and the policy decides whether a window is open.
 
-## Versions
+### Versions
 
 - The next stable version is the last stable tag bumped by the pending entries, or the open
   pre-release series if that is higher, so `1.0.0rc9` leads to `1.0.0` even when the
@@ -131,7 +165,7 @@ wakes the bot, and the policy decides whether a window is open.
   counts main's first-parent commits
 - A hotfix is always a patch on its `X.Y` series
 
-## CLI
+### CLI
 
 The workflows call these; you can run them locally too.
 
@@ -150,7 +184,7 @@ The workflows call these; you can run them locally too.
 Exit codes: `0` done, a plan may decide to skip; `1` doctor found a failure; `2` bad input
 or a state the bot refuses to act on.
 
-## Limits
+### Limits
 
 - GitHub's token can't push past branch protection: let `github-actions[bot]` bypass the
   rules on main and `release/*`, or the landing fails

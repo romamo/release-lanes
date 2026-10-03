@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from release_lanes.github import Milestone
-from release_lanes.gitrepo import Git
-from release_lanes.policy import Policy
+from shipyard.github import Milestone
+from shipyard.gitrepo import Git
+from shipyard.policy import Policy
 
 POLICY = """\
 name = "demo"

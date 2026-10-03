@@ -6,11 +6,11 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from release_lanes.changelog import Changelog
-from release_lanes.errors import ReleaseError
-from release_lanes.gitrepo import Git
-from release_lanes.policy import POLICY_PATH, BumpFrom, Policy, VersionFiles
-from release_lanes.stamp import project_version
+from shipyard.changelog import Changelog
+from shipyard.errors import ReleaseError
+from shipyard.gitrepo import Git
+from shipyard.policy import POLICY_PATH, BumpFrom, Policy, VersionFiles
+from shipyard.stamp import project_version
 
 CALLER = Path(".github") / "workflows" / "release.yml"
 _BOT_WORKFLOWS = ("prepare.yml", "land.yml")
@@ -104,7 +104,7 @@ def doctor(root: Path) -> list[Check]:
 
     caller = root / CALLER
     if not caller.is_file():
-        add(False, "workflow", f"no {CALLER}; `release-lanes init` writes one")
+        add(False, "workflow", f"no {CALLER}; `shipyard init` writes one")
     else:
         text = caller.read_text(encoding="utf-8")
         uses_bot = all(re.search(rf"uses:\s*\S*/\.github/workflows/{name}\b", text) for name in _BOT_WORKFLOWS)

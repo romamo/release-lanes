@@ -27,16 +27,16 @@ jobs:
           python-version: "3.14"
 
       - run: uv sync --locked
-      - run: uv run ruff check src tests
-      - run: uv run ruff format --check src tests
+      - run: uv run ruff check src tests skills
+      - run: uv run ruff format --check src tests skills
       - run: uv run mypy
       - run: uv run pytest -q
       - name: Lint the workflows, including the template init writes
         run: |
           uvx --from actionlint-py actionlint .github/workflows/*.yml
           uv run python -c "
-          from release_lanes.init import Detected, caller_text
-          from release_lanes.policy import Style, VersionFiles
+          from shipyard.init import Detected, caller_text
+          from shipyard.policy import Style, VersionFiles
           print(caller_text(Detected('demo', 'main', Style.KEEP_A_CHANGELOG, VersionFiles.NONE), 'ci.yml'))
           " > "$RUNNER_TEMP/release.yml"
           uvx --from actionlint-py actionlint -ignore 'ci.yml' "$RUNNER_TEMP/release.yml"

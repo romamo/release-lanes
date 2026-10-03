@@ -16,9 +16,9 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from release_lanes.errors import ReleaseError
-from release_lanes.policy import Style
-from release_lanes.version import Version
+from shipyard.errors import ReleaseError
+from shipyard.policy import Style
+from shipyard.version import Version
 
 _HEADINGS = {
     Style.KEEP_A_CHANGELOG: (

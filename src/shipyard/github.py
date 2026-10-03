@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from release_lanes.errors import ReleaseError
+from shipyard.errors import ReleaseError
 
 
 @dataclass(frozen=True, slots=True)

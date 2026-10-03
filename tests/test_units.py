@@ -2,11 +2,11 @@ import datetime as dt
 
 import pytest
 
-from release_lanes.changelog import Changelog, Entry
-from release_lanes.errors import ReleaseError
-from release_lanes.policy import Lane, Policy, Style
-from release_lanes.schedule import Freeze, Window
-from release_lanes.version import Part, Version
+from shipyard.changelog import Changelog, Entry
+from shipyard.errors import ReleaseError
+from shipyard.policy import Lane, Policy, Style
+from shipyard.schedule import Freeze, Window
+from shipyard.version import Part, Version
 
 from .conftest import POLICY
 

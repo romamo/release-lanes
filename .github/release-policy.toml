@@ -1,5 +1,5 @@
-# release-lanes releases itself with its own bot
-name = "release-lanes"
+# shipyard releases itself with its own bot
+name = "shipyard"
 mode = "release"
 branch = "main"
 version_files = "pyproject"
@@ -26,3 +26,9 @@ dispatch = ["move-major-tag.yml"]
 
 [lanes.hotfix]
 github_release = true
+
+# The plugin's version follows the package's, so a plugin update ships with each release
+[[version_lines]]
+file = ".claude-plugin/plugin.json"
+pattern = '"version": "[^"]+"'
+replace = '"version": "{version}"'

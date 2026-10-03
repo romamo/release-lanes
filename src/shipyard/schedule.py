@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from release_lanes.errors import ReleaseError
+from shipyard.errors import ReleaseError
 
 _DAYS = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
 _WINDOW = re.compile(r"(?P<days>\S+)\s+(?P<hour>\d\d):(?P<minute>\d\d)\s+(?P<zone>\S+)")
