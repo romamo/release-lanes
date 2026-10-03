@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-03
+
 ### Added
 
 - `doctor` fails a `[tool.uv.sources]` entry taken from a local path or installed
@@ -28,5 +30,6 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/romamo/release-lanes/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/romamo/release-lanes/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/romamo/release-lanes/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/romamo/release-lanes/releases/tag/v0.1.0
