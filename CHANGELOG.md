@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-03
+
 ### Fixed
 
 - A rejected push now reports git's error, and a rejected tag push is retried: the first
@@ -37,6 +39,7 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/romamo/release-lanes/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/romamo/release-lanes/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/romamo/release-lanes/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/romamo/release-lanes/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/romamo/release-lanes/releases/tag/v0.1.0

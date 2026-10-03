@@ -1,6 +1,6 @@
 [project]
 name = "release-lanes"
-version = "0.2.0"
+version = "0.2.1"
 description = "Release lanes driven by a hand-written CHANGELOG: dev, rc, stable, and hotfix releases cut by policy in GitHub Actions"
 readme = "README.md"
 license = "MIT"
