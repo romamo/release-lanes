@@ -98,6 +98,7 @@ tmp/shipyard/skills/github-ship-watch/SKILL.md for <owner/repo> — watch and tr
 
 ## Safeguards
 
+- A change to a flag, format, default, public API, or stored state is designed in its issue first and checked against the repo's decisions log (`DECISIONS.md` or `docs/decisions.md`); what you settle is recorded there, so it isn't asked again
 - Scope is read narrowly: "triage" never merges, and "merge" never tags, unless you say so
 - A change that departs from a spec, breaks existing users, or belongs to a held PR stops and asks you, whatever the scope
 - When another session works the same repo, the skills message it first, and your word in the current session wins

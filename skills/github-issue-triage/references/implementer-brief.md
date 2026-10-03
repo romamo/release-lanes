@@ -13,8 +13,9 @@ Follow the github-issue-resolve skill's phases 2 to 6 (verify the claim on the c
 - PR body: summary, test notes, `Fixes #N`, ending {PR attribution line}
 - Keep gh calls to a handful and never poll: the API rate limit is shared
 - Rules: {rules_files, e.g. AGENTS.md}; {project rules in one line, e.g. uv run, fail fast, no monkeypatching}
+- Settled decisions this change must respect: {the output of `decisions.py find` for the touched paths and areas, or "none recorded"}. Departing from one, or from the design below, is a "decision for you": stop and report it, don't ship it
 
-Issue #{N} (branch `{fix|feat}/{N}-{slug}`): {the problem in two sentences, with the repro}. {The agreed plan from the triage comment}. {Risks: the paths that must not change, every input path to cover, platform-only branches, docs and specs that name old values}. {Out of scope: what is deferred}.
+Issue #{N} (branch `{fix|feat}/{N}-{slug}`): {the problem in two sentences, with the repro}. {The agreed plan from the triage comment, including its Design section for a contract change}. {Risks: the paths that must not change, every input path to cover, platform-only branches, docs and specs that name old values}. {Out of scope: what is deferred}.
 
 Final report: each PR URL, 2 to 3 lines on each, and a "Decisions for you" list naming every behaviour change, spec deviation, public-API change, and anything you couldn't verify.
 ```

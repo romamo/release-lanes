@@ -41,6 +41,7 @@ Judgment stays with you: which PRs to delegate, each PR's risks, whether a revie
 | `landed.py --onto <ref> <sha>...` | Did these commits land, even rebased or with a hand-merged CHANGELOG? | Before deleting a worktree or branch |
 | `release_ready.py <repo> <sha> <version>` | Is the release commit ready to tag: CI green on it, on the default branch, tag free, version in manifest and CHANGELOG, "not additive" if Breaking, compare link? Lists open PRs to judge | Right before tagging |
 | `shipped.py <repo> <prev-tag> <tag> [--post]` | Which closed issues did this release fix, and which haven't been told yet? Dry run by default | After the publish is verified |
+| `../github-issue-triage/scripts/decisions.py find\|check\|add` | Which settled rules a PR's files touch; the log's format; recording a rule the user settles during review | `find` in every reviewer brief (`{decisions_script}`); `add` when a held PR's answer sets a rule |
 
 ## Workflow
 
@@ -66,6 +67,8 @@ A reviewer's report is a claim. For each fix commit, read the diff yourself (`gi
 - Does it fix what the report says, and is it minimal?
 - Does it change behavior beyond that? Name any change in the PR body (for example, a retry window going from 1 s to 2 s).
 - Is it a cleanup rather than a fix? Offer it as optional.
+
+A PR that departs from a settled decision (`D-n`) without a superseding entry the user approved is held, not merged: the departure is the user's call (hard rule 3). When the user answers a held PR's question in a way that sets a rule for later work, record it with `decisions.py add` (see github-issue-triage's [design-gate.md](../github-issue-triage/references/design-gate.md#recording-a-decision)) in that PR, as a review fix commit.
 
 Verdicts: **MERGE**, **MERGE AFTER SMALL FIX**, or **REFUSE** (with the reason, and what would change the verdict). Security findings, such as secrets reaching envelopes, logs, or another caller's output, rank first in the report.
 

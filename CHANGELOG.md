@@ -7,6 +7,16 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- A design gate and a decisions log for the triage skills. An issue that changes a flag,
+  a format, a default, a public API, or stored state gets its design written into the
+  issue and checked against the repo's settled decisions before an implementer starts;
+  a departure waits for the user. `decisions.py` keeps the log (`DECISIONS.md` or
+  `docs/decisions.md`): `add` numbers and links entries, `find` lists the rules a diff's
+  paths touch, `check` validates it. Implementer and reviewer briefs carry the matching
+  rules, and github-pr-triage holds a PR that departs from one
+
 ## [0.4.0] - 2026-10-03
 
 ### Added
