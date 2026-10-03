@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-03
+
 ### Breaking
 
 - release-lanes is now shipyard: the package, the CLI (`shipyard init`, `shipyard doctor`,
@@ -56,7 +58,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/romamo/shipyard/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/romamo/shipyard/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/romamo/shipyard/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/romamo/shipyard/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/romamo/shipyard/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/romamo/shipyard/releases/tag/v0.1.0
