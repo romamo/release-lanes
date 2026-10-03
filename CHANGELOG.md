@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-03
+
 ### Added
 
 - A design gate and a decisions log for the triage skills. An issue that changes a flag,
@@ -89,7 +91,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/romamo/shipyard/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/romamo/shipyard/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/romamo/shipyard/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/romamo/shipyard/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/romamo/shipyard/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/romamo/shipyard/compare/v0.2.1...v0.3.0
