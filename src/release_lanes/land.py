@@ -2,6 +2,7 @@
 a stable release made off main back into main, and publish it"""
 
 import datetime as dt
+import time
 from dataclasses import dataclass
 
 from release_lanes.errors import ReleaseError
@@ -13,6 +14,7 @@ from release_lanes.version import Version
 
 WORK_PREFIX = "release-lanes/"  # the branch a release commit waits on while CI runs
 _SYNC_ATTEMPTS = 5
+_TAG_RETRY_WAITS = (2, 5, 10, 0)  # seconds after each failed attempt; the last is not waited
 
 
 def work_branch(version: Version) -> str:
@@ -55,8 +57,8 @@ def prepare(
         return Prepared(changed, sha, False)
     if git.remote_branch(work_branch(version)) is not None:
         return Prepared(changed, sha, False)
-    if not git.push(f"{sha}:refs/heads/{work_branch(version)}"):
-        raise ReleaseError(f"pushing {work_branch(version)} was rejected")
+    if error := git.push(f"{sha}:refs/heads/{work_branch(version)}"):
+        raise ReleaseError(f"pushing {work_branch(version)} was rejected: {error}")
     return Prepared(changed, sha, True)
 
 
@@ -77,6 +79,7 @@ def land(
     sha: str,
     base: str,
     today: dt.date,
+    retry_waits: tuple[int, ...] = _TAG_RETRY_WAITS,
 ) -> Landed:
     rule = policy.rule(lane)
     work = work_branch(version)
@@ -91,22 +94,21 @@ def land(
     placed = "tag only"
     on_main = False
     if lane is Lane.STABLE and git.remote_branch(policy.branch) == base:
-        if not git.push(f"{sha}:refs/heads/{policy.branch}"):
-            raise ReleaseError(f"pushing {sha[:12]} to {policy.branch} was rejected")
+        if error := git.push(f"{sha}:refs/heads/{policy.branch}"):
+            raise ReleaseError(f"pushing {sha[:12]} to {policy.branch} was rejected: {error}")
         placed, on_main = policy.branch, True
     elif lane is Lane.HOTFIX:
         branch = f"release/{version.series}"
         current = git.remote_branch(branch)
         if current is not None and current != base:
             raise ReleaseError(f"{branch} moved to {current[:12]} since the hotfix was planned on {base[:12]}")
-        if not git.push(f"{sha}:refs/heads/{branch}"):
-            raise ReleaseError(f"pushing {sha[:12]} to {branch} was rejected")
+        if error := git.push(f"{sha}:refs/heads/{branch}"):
+            raise ReleaseError(f"pushing {sha[:12]} to {branch} was rejected: {error}")
         placed = branch
 
     message = policy.tag_message.format(name=policy.name, version=version)
     git.run("tag", "-a", version.tag, "-m", message, sha)
-    if not git.push(f"refs/tags/{version.tag}"):
-        raise ReleaseError(f"pushing tag {version.tag} was rejected")
+    _push_tag(git, version, sha, retry_waits)
 
     released = git.show(sha, policy.changelog)
     if released is None:
@@ -130,6 +132,23 @@ def land(
     return Landed(version.tag, placed, synced, tuple(published))
 
 
+def _push_tag(git: Git, version: Version, sha: str, retry_waits: tuple[int, ...]) -> None:
+    """Push the release tag. A rejection is retried: by then the release commit is on its
+    branch, so a tag that never arrives leaves a release no later run can finish"""
+    errors = []
+    for wait in retry_waits:
+        if not (error := git.push(f"refs/tags/{version.tag}")):
+            return
+        errors.append(error)
+        if git.remote_tag(version.tag):
+            git.fetch(f"+refs/tags/{version.tag}:refs/tags/{version.tag}")
+            if git.sha(version.tag) == sha:
+                return  # the push landed although git reported an error
+            raise ReleaseError(f"{version.tag} appeared on origin at another commit: {error}")
+        time.sleep(wait)
+    raise ReleaseError(f"pushing tag {version.tag} was rejected {len(errors)} times: {errors[-1]}")
+
+
 def _sync_main(git: Git, policy: Policy, version: Version, released: str, today: dt.date, newest: bool) -> None:
     """Commit the release's CHANGELOG section (and version, when newest) onto main, retrying
     when a merge lands on main between the fetch and the push"""
@@ -139,7 +158,7 @@ def _sync_main(git: Git, policy: Policy, version: Version, released: str, today:
         sync(git, policy, version, released, today, newest)
         git.run("add", "-A")
         git.run("commit", "-q", "-m", f"Sync {version} into {policy.branch}")
-        if git.push(f"HEAD:refs/heads/{policy.branch}"):
+        if not git.push(f"HEAD:refs/heads/{policy.branch}"):
             return
     raise ReleaseError(f"{policy.branch} kept moving: the sync of {version} failed {_SYNC_ATTEMPTS} times")
 
@@ -148,6 +167,6 @@ def cleanup(git: Git, version: Version) -> bool:
     """Delete the release commit's work branch; whether there was one"""
     if git.remote_branch(work_branch(version)) is None:
         return False
-    if not git.push(f":refs/heads/{work_branch(version)}"):
-        raise ReleaseError(f"deleting {work_branch(version)} was rejected")
+    if error := git.push(f":refs/heads/{work_branch(version)}"):
+        raise ReleaseError(f"deleting {work_branch(version)} was rejected: {error}")
     return True

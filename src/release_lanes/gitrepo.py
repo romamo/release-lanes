@@ -106,9 +106,11 @@ class Git:
     def fetch(self, *refspecs: str) -> None:
         self.run("fetch", "-q", "--tags", REMOTE, *refspecs)
 
-    def push(self, *refspecs: str) -> bool:
-        """Whether the push went through; a rejected push (the ref moved) returns False"""
-        return self.ok("push", "-q", REMOTE, *refspecs)
+    def push(self, *refspecs: str) -> str:
+        """Push to origin; git's error when the remote rejected it (such as a ref that
+        moved), else ''"""
+        proc = self._proc(("push", "-q", REMOTE, *refspecs))
+        return "" if proc.returncode == 0 else proc.stderr.decode(errors="replace").strip()
 
     def dirty(self) -> bool:
         return bool(self.run("status", "--porcelain").strip())

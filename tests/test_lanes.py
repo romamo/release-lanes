@@ -2,6 +2,7 @@
 (push, tag, sync, publish), as the workflows run them"""
 
 import datetime as dt
+from pathlib import Path
 
 import pytest
 
@@ -242,3 +243,49 @@ def test_land_refuses_an_existing_tag(repo: Repo) -> None:
     repo.git.run("push", "-q", "origin", f"{decision.base}:refs/tags/{decision.version.tag}")
     with pytest.raises(ReleaseError, match="exists on origin"):
         land(repo.git, repo.policy, repo.github, decision.lane, decision.version, prepared.sha, decision.base, day)
+
+
+def _reject_tags(repo: Repo, times: int | None) -> None:
+    """Make origin refuse tag pushes: the next `times` ones, or every one when None"""
+    origin = Path(repo.git.run("remote", "get-url", "origin").strip())
+    counter = origin / "rejections"
+    counter.write_text("0", encoding="utf-8")
+    limit = "999999" if times is None else str(times)
+    hook = origin / "hooks" / "pre-receive"
+    hook.write_text(
+        "#!/bin/sh\n"
+        "while read old new ref; do\n"
+        '  case "$ref" in refs/tags/*)\n'
+        f'    n=$(cat {counter}); if [ "$n" -lt {limit} ]; then echo $((n + 1)) > {counter};\n'
+        '      echo "tags are refused for now" >&2; exit 1; fi;;\n'
+        "  esac\n"
+        "done\n",
+        encoding="utf-8",
+    )
+    hook.chmod(0o755)
+
+
+def _land_rc(repo: Repo, waits: tuple[int, ...]) -> tuple[Decision, str]:
+    repo.merge(1, "Added", "Feature A")
+    decision = plan(repo, at_day(1))
+    assert decision.version is not None and decision.lane is not None
+    day = at_day(1).date()
+    prepared = prepare(
+        repo.git, repo.policy, decision.lane, decision.version, decision.base, day, commit=True, push=True
+    )
+    land(repo.git, repo.policy, repo.github, decision.lane, decision.version, prepared.sha, decision.base, day, waits)
+    return decision, prepared.sha
+
+
+def test_a_rejected_tag_push_is_retried(repo: Repo) -> None:
+    _reject_tags(repo, times=1)
+    _, sha = _land_rc(repo, waits=(0, 0))
+    assert repo.git.remote_tag("v1.1.0rc1")
+    assert repo.github.releases[-1][0] == "v1.1.0rc1"
+    assert sha
+
+
+def test_a_refused_tag_push_reports_gits_error(repo: Repo) -> None:
+    _reject_tags(repo, times=None)
+    with pytest.raises(ReleaseError, match="rejected 2 times: .*tags are refused for now"):
+        _land_rc(repo, waits=(0, 0))

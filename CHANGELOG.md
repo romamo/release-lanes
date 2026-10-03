@@ -7,6 +7,13 @@ bot.
 
 ## [Unreleased]
 
+### Fixed
+
+- A rejected push now reports git's error, and a rejected tag push is retried: the first
+  release by the bot (0.2.0) landed on main, but its tag push was refused and the
+  reason was lost. The `land` step also fails when the tool fails, where a pipe through
+  `tee` hid the failure and reported success
+
 ## [0.2.0] - 2026-10-03
 
 ### Added
