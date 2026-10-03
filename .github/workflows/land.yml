@@ -50,6 +50,7 @@ jobs:
       - uses: astral-sh/setup-uv@v10.2.0
 
       - name: Land, tag, and publish
+        shell: bash # -eo pipefail: a failed land fails the step, though its output goes through tee
         env:
           GH_TOKEN: ${{ github.token }}
           TOOL: ${{ inputs.tool }}
