@@ -35,6 +35,7 @@ repo:
 | Publish workflow | the one that uploads to PyPI, npm, or similar | must run on `workflow_dispatch` with a `tag` input and build `refs/tags/<tag>` |
 | Existing release automation | release scripts, a release bot, tag-triggered workflows | replaced or disabled in the same pull request, so two tools never tag |
 | Branch protection | `gh api repos/{owner}/{repo}/rulesets`, `.../branches/<branch>/protection` | `github-actions[bot]` must be able to push main, `release/*`, and `v*` tags |
+| Python package basics | `pyproject.toml`, `src/`, the repo root | see [Python packages](#python-packages); a release ships whatever the build picks up |
 
 ## 2. Fix the prerequisites
 
@@ -61,6 +62,43 @@ Make each change the inspection showed missing, in the same branch:
   any check that the tagged commit is on main: rc and promoted stable tags are off main
 - **Tag-triggered publish** (`on: push: tags`): keep it only if it does not also run for
   the bot's tags; a workflow-token push starts no workflow, so the bot always dispatches
+- **Python package**: make the fixes in [Python packages](#python-packages)
+
+### Python packages
+
+The bot publishes what `uv build` makes from the tag, so check the package once here.
+`doctor` fails a `[tool.uv.sources]` entry with a `path` or `editable`: CI and users don't
+have that checkout. Fix the rest by hand:
+
+- `[project]` has a one-line `description`, `license`, `authors`, `requires-python`, and
+  `[project.urls]` with `Repository` and `Issues` from `git remote get-url origin`. Take
+  the author and license from the user's memory or earlier packages; never write a
+  placeholder
+- `LICENSE` and `README.md` exist; a typed package ships `src/<pkg>/py.typed`
+- `.gitignore` covers `.env`, `__pycache__`, `*.pyc`, and `.DS_Store`, and `git ls-files`
+  lists none of them
+- The sdist leaves out tooling: with hatchling, an explicit
+  `[tool.hatch.build.targets.sdist]` `include` (`/src`, `/tests`, `/CHANGELOG.md`) or an
+  `exclude` covering `/.github`, `/.agents`, `/.claude`, and `/uv.lock`
+- The publish workflow builds the tag, checks the artifacts, and smoke-tests them before
+  uploading. Add these steps after its checkout of the tag:
+
+  ```yaml
+  - run: uv build --out-dir dist
+  - name: Check the sdist leaves out tooling
+    run: |
+      if tar -tzf dist/*.tar.gz | grep -E '^[^/]+/(\.github|\.agents?|\.claude|uv\.lock)(/|$)'; then
+        exit 1
+      fi
+  - name: Smoke-test the wheel and the sdist
+    run: |
+      for dist in dist/*.whl dist/*.tar.gz; do
+        uv run --isolated --no-project --with "$dist" python -c "import <pkg>"
+      done
+  ```
+
+  A CLI checks its entry point too (`--with "$dist" <cli> --version`); a
+  `tests/smoke_test.py` that calls one public function replaces the `import` line
 
 ## 3. Choose the lanes with the user
 
@@ -121,6 +159,11 @@ or the tags are wrong; fix those, not the version.
 - Releases made by commits on main (`Release X` commits tagged on main) keep working as
   history: the bot reads their tags. Delete the old scripts and workflows in the same pull
   request
+- A package from the retired oss-package-engineer skill (its `publish.yml` runs on
+  `push: tags: v*`, installs Python 3.11, and has "Smoke test (wheel)" and "Smoke test
+  (source distribution)" steps): keep its smoke-test steps and `tests/smoke_test.py`, give
+  it the `workflow_dispatch` `tag` input, and drop the tag trigger. Its `chore: release vX`
+  commits are history like any other; their CHANGELOG sections stay as written
 - Under the bot, rc releases do not write CHANGELOG sections; their entries stay under
   Unreleased until the stable release. Existing rc sections stay as they are
 - A project in an rc series (`1.0.0rc9`) continues it: the next rc is `1.0.0rc10`, and the

@@ -2,6 +2,7 @@
 workflows the bot calls"""
 
 import re
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -82,6 +83,20 @@ def doctor(root: Path) -> list[Check]:
         except (ReleaseError, OSError) as exc:
             add(False, "version", str(exc))
 
+    pyproject = root / "pyproject.toml"
+    if pyproject.is_file():
+        try:
+            local = _local_sources(pyproject)
+            add(
+                not local,
+                "sources",
+                f"[tool.uv.sources] points at a local checkout, which CI and users don't have: {', '.join(local)}"
+                if local
+                else "no path or editable [tool.uv.sources]",
+            )
+        except tomllib.TOMLDecodeError as exc:
+            add(False, "sources", f"pyproject.toml: {exc}")
+
     for line in policy.version_lines:
         target = root / line.file
         hits = len(line.pattern.findall(target.read_text(encoding="utf-8"))) if target.is_file() else 0
@@ -106,6 +121,18 @@ def doctor(root: Path) -> list[Check]:
             ok = target.is_file() and _takes_input(target.read_text(encoding="utf-8"), "workflow_dispatch", "tag")
             add(ok, "dispatch", f"{workflow} ({rule.lane}) runs on workflow_dispatch with a 'tag' input")
     return checks
+
+
+def _local_sources(pyproject: Path) -> list[str]:
+    """The [tool.uv.sources] packages taken from a local path, editable or not"""
+    sources = tomllib.loads(pyproject.read_text(encoding="utf-8")).get("tool", {}).get("uv", {}).get("sources", {})
+    local = []
+    for name, source in sources.items():
+        # a package may list several sources, one per marker
+        entries = source if isinstance(source, list) else [source]
+        if any(isinstance(e, dict) and ("path" in e or e.get("editable")) for e in entries):
+            local.append(name)
+    return sorted(local)
 
 
 def _takes_input(text: str, event: str, name: str) -> bool:

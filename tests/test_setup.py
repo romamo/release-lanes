@@ -74,6 +74,20 @@ def test_doctor_catches_a_version_line_that_no_longer_matches(repo: Repo) -> Non
     assert checks[0].status == "FAIL" and "0 time(s)" in checks[0].detail
 
 
+def test_doctor_fails_a_local_uv_source(repo: Repo) -> None:
+    checks = {c.name: c.status for c in doctor(repo.root)}
+    assert checks["sources"] == "PASS"
+    repo.write(
+        "pyproject.toml",
+        repo.read("pyproject.toml")
+        + '\n[tool.uv.sources]\nlib = { path = "../lib", editable = true }\n'
+        + 'pkg = [{ index = "pytorch", marker = "sys_platform == \'linux\'" }, { path = "../pkg" }]\n'
+        + 'remote = { git = "https://github.com/o/remote" }\n',
+    )
+    [check] = [c for c in doctor(repo.root) if c.name == "sources"]
+    assert check.status == "FAIL" and check.detail.endswith(": lib, pkg")
+
+
 def test_cli_plan_and_prepare(repo: Repo, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     repo.merge(1, "Added", "Feature A")
     # no blocker label: the CLI talks to GitHub through gh, which this repo has no remote for
