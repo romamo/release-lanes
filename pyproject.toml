@@ -1,7 +1,7 @@
 [project]
 name = "shipyard"
 version = "0.2.1"
-description = "Release lanes driven by a hand-written CHANGELOG: dev, rc, stable, and hotfix releases cut by policy in GitHub Actions"
+description = "Issue to release on GitHub: agent skills that triage issues and land pull requests, and release lanes cut by policy from a hand-written CHANGELOG"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Romamo" }]
