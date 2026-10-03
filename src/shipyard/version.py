@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, replace
 from enum import StrEnum
 
-from release_lanes.errors import ReleaseError
+from shipyard.errors import ReleaseError
 
 PATTERN = re.compile(r"(\d+)\.(\d+)\.(\d+)(?:(a|b|rc)(\d+))?(?:\.dev(\d+))?")
 _SEMVER_PRE = {"a": "alpha", "b": "beta", "rc": "rc"}

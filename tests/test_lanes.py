@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from release_lanes.changelog import Changelog
-from release_lanes.errors import ReleaseError
-from release_lanes.land import cleanup, land, prepare, work_branch
-from release_lanes.planner import Decision, Event, Hotfix, Planner
-from release_lanes.policy import Lane, Mode, Style
-from release_lanes.version import Version
+from shipyard.changelog import Changelog
+from shipyard.errors import ReleaseError
+from shipyard.land import cleanup, land, prepare, work_branch
+from shipyard.planner import Decision, Event, Hotfix, Planner
+from shipyard.policy import Lane, Mode, Style
+from shipyard.version import Version
 
 from .conftest import Repo, at_day
 

@@ -6,8 +6,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from release_lanes.errors import ReleaseError
-from release_lanes.version import PATTERN, TAG_PREFIX, Version
+from shipyard.errors import ReleaseError
+from shipyard.version import PATTERN, TAG_PREFIX, Version
 
 REMOTE = "origin"
 

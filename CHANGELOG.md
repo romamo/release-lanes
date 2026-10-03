@@ -1,11 +1,28 @@
 # Changelog
 
-All notable changes to release-lanes. The format follows
+All notable changes to shipyard, named release-lanes before 0.3.0. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
-[Semantic Versioning](https://semver.org/). release-lanes releases itself with its own
+[Semantic Versioning](https://semver.org/). shipyard releases itself with its own
 bot.
 
 ## [Unreleased]
+
+### Breaking
+
+- release-lanes is now shipyard: the package, the CLI (`shipyard init`, `shipyard doctor`,
+  and the rest), and the repository `romamo/shipyard`. In a repository already set up,
+  replace `romamo/release-lanes` with `romamo/shipyard` in `.github/workflows/release.yml`,
+  or run `shipyard init --force` and restore your policy. A release commit now waits on a
+  `shipyard/` work branch
+
+### Added
+
+- The GitHub workflow skills join `release-lanes-setup`: `github-issue-triage`,
+  `github-issue-resolve`, and `github-pr-triage`, with the whole flow in `docs/flow.md`.
+  `github-pr-triage` starts a shipyard bot after its last merge
+- A Claude Code plugin and marketplace in `.claude-plugin`: `/plugin marketplace add
+  romamo/shipyard`, then `/plugin install shipyard@shipyard`. Each release sets the
+  plugin's version
 
 ## [0.2.1] - 2026-10-03
 
@@ -39,7 +56,7 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/romamo/release-lanes/compare/v0.2.1...HEAD
-[0.2.1]: https://github.com/romamo/release-lanes/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/romamo/release-lanes/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/romamo/release-lanes/releases/tag/v0.1.0
+[Unreleased]: https://github.com/romamo/shipyard/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/romamo/shipyard/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/romamo/shipyard/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/romamo/shipyard/releases/tag/v0.1.0

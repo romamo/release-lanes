@@ -1,18 +1,18 @@
 ---
 name: release-lanes-setup
-description: Set up the release-lanes bot in a repository so releases are cut by policy on lanes (dev, rc, stable, hotfix) from its hand-written CHANGELOG. Use when the user asks to add a release bot, automate releases, set up release lanes, scheduled or nightly releases, release candidates, or hotfix releases, or to move a repo onto release-lanes. Covers prerequisites, choosing lanes with the user, writing the policy, wiring CI and publishing, a dry run, and migration from hand-made or scripted releases.
+description: Set up the shipyard release bot in a repository so releases are cut by policy on lanes (dev, rc, stable, hotfix) from its hand-written CHANGELOG. Use when the user asks to add a release bot, automate releases, set up release lanes, scheduled or nightly releases, release candidates, or hotfix releases, or to move a repo onto release lanes. Covers prerequisites, choosing lanes with the user, writing the policy, wiring CI and publishing, a dry run, and migration from hand-made or scripted releases.
 ---
 
-# Set up release-lanes
+# Set up release lanes
 
-release-lanes cuts releases from a hand-written CHANGELOG on lanes the project's policy
+shipyard cuts releases from a hand-written CHANGELOG on lanes the project's policy
 defines. Read the project's README section "How a release works" once before starting:
 pre-releases are tagged off main, and stable releases promote a soaked rc.
 
 Run the tool with:
 
 ```bash
-CR="uvx --from git+https://github.com/romamo/release-lanes@v0 release-lanes"
+CR="uvx --from git+https://github.com/romamo/shipyard@v0 shipyard"
 ```
 
 Work on a branch and finish with a pull request. Never set `mode = "release"` in the

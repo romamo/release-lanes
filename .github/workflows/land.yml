@@ -1,4 +1,4 @@
-name: release-lanes land
+name: shipyard land
 
 # Called after the caller's CI ran on the release commit. When CI passed it lands the
 # release: main (a stable release on an unmoved main), release/X.Y (a hotfix), or the tag
@@ -26,7 +26,7 @@ on:
         required: true
       tool:
         type: string
-        default: "git+https://github.com/romamo/release-lanes@v0"
+        default: "git+https://github.com/romamo/shipyard@v0"
 
 permissions:
   contents: read
@@ -35,7 +35,7 @@ jobs:
   land:
     if: inputs.ci-result == 'success'
     concurrency:
-      group: release-lanes
+      group: shipyard
       cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
@@ -59,7 +59,7 @@ jobs:
           SHA: ${{ inputs.sha }}
           BASE: ${{ inputs.base }}
         run: |
-          uvx --from "$TOOL" release-lanes land --lane "$LANE" --version "$VERSION" --sha "$SHA" --base "$BASE" \
+          uvx --from "$TOOL" shipyard land --lane "$LANE" --version "$VERSION" --sha "$SHA" --base "$BASE" \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
   cleanup:
@@ -79,4 +79,4 @@ jobs:
         env:
           TOOL: ${{ inputs.tool }}
           VERSION: ${{ inputs.version }}
-        run: uvx --from "$TOOL" release-lanes cleanup --version "$VERSION"
+        run: uvx --from "$TOOL" shipyard cleanup --version "$VERSION"

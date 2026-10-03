@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub PR Triage"
+  short_description: "Review open PRs in parallel, verify fixes, and merge only on green CI."
+  default_prompt: "Use $github-pr-triage to review all open PRs in this repo and triage each to merge or refuse."

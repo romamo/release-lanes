@@ -1,5 +1,5 @@
 [project]
-name = "release-lanes"
+name = "shipyard"
 version = "0.2.1"
 description = "Release lanes driven by a hand-written CHANGELOG: dev, rc, stable, and hotfix releases cut by policy in GitHub Actions"
 readme = "README.md"
@@ -16,11 +16,11 @@ classifiers = [
 ]
 
 [project.scripts]
-release-lanes = "release_lanes.cli:run"
+shipyard = "shipyard.cli:run"
 
 [project.urls]
-Repository = "https://github.com/romamo/release-lanes"
-Changelog = "https://github.com/romamo/release-lanes/blob/main/CHANGELOG.md"
+Repository = "https://github.com/romamo/shipyard"
+Changelog = "https://github.com/romamo/shipyard/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling"]

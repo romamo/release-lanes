@@ -5,14 +5,14 @@ import datetime as dt
 import time
 from dataclasses import dataclass
 
-from release_lanes.errors import ReleaseError
-from release_lanes.github import GitHub
-from release_lanes.gitrepo import Git
-from release_lanes.policy import Lane, Policy
-from release_lanes.stamp import notes, stamp, sync
-from release_lanes.version import Version
+from shipyard.errors import ReleaseError
+from shipyard.github import GitHub
+from shipyard.gitrepo import Git
+from shipyard.policy import Lane, Policy
+from shipyard.stamp import notes, stamp, sync
+from shipyard.version import Version
 
-WORK_PREFIX = "release-lanes/"  # the branch a release commit waits on while CI runs
+WORK_PREFIX = "shipyard/"  # the branch a release commit waits on while CI runs
 _SYNC_ATTEMPTS = 5
 _TAG_RETRY_WAITS = (2, 5, 10, 0)  # seconds after each failed attempt; the last is not waited
 

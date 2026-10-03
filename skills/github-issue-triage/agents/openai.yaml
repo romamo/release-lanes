@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Issue Triage"
+  short_description: "Triage an issue backlog into implement, postpone, or clarify, and open a PR per fix."
+  default_prompt: "Use $github-issue-triage to triage the open issues in this repo: decide implement, postpone, or clarify, comment each verdict, and open a PR for each fix."

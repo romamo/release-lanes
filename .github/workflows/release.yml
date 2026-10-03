@@ -1,6 +1,6 @@
 name: Release
 
-# release-lanes dogfoods itself: the same wiring `release-lanes init` writes, but
+# shipyard dogfoods itself: the same wiring `shipyard init` writes, but
 # calling the reusable workflows in this repository and running the tool from the checkout.
 
 on:

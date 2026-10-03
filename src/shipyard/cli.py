@@ -1,4 +1,4 @@
-"""release-lanes: release lanes driven by a hand-written CHANGELOG.
+"""shipyard: release lanes driven by a hand-written CHANGELOG.
 
   settle-minutes  how long to wait after a push for more merges
   plan            decide whether a lane releases now; JSON on stdout
@@ -21,16 +21,16 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
-from release_lanes.doctor import doctor
-from release_lanes.errors import ReleaseError
-from release_lanes.github import GhCli
-from release_lanes.gitrepo import Git
-from release_lanes.init import init
-from release_lanes.land import cleanup, land, prepare
-from release_lanes.planner import Event, Hotfix, Planner
-from release_lanes.policy import POLICY_PATH, Lane, Policy
-from release_lanes.stamp import notes, sync
-from release_lanes.version import Version
+from shipyard.doctor import doctor
+from shipyard.errors import ReleaseError
+from shipyard.github import GhCli
+from shipyard.gitrepo import Git
+from shipyard.init import init
+from shipyard.land import cleanup, land, prepare
+from shipyard.planner import Event, Hotfix, Planner
+from shipyard.policy import POLICY_PATH, Lane, Policy
+from shipyard.stamp import notes, sync
+from shipyard.version import Version
 
 
 def _outputs(path: Path | None, values: Mapping[str, str]) -> None:
@@ -61,7 +61,7 @@ def _now(text: str | None) -> dt.datetime:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="release-lanes", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+        prog="shipyard", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--repo", type=Path, default=Path.cwd(), help="the repository checkout (default: .)")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -122,7 +122,7 @@ def main(argv: list[str]) -> int:
     if args.command == "init":
         for path in init(root, args.ci, args.force):
             print(f"wrote {path.relative_to(root)}")
-        print("next: review the policy, then run `release-lanes doctor`")
+        print("next: review the policy, then run `shipyard doctor`")
         return 0
     if args.command == "doctor":
         checks = doctor(root)
@@ -199,6 +199,6 @@ def run() -> None:
     try:
         code = main(sys.argv[1:])
     except ReleaseError as exc:
-        print(f"release-lanes: {exc}", file=sys.stderr)
+        print(f"shipyard: {exc}", file=sys.stderr)
         code = 2
     sys.exit(code)
