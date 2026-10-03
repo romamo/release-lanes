@@ -7,6 +7,11 @@ bot.
 
 ## [Unreleased]
 
+### Fixed
+
+- `github-pr-triage` starts a shipyard bot by naming the lane: a hand-started
+  `lane=policy` run cancels the push run's quiet wait and then skips (#6)
+
 ## [0.3.0] - 2026-10-03
 
 ### Breaking
