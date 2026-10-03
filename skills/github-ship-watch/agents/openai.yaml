@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Ship Watch"
+  short_description: "Watch the issue-to-release pipeline and finish the releases the policy already decided."
+  default_prompt: "Use $github-ship-watch to check this repo's release bot, its recent releases, and its issue intake, and repair what the release policy already decided."

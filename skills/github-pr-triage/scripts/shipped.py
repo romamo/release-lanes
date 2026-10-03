@@ -65,7 +65,7 @@ def main() -> int:
     if "/" not in args.repo:
         parser.error("repo must be owner/name")
 
-    run(["git", "fetch", "-q", "--tags", "origin"], cwd=args.repo_dir)
+    run(["git", "fetch", "-q", "--force", "--tags", "origin"], cwd=args.repo_dir)  # a bot moves major tags such as v0
     issues: dict[int, set[str]] = {}
     seen_prs: set[int] = set()
     for sha, body in commits(args.repo_dir, args.prev_tag, args.tag):

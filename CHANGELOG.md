@@ -7,6 +7,18 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- The `github-ship-watch` skill: one pass reports a failed or stalled release bot, a
+  release missing from PyPI, fixed issues not yet told which version shipped them, and
+  issues triage owes, then finishes what the policy already decided. Its
+  `watch_state.py` exits 1 when anything needs action, for `/loop` and `/schedule`
+
+### Fixed
+
+- `shipped.py` fetches tags with `--force`, so it no longer fails once the bot has moved
+  a major tag such as `v0`
+
 ## [0.3.1] - 2026-10-03
 
 ### Fixed

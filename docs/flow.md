@@ -1,12 +1,13 @@
 # GitHub issue-to-ship flow
 
-Three skills cover the path from a new issue to a published release, in any GitHub repo with the `gh` CLI:
+Three skills cover the path from a new issue to a published release, and a fourth watches it, in any GitHub repo with the `gh` CLI:
 
 | Skill | Job |
 |---|---|
 | `github-issue-triage` | The backlog: a verdict on every issue (implement, postpone, clarify), comments and labels, one PR per fix |
 | `github-issue-resolve` | One issue in depth: verify, fix with a regression test, open a PR |
 | `github-pr-triage` | Landing: review, CI gate, rebase, merge, and the release |
+| `github-ship-watch` | The routine: a stuck bot, a missing upload, unannounced fixes, waiting issues |
 
 Before the first release, a new package goes through `release-lanes-setup`: package checks, CI and publish wiring, and the shipyard release bot's policy. In a repo with a release bot (`.github/release-policy.toml`), the bot tags; the skills here only start it and never tag by hand. The `oss-package-engineer` skill is retired: its release path is github-pr-triage's "tag X" or the bot, and its package checks live in release-lanes-setup.
 
@@ -71,8 +72,29 @@ The bump, registry, and install commands per ecosystem (Python, Node, Rust, Go, 
 
 ## Keeping it running
 
-- `/loop 30m /github-issue-triage <owner/repo>`: re-triages whatever the script flags, every 30 minutes
-- `/schedule`: a daily cloud run instead
+`github-ship-watch` is the routine: each pass checks the release bot, the newest releases, and the issue intake, finishes what the policy already decided (a stalled lane, a flaky release job, the shipped notices), and hands flagged issues to triage when asked.
+
+- `/loop 30m /github-ship-watch <owner/repo> — watch and triage`: every 30 minutes in this session
+- `/schedule`: a cloud routine, with the prompt below that clones shipyard
+- Status only: `python3 $S/github-ship-watch/scripts/watch_state.py <owner/repo>` (exit 1 when anything needs action)
+
+To enable the plugin in every local session of a repo, commit this to its `.claude/settings.json`:
+
+```json
+{
+  "extraKnownMarketplaces": {
+    "shipyard": { "source": { "source": "github", "repo": "romamo/shipyard" }, "autoUpdate": true }
+  },
+  "enabledPlugins": { "shipyard@shipyard": true }
+}
+```
+
+A cloud routine may not apply a repo's plugin keys ([plugins for organizations](https://code.claude.com/docs/en/plugins/org.md) lists where each surface reads them), so give the routine a prompt that doesn't depend on them:
+
+```
+Clone https://github.com/romamo/shipyard into tmp/shipyard (or pull it if present), then follow
+tmp/shipyard/skills/github-ship-watch/SKILL.md for <owner/repo> — watch and triage
+```
 
 ## Safeguards
 
