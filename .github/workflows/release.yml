@@ -9,10 +9,10 @@ on:
   workflow_dispatch:
     inputs:
       lane:
-        description: "Release this lane now, skipping its triggers (gates still apply); empty follows the policy"
+        description: "policy: follow the policy; a lane: release it now, skipping triggers but not gates"
         type: choice
-        options: ["", stable, hotfix]
-        default: ""
+        options: [policy, stable, hotfix]
+        default: policy
       dry-run:
         description: "Show the release commit, push nothing"
         type: boolean
@@ -33,7 +33,7 @@ jobs:
   prepare:
     uses: ./.github/workflows/prepare.yml
     with:
-      lane: ${{ inputs.lane || '' }}
+      lane: ${{ inputs.lane != 'policy' && inputs.lane || '' }}
       dry-run: ${{ inputs.dry-run || false }}
       hotfix-prs: ${{ inputs.hotfix-prs || '' }}
       hotfix-from: ${{ inputs.hotfix-from || '' }}
