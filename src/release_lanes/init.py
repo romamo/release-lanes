@@ -140,10 +140,10 @@ on:
   workflow_dispatch:
     inputs:
       lane:
-        description: "Release this lane now, skipping its triggers (gates still apply); empty follows the policy"
+        description: "policy: follow the policy; a lane: release it now, skipping triggers but not gates"
         type: choice
-        options: ["", dev, rc, stable, hotfix]
-        default: ""
+        options: [policy, dev, rc, stable, hotfix]
+        default: policy
       dry-run:
         description: "Show the release commit, push nothing"
         type: boolean
@@ -164,7 +164,7 @@ jobs:
   prepare:
     uses: {uses}/prepare.yml@{BOT_REF}
     with:
-      lane: ${{{{ inputs.lane || '' }}}}
+      lane: ${{{{ inputs.lane != 'policy' && inputs.lane || '' }}}}
       dry-run: ${{{{ inputs.dry-run || false }}}}
       hotfix-prs: ${{{{ inputs.hotfix-prs || '' }}}}
       hotfix-from: ${{{{ inputs.hotfix-from || '' }}}}

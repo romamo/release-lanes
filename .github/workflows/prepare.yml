@@ -134,4 +134,5 @@ jobs:
         if: steps.plan.outputs.action == 'skip'
         env:
           REASON: ${{ steps.plan.outputs.reason }} # may quote an issue title: never inline it
-        run: printf 'No release: %s\n' "$REASON" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          printf 'No release: %s\n' "$REASON" >> "$GITHUB_STEP_SUMMARY"
