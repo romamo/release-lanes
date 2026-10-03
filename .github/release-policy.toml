@@ -1,6 +1,6 @@
 # release-lanes releases itself with its own bot
 name = "release-lanes"
-mode = "dry-run"
+mode = "release"
 branch = "main"
 version_files = "pyproject"
 after_stamp = ["uv lock --check"]
