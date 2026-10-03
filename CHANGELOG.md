@@ -15,6 +15,9 @@ bot.
 - `prepare` names a branch `shipyard` on origin that blocks the `shipyard/<tag>` work
   branch, instead of failing with git's raw `cannot lock ref` error, and `doctor` checks
   for it as `work branch` (#7)
+- `github-pr-triage` launches reviewer agents from the repo's root and has each confirm
+  its remote: from a nested clone, worktree isolation copied the wrong repository and a
+  reviewer's fix commits were lost with its worktree
 
 ## [0.5.0] - 2026-10-03
 

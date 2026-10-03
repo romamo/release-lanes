@@ -58,6 +58,7 @@ Also run ListAgents for other sessions working on this repo; message them before
 ### 2. Review
 
 - **Delegate a PR** that touches code: one reviewer agent per PR, `isolation: "worktree"`, all launched in one message so they run in parallel. Fill in the brief from [references/reviewer-brief.md](references/reviewer-brief.md). Give each reviewer the PR's specific risks (security surface, the race the PR claims to fix, the rules it changes) rather than a generic "look for bugs".
+- **Launch from the repo's root.** `isolation: "worktree"` makes a worktree of whatever repository the shell's cwd is in. Launched from a nested clone (a spec checkout under `tmp/`), six reviewers got worktrees of the spec repo, cloned the PR's repo inside them, and one reviewer's fix commits were deleted with its "unchanged" worktree when it finished. Check `git remote get-url origin` before the launch, and have each reviewer confirm it too
 - **Review a small docs-only PR inline:** read the diff, then check every claim it makes against the source (signatures, defaults, exit codes, link anchors). A reviewer agent costs more than it finds here.
 - **Stacked PRs:** tell the reviewer the base PR and build the stack yourself, in order.
 
