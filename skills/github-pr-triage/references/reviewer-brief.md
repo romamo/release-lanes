@@ -18,6 +18,8 @@ Review GitHub PR #{N} of {owner/repo} ("{title}", fixes #{issue}). The repo is a
    - Security: secrets reaching output, logs, error messages, or another concurrent caller's output; input validation on every entry path
    - Whether it resolves the issue fully or only partially
    - The repo's rules in {rules_files, e.g. AGENTS.md, CLAUDE.md}
+   - The settled decisions the diff touches: run `{decisions_script} find $(git diff --name-only origin/{default}...HEAD)` and check the diff against each Rule. A departure is a finding unless the PR records a superseding entry the user approved. Also run `{decisions_script} check` if the PR edits the log
+   - Whether the code matches the design in the issue's triage comment, for a contract change
    - Whether CHANGELOG, README, and docs agree with the code
 4. Reproduce each real bug before fixing it. Commit each small fix with a regression test that fails on the old code, on review-{N}, and rerun the affected checks. Leave larger problems as findings.
 5. Final report, under 250 words: verdict (MERGE / MERGE AFTER SMALL FIX / REFUSE), rebase status, test results, findings with file:line (fixed or not), and the HEAD SHA of review-{N}.

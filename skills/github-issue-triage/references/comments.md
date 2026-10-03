@@ -10,6 +10,9 @@ Triage: **implement**{, for the next release candidate | after rcN}. The plan:
 - {change 1}
 - {change 2}
 
+{Only for a contract change (design-gate.md):}
+**Design.** {The contract change exactly: flag, field and type, default.} {Why this over the alternative.} {Compatibility: who breaks, and the migration.} {Relies on D-n.} {How it's tested.}
+
 {What is deliberately left out, and where it went (a postponed issue, 1.1).} I'll link the PR here.
 ```
 
