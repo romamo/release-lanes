@@ -40,19 +40,7 @@ def doctor(root: Path) -> list[Check]:
 
     git = Git(root)
     add(git.ok("remote", "get-url", "origin"), "remote", "an 'origin' remote to push releases to")
-    # origin's branches as last fetched: doctor reads the clone and doesn't call the remote
-    work = f"{WORK_PREFIX}<tag>"
-    if git.ok("show-ref", "--verify", "-q", f"refs/remotes/{REMOTE}/{BLOCKING_BRANCH}"):
-        add(False, "work branch", blocked(work))
-    elif git.ok("show-ref", "--verify", "-q", f"refs/heads/{BLOCKING_BRANCH}"):
-        add(
-            False,
-            "work branch",
-            f"a local branch '{BLOCKING_BRANCH}' would block the work branch {work} once pushed to origin",
-            warn=True,
-        )
-    else:
-        add(True, "work branch", f"no branch '{BLOCKING_BRANCH}' on origin to block {work}")
+    checks.append(_work_branch(git))
     tags = git.tags()
     stable = [t.version for t in tags if t.version.is_stable]
     add(
@@ -135,6 +123,24 @@ def doctor(root: Path) -> list[Check]:
             ok = target.is_file() and _takes_input(target.read_text(encoding="utf-8"), "workflow_dispatch", "tag")
             add(ok, "dispatch", f"{workflow} ({rule.lane}) runs on workflow_dispatch with a 'tag' input")
     return checks
+
+
+def _work_branch(git: Git) -> Check:
+    """Asks origin itself, as prepare does: a shallow, single-branch, or stale clone's
+    refs/remotes don't show every branch on origin"""
+    work = f"{WORK_PREFIX}<tag>"
+    if not git.ok("remote", "get-url", REMOTE):
+        return Check("WARN", "work branch", f"no '{REMOTE}' remote to ask for a branch '{BLOCKING_BRANCH}'")
+    try:
+        on_origin = git.remote_branch(BLOCKING_BRANCH) is not None
+    except ReleaseError as exc:
+        return Check("WARN", "work branch", f"can't ask {REMOTE} for a branch '{BLOCKING_BRANCH}': {exc}")
+    if on_origin:
+        return Check("FAIL", "work branch", blocked(work))
+    if git.ok("show-ref", "--verify", "-q", f"refs/heads/{BLOCKING_BRANCH}"):
+        detail = f"a local branch '{BLOCKING_BRANCH}' would block the work branch {work} once pushed to {REMOTE}"
+        return Check("WARN", "work branch", detail)
+    return Check("PASS", "work branch", f"no branch '{BLOCKING_BRANCH}' on {REMOTE} to block {work}")
 
 
 def _local_sources(pyproject: Path) -> list[str]:
