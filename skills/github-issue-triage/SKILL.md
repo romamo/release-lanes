@@ -65,7 +65,7 @@ Apply [references/triage-rubric.md](references/triage-rubric.md) to each issue. 
 
 ### 2b. Design gate
 
-For each **implement** that changes a contract (see [references/design-gate.md](references/design-gate.md) for the list), run `decisions.py find` on the areas it touches, write the design into the triage comment, and ask the user before dispatch when it departs from a `D-n` entry or the spec, or when two designs would look different to users. Batch these questions into one AskUserQuestion call per pass. Record each answer with `decisions.py add`; the entry ships in the PR that implements it.
+For each **implement** that changes a contract (see [references/design-gate.md](references/design-gate.md) for the list), run `decisions.py find` on the areas it touches, write the design into the triage comment, and ask the user before dispatch when it departs from a `D-n` entry or the spec, or when two designs would look different to users. Batch these questions into one AskUserQuestion call per pass. Record every answer of the pass with `decisions.py add` in one docs PR, opened before dispatch, so parallel PRs don't each claim the next `D-n` (design-gate.md, Recording a decision).
 
 ### 3. Comment and label
 
@@ -79,7 +79,7 @@ Fill in [references/implementer-brief.md](references/implementer-brief.md): one 
 
 For each PR, check:
 - The diff matches the claim, and each behaviour change is named
-- Everything under "decisions for you". Apply hard rule 4, and send a revision through SendMessage to the same agent, since it keeps its context. When the user's answer sets a rule for later work, record it (design-gate.md, Recording a decision) and have the agent add the entry to its PR
+- Everything under "decisions for you". Apply hard rule 4, and send a revision through SendMessage to the same agent, since it keeps its context. When the user's answer sets a rule for later work, record it in the pass's decisions PR (design-gate.md, Recording a decision), not in the agent's PR
 - The diff against the design in the triage comment: a departure the report doesn't name is a finding
 - Whether the default branch already covers part of the issue. If so, shrink the PR and retitle it. Do this before step 6; once the PR is handed over, ask github-pr-triage to do it (hard rule 7)
 

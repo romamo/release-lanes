@@ -39,7 +39,7 @@ Pick one verdict:
 | Duplicate | Comment with link, stop |
 | Needs a product decision | Comment the options, ask the user, stop |
 | The fix would depart from a spec the project implements | Comment the conflict with requirement IDs, file an issue on the spec repo if the user agrees, stop |
-| Confirmed, and the fix changes a contract (a flag, a format, a default, a public API, stored state) | Run github-issue-triage's [design gate](../github-issue-triage/references/design-gate.md): `decisions.py find`, the design in the issue comment, and the user's answer first when it departs from a `D-n` entry or the spec. Then Phase 3, with the decision entry in the PR if the user settled one |
+| Confirmed, and the fix changes a contract (a flag, a format, a default, a public API, stored state) | Run github-issue-triage's [design gate](../github-issue-triage/references/design-gate.md): `decisions.py find`, the design in the issue comment, and the user's answer first when it departs from a `D-n` entry or the spec. Then Phase 3. A decision the user settled goes in its own docs PR, or an open one that already edits the log (design-gate.md, Recording a decision) |
 
 ## Phase 3: Prepare a clean branch
 
