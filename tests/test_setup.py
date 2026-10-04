@@ -179,6 +179,35 @@ def test_doctor_checks_each_environments_workflow(repo: Repo) -> None:
     )
 
 
+def test_doctor_wants_environment_as_a_jobs_own_key(repo: Repo) -> None:
+    repo.write(
+        repo.policy_file,
+        repo.read(repo.policy_file) + '\n[environments.staging]\nlane = "rc"\nworkflow = "deploy.yml"\n',
+    )
+    head = DEPLOY[: DEPLOY.index("jobs:")]
+
+    def status(jobs: str) -> str:
+        repo.write(".github/workflows/deploy.yml", head + jobs)
+        return next(c.status for c in doctor(repo.root) if c.name == "environment")
+
+    steps = "jobs:\n  deploy:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n"
+    # an action's input or an env entry named environment records no deployment
+    with_input = steps.replace("- run: echo\n", "- uses: o/deploy@v1\n        with:\n          environment: x\n")
+    assert status(with_input) == "FAIL"
+    assert status(steps.replace("    steps:", "    env:\n      environment: x\n    steps:")) == "FAIL"
+    mapping = "    environment:\n      name: ${{ inputs.environment }}\n      url: https://example.com\n"
+    assert status(steps.replace("    steps:", mapping + "    steps:")) == "PASS"
+    # a job that calls a local reusable workflow deploys if that workflow's job sets it
+    caller = "jobs:\n  deploy:\n    uses: ./.github/workflows/_deploy.yml\n    with:\n      environment: x\n"
+    repo.write(".github/workflows/_deploy.yml", "on: workflow_call\n" + steps)
+    assert status(caller) == "FAIL"
+    repo.write(
+        ".github/workflows/_deploy.yml",
+        "on: workflow_call\n" + steps.replace("    steps:", "    environment: x\n    steps:"),
+    )
+    assert status(caller) == "PASS"
+
+
 def test_doctor_catches_a_version_line_that_no_longer_matches(repo: Repo) -> None:
     repo.write("README.md", "# demo\n")
     checks = [c for c in doctor(repo.root) if c.name == "version_lines"]

@@ -143,12 +143,39 @@ def _deploy(path: Path, environment: str) -> Check:
         return Check("FAIL", "environment", f"{name}: no .github/workflows/{path.name}")
     text = path.read_text(encoding="utf-8")
     missing = [f"the '{i}' input" for i in ("tag", "environment") if not _takes_input(text, "workflow_dispatch", i)]
-    jobs = re.search(r"^jobs:\s*(?:#.*)?$(?P<body>(?:\n[ \t#].*|\n\s*)*)", text, re.MULTILINE)
-    if jobs is None or not re.search(r"^\s+environment:", jobs["body"], re.MULTILINE):
+    if not _sets_environment(path, set()):
         missing.append("a job with environment: (GitHub records a deployment only then)")
     if missing:
         return Check("FAIL", "environment", f"{name} lacks {', '.join(missing)}")
     return Check("PASS", "environment", f"{name} runs on workflow_dispatch with 'tag' and 'environment' inputs")
+
+
+def _sets_environment(path: Path, seen: set[Path]) -> bool:
+    """Whether a job sets environment: as one of its own keys (not a step's `with:` or an
+    `env:` entry), directly or in a local reusable workflow the job calls; a text check"""
+    if path in seen or not path.is_file():
+        return False
+    seen.add(path)
+    jobs = re.search(r"^jobs:\s*(?:#.*)?$(?P<body>(?:\n[ \t#].*|\n\s*)*)", path.read_text(encoding="utf-8"), re.M)
+    job_indent: int | None = None
+    key_indent: int | None = None
+    for line in jobs["body"].splitlines() if jobs else ():
+        key = line.strip()
+        if not key or key.startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip(" "))
+        if job_indent is None or indent <= job_indent:
+            job_indent, key_indent = indent, None  # a job's id
+            continue
+        if key_indent is None:
+            key_indent = indent
+        if indent != key_indent:
+            continue
+        if key.startswith("environment:"):
+            return True
+        if (local := _LOCAL_USES.match(key)) and _sets_environment(path.parent / local["file"], seen):
+            return True
+    return False
 
 
 def _work_branch(git: Git) -> Check:
