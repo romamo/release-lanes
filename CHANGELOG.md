@@ -36,6 +36,10 @@ bot.
 - The triage skills keep an implementer's or reviewer's worktree until its PR merges, not
   just until it's pushed: a revision goes back to the same agent through SendMessage, and
   an agent whose worktree was removed can't be resumed
+- `doctor` accepts the repository hosting shipyard calling its own `operate.yml` locally:
+  there `.github/workflows/operate.yml` is the reusable workflow, so the operate check
+  reads the workflow that `uses: ./.github/workflows/operate.yml` instead. It also no
+  longer misses a deploy job's `environment:` after a blank line in an earlier job (#53)
 
 ## [0.9.0] - 2026-10-04
 

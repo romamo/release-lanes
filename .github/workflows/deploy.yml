@@ -1,0 +1,84 @@
+name: Deploy
+
+# shipyard's own deploy target: GitHub Pages at https://romamo.github.io/shipyard/. land
+# starts it on each stable tag, and shipyard operate on a rollback, with -f tag=<tag>
+# -f environment=github-pages. The site is site/ at the tag plus a health.json naming the
+# release, {"version": "X.Y.Z"}, which shipyard operate checks against the deployed tag.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "The release tag to deploy, such as v1.2.0"
+        type: string
+        required: true
+      environment:
+        description: "The GitHub environment; Pages deploys only to github-pages"
+        type: string
+        required: true
+      simulate-failure:
+        # The rollback drill's fault (#53): health.json names a version that isn't the tag, so
+        # operate's health check fails and it rolls back, without shipping a broken package.
+        # Nothing but the drill sets it
+        description: "Rollback drill only: health.json reports a version that isn't the tag"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# One Pages deploy at a time, none cancelled: a rollback must not be dropped mid-way
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the inputs
+        env:
+          TAG: ${{ inputs.tag }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          if [ "$ENVIRONMENT" != "github-pages" ]; then
+            echo "::error::environment must be github-pages, got '$ENVIRONMENT'"
+            exit 1
+          fi
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*$ ]]; then
+            echo "::error::tag must be a release tag such as v1.2.0, got '$TAG'"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+
+      - name: Write health.json
+        env:
+          TAG: ${{ inputs.tag }}
+          SIMULATE_FAILURE: ${{ inputs.simulate-failure }}
+        run: |
+          version="${TAG#v}"
+          if [ "$SIMULATE_FAILURE" = "true" ]; then
+            version="0.0.0-simulated-failure"
+          fi
+          printf '{"version": "%s"}\n' "$version" > site/health.json
+          cat site/health.json
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site/
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write # deploys the artifact
+      id-token: write # proves the deploy comes from this workflow
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

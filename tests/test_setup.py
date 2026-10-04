@@ -207,6 +207,9 @@ def test_doctor_wants_environment_as_a_jobs_own_key(repo: Repo) -> None:
         "on: workflow_call\n" + steps.replace("    steps:", "    environment: x\n    steps:"),
     )
     assert status(caller) == "PASS"
+    # a blank line between steps doesn't end the jobs, so a later job's environment counts (#53)
+    two_jobs = steps + "\n      - run: echo\n\n  deploy-site:\n    needs: deploy\n" + mapping + "    steps: []\n"
+    assert status(two_jobs) == "PASS"
 
 
 def test_doctor_catches_a_version_line_that_no_longer_matches(repo: Repo) -> None:

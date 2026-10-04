@@ -32,3 +32,13 @@ github_release = true
 file = ".claude-plugin/plugin.json"
 pattern = '"version": "[^"]+"'
 replace = '"version": "{version}"'
+
+# shipyard's own GitHub Pages site: each stable release deploys there, and operate checks that
+# its health.json names the deployed release (#53)
+[environments.github-pages]
+lane = "stable"
+workflow = "deploy.yml"
+health = "https://romamo.github.io/shipyard/health.json"
+
+[operate]
+rollback_after = 3
