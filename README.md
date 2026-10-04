@@ -1,15 +1,15 @@
 # shipyard
 
-From a GitHub issue to a published release, run by agents and one release bot:
+From a GitHub issue to a published release, run by agents and shipyard's release workflows:
 
 | Stage | Part | Does |
 |---|---|---|
 | Triage | `github-issue-triage` skill | A verdict on every issue (implement, postpone, clarify), a comment and labels, one PR per fix |
 | Fix | `github-issue-resolve` skill | One issue: verify against main, fix with a regression test, open a PR |
 | Land | `github-pr-triage` skill | Review each PR in its own worktree, fix small problems, merge only on green CI |
-| Release | the release bot | Cut the release on its lane when the policy says one is due, run CI on it, tag, publish |
-| Watch | `github-ship-watch` skill | On a loop or schedule: catch a failed or stalled bot, a release missing from PyPI, unannounced fixes, and untriaged issues; finish what the policy decided |
-| Set up | `release-lanes-setup` skill | Wire a repository to the bot: package checks, CI, publishing, the policy, a dry run |
+| Release | shipyard (`prepare.yml`, `land.yml`) | Cut the release on its lane when the policy says one is due, run CI on it, tag, publish |
+| Watch | `github-ship-watch` skill | On a loop or schedule: catch a failed or stalled release run, a release missing from PyPI, unannounced fixes, and untriaged issues; finish what the policy decided |
+| Set up | `release-lanes-setup` skill | Wire a repository to shipyard: package checks, CI, publishing, the policy, a dry run |
 
 [docs/flow.md](docs/flow.md) shows what to say to run each stage, alone or all at once.
 
@@ -36,8 +36,9 @@ or Python 3.10+.
 ## Release lanes
 
 Release lanes for projects that keep a hand-written CHANGELOG. Every pull request adds its
-own entry under Unreleased; a policy file decides when each lane releases, and a GitHub
-Actions bot cuts the release, runs your CI on it, tags it, and publishes it.
+own entry under Unreleased; a policy file decides when each lane releases, and shipyard's
+reusable GitHub Actions workflows cut the release, run your CI on it, tag it, and publish
+it.
 
 | Lane | Version | Released from | Typical trigger |
 |---|---|---|---|
@@ -82,8 +83,8 @@ uvx --from git+https://github.com/romamo/shipyard@v0 shipyard doctor
 ```
 
 `init` writes `.github/release-policy.toml` in `mode = "dry-run"` and
-`.github/workflows/release.yml`, which wires the bot's reusable workflows to your CI.
-`doctor` checks what the bot needs:
+`.github/workflows/release.yml`, which wires shipyard's reusable workflows to your CI.
+`doctor` checks what shipyard needs:
 
 - A CHANGELOG with an Unreleased section, in keep-a-changelog or dash style
 - A stable `vX.Y.Z` tag to count from
@@ -155,7 +156,7 @@ A lane releases when one of its **triggers** is due (quiet time, a schedule wind
 opened after its last release, a finished milestone) and no **gate** holds it. Any lane can
 also be started by hand from the Release workflow, which skips the triggers but not the
 gates. One run releases one lane, in the order hotfix, stable, rc, dev; GitHub's cron only
-wakes the bot, and the policy decides whether a window is open.
+starts a run, and the policy decides whether a window is open.
 
 ### Versions
 
@@ -184,7 +185,7 @@ The workflows call these; you can run them locally too.
 | `settle-minutes` | Print how long to wait after a push |
 
 Exit codes: `0` done, a plan may decide to skip; `1` doctor found a failure; `2` bad input
-or a state the bot refuses to act on.
+or a state shipyard refuses to act on.
 
 ### Limits
 

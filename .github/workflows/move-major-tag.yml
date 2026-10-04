@@ -1,7 +1,7 @@
 name: Move the major tag
 
-# Callers pin `@v0`: after a stable release, point the major tag at it. The release bot
-# starts this workflow with the release's tag.
+# Callers pin `@v0`: after a stable release, point the major tag at it. shipyard's land
+# workflow starts this one with the release's tag.
 
 on:
   workflow_dispatch:

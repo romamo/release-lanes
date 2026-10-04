@@ -7,9 +7,9 @@ Three skills cover the path from a new issue to a published release, and a fourt
 | `github-issue-triage` | The backlog: a verdict on every issue (implement, postpone, clarify), comments and labels, one PR per fix |
 | `github-issue-resolve` | One issue in depth: verify, fix with a regression test, open a PR |
 | `github-pr-triage` | Landing: review, CI gate, rebase, merge, and the release |
-| `github-ship-watch` | The routine: a stuck bot, a missing upload, unannounced fixes, waiting issues |
+| `github-ship-watch` | The routine: a stuck release run, a missing upload, unannounced fixes, waiting issues |
 
-Before the first release, a new package goes through `release-lanes-setup`: package checks, CI and publish wiring, and the shipyard release bot's policy. In a repo with a release bot (`.github/release-policy.toml`), the bot tags; the skills here only start it and never tag by hand. The `oss-package-engineer` skill is retired: its release path is github-pr-triage's "tag X" or the bot, and its package checks live in release-lanes-setup.
+Before the first release, a new package goes through `release-lanes-setup`: package checks, CI and publish wiring, and shipyard's release policy. In a repo that runs shipyard (`.github/release-policy.toml`), shipyard tags; the skills here only start its Release workflow and never tag by hand. The `oss-package-engineer` skill is retired: its release path is github-pr-triage's "tag X" or shipyard, and its package checks live in release-lanes-setup.
 
 Start each one with its slash command or with plain wording. The words you use set how far it goes. Below, `<owner/repo>` is the GitHub repo, `<X>` the version to release, and `<prev>` the previous tag.
 
@@ -72,7 +72,7 @@ The bump, registry, and install commands per ecosystem (Python, Node, Rust, Go, 
 
 ## Keeping it running
 
-`github-ship-watch` is the routine: each pass checks the release bot, the newest releases, and the issue intake, finishes what the policy already decided (a stalled lane, a flaky release job, the shipped notices), and hands flagged issues to triage when asked.
+`github-ship-watch` is the routine: each pass checks the release runs, the newest releases, and the issue intake, finishes what the policy already decided (a stalled lane, a flaky release job, the shipped notices), and hands flagged issues to triage when asked.
 
 - `/loop 30m /github-ship-watch <owner/repo> — watch and triage`: every 30 minutes in this session
 - `/schedule`: a cloud routine, with the prompt below that clones shipyard
