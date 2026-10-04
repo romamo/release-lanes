@@ -18,7 +18,7 @@ A planned drill for #53 deployed v0.10.1 to the github-pages environment with `s
 | 2026-10-04 21:31 | Third failed check: #81 opened, rollback to v0.10.0 dispatched |
 | 2026-10-04 21:31 | v0.10.0 live again |
 | 2026-10-04 21:32 | operate found github-pages healthy and commented on #81 |
-| 2026-10-04 22:0x | While #81 was open, the planner held the stable lane ("0.11.0 held, open 'incident' issues: #81"); #81 closed, releasing the hold |
+| 2026-10-04 21:48 | While #81 was open, the planner held the stable lane ("0.11.0 held, open 'incident' issues: #81"); #81 closed, releasing the hold |
 
 ## Cause
 
