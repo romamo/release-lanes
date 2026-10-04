@@ -30,6 +30,12 @@ bot.
   about it only once a stage is set to propose or a hold is open. Each `deploy.<name>` must
   name an environment in `[environments]`. Deploy and rollback autonomy take effect once
   shipyard deploys (#32)
+- `shipyard gate <owner/repo> --prompt '<prompt>'` starts a Claude Code background
+  session (`claude --bg`) for a repo only when its state needs one: it reads the state
+  with code, skips while a session it started is still working or waits on you, skips
+  findings unchanged since the last launch for `--retry-hours`, and passes the findings
+  in the prompt. Run it from launchd instead of `/loop`, so each pass is a new session
+  and a quiet tick makes no model call. The wheel now bundles the skills
 
 ## [0.7.0] - 2026-10-04
 

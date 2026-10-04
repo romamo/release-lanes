@@ -10,6 +10,7 @@
   notes           print a release's notes
   doctor          check that the repository is ready for the bot
   init            write a starting policy and the calling workflow
+  gate            start a Claude Code session for the repo only when its state needs one
 
 Exit codes: 0 done (a plan may skip); 1 doctor found a failure; 2 bad input or a refused state.
 """
@@ -25,6 +26,7 @@ from pathlib import Path
 
 from shipyard.doctor import CALLER, doctor
 from shipyard.errors import ReleaseError
+from shipyard.gate import WORK, ClaudeCli, gate, watch
 from shipyard.github import GhCli, GitHub
 from shipyard.gitrepo import Git
 from shipyard.init import init
@@ -128,6 +130,19 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help=f"overwrite existing files; an existing {ALIAS_PATH} is replaced by {CONFIG_PATH}",
     )
+
+    p = sub.add_parser("gate", help="start a Claude Code session only when the repo's state needs one")
+    p.add_argument("slug", metavar="owner/name", help="the GitHub repo; --repo is its checkout")
+    p.add_argument(
+        "--prompt",
+        required=True,
+        help="the session's prompt, {repo} replaced, e.g. '/github-issue-triage {repo} merge when green'",
+    )
+    p.add_argument("--prs", action="store_true", help="open pull requests count as work (merge when green)")
+    p.add_argument("--retry-hours", type=float, default=24, help="relaunch on unchanged findings after this")
+    p.add_argument("--claude-arg", action="append", default=[], help="extra flag for the session (repeatable)")
+    p.add_argument("--dry-run", action="store_true", help="decide and print; start or stop nothing")
+    p.add_argument("--json", action="store_true", help="print the decision as JSON")
     return parser
 
 
@@ -154,6 +169,8 @@ def main(argv: list[str], github: GitHub | None = None) -> int:
         for check in checks:
             print(f"{check.status} {check.name}: {check.detail}")
         return 1 if any(c.status == "FAIL" for c in checks) else 0
+    if args.command == "gate":
+        return _gate(root, args)
 
     policy = Policy.load(config_path(root))
     git = Git(root, policy.bot_name, policy.bot_email)
@@ -220,6 +237,39 @@ def main(argv: list[str], github: GitHub | None = None) -> int:
             raise ReleaseError(f"no {policy.changelog} at {args.version.tag}")
         stable = [t.version for t in git.tags() if t.version.is_stable and t.version < args.version]
         sys.stdout.write(notes(policy, text, args.version, max(stable) if stable else None))
+    return 0
+
+
+def _gate(root: Path, args: argparse.Namespace) -> int:
+    if args.retry_hours <= 0:
+        raise ReleaseError("--retry-hours must be positive")
+    work = WORK | {"PRS_OPEN"} if args.prs else WORK
+    decision, launched = gate(
+        Git(root),
+        args.slug,
+        args.prompt,
+        ClaudeCli(args.claude_arg),
+        lambda: watch(args.slug, root),
+        dt.datetime.now(dt.UTC),
+        dt.timedelta(hours=args.retry_hours),
+        work,
+        args.dry_run,
+    )
+    if args.json:
+        record = {
+            "action": decision.action.value,
+            "reason": decision.reason,
+            "work": [f.line() for f in decision.work],
+            "stopped": [] if args.dry_run else list(decision.stop),
+            "launched": launched,
+        }
+        print(json.dumps(record, indent=2))
+        return 0
+    print(f"{decision.action.value}: {decision.reason}")
+    for finding in decision.work:
+        print(f"  {finding.line()}")
+    if launched:
+        print(f"  launched {launched}: claude attach {launched}")
     return 0
 
 
