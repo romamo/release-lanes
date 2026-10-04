@@ -43,8 +43,10 @@ class Table:
         return list(self.raw)
 
     def allow(self, *keys: str) -> None:
-        if unknown := sorted(set(self.raw) - set(keys)):
-            raise ReleaseError(f"{self.where}: unknown keys {unknown}; allowed: {sorted(keys)}")
+        """Refuse keys outside these; a StrEnum's members name their plain values (#59)"""
+        names = sorted(str(k) for k in keys)
+        if unknown := sorted(set(self.raw) - set(names)):
+            raise ReleaseError(f"{self.where}: unknown keys {unknown}; allowed: {names}")
 
     def _get(self, key: str, default: object, kind: type | tuple[type, ...], label: str) -> Any:
         if key not in self.raw:

@@ -84,6 +84,9 @@ bot.
   is found once by the old scan and labelled on that update.
   github-ship-watch finds proposals by the label too, falling back to its title search
   while none has it (#41)
+- A config error for an unknown key in `[lanes]`, `[bump]` or `[autonomy]` lists the allowed
+  keys as the values the file accepts (`'dev', 'hotfix', 'rc', 'stable'`), not as enum
+  reprs like `<Lane.DEV: 'dev'>` (#59)
 
 ## [0.9.0] - 2026-10-04
 
