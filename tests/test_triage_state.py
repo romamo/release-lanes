@@ -203,6 +203,23 @@ def test_a_verdict_and_hold_older_than_50_comments_are_read(ts: ModuleType) -> N
     assert ts.classify_open(item, "Triage:", "postponed", states, None)[0] == "BLOCKED"
 
 
+def test_a_hold_on_a_spec_pr_lifts_only_when_it_merges(ts: ModuleType) -> None:
+    item = issue(("2026-09-01T10:00:00Z", "Triage: **feature**, the spec is o/r#60\n\nOn hold: waits on o/r#60"))
+    ref = ("o", "r", 60)
+    assert ts.upstream_refs(item) == [ref]
+    # issueOrPullRequest answers for a PR's number as for an issue's: they share one sequence
+    for node, state in (
+        ({"__typename": "PullRequest", "state": "OPEN"}, "BLOCKED"),
+        ({"__typename": "PullRequest", "state": "CLOSED"}, "BLOCKED"),
+        ({"__typename": "PullRequest", "state": "MERGED"}, "UNBLOCKED"),
+        ({"__typename": "Issue", "state": "CLOSED"}, "UNBLOCKED"),
+    ):
+        states = {ref: ts.ref_state(node)}
+        assert ts.classify_open(item, "Triage:", "postponed", states, None)[0] == state, node
+    refused = {ref: ts.ref_state({"__typename": "PullRequest", "state": "CLOSED"})}
+    assert ts.classify_open(item, "Triage:", "postponed", refused, None)[1] == "o/r#60:closed_unmerged"
+
+
 def test_a_pr_linked_after_50_cross_references_is_in_progress(ts: ModuleType) -> None:
     timeline = forward([mention(100 + i) for i in range(50)], "t1")
     closing = {"willCloseTarget": True, "isCrossRepository": False, "source": {"number": 99, "state": "OPEN"}}

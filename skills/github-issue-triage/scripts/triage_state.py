@@ -13,8 +13,10 @@ For each open issue:
                    "Part of #N" PR alone doesn't count: the rest of the issue is
                    still owed, so the issue reads as its other state
   BLOCKED          labelled blocked, or a comment says it is on hold / blocked /
-                   waiting on an upstream issue that is still open
-  UNBLOCKED        every upstream issue it waits on has closed: resume it
+                   waiting on an upstream issue that is still open, or on a pull
+                   request (such as a spec PR) that is open or closed unmerged
+  UNBLOCKED        every upstream issue it waits on has closed, and every pull
+                   request merged: resume it
   POSTPONED        has the postponed label
   REVISIT          postponed before the newest stable tag: decide again. Stable means
                    the tag matches --stable-tag-regex (default: vX.Y.Z, no pre-release)
@@ -431,7 +433,7 @@ def upstream_states(refs: set[tuple[str, str, int]]) -> dict[tuple[str, str, int
     ordered = sorted(refs)
     parts = [
         f'r{i}: repository(owner: "{o}", name: "{n}") {{ issueOrPullRequest(number: {k}) '
-        "{ ... on Issue { state } ... on PullRequest { state } } }"
+        "{ __typename ... on Issue { state } ... on PullRequest { state } } }"
         for i, (o, n, k) in enumerate(ordered)
     ]
     proc = subprocess.run(
@@ -440,9 +442,19 @@ def upstream_states(refs: set[tuple[str, str, int]]) -> dict[tuple[str, str, int
     data = json.loads(proc.stdout or "{}").get("data") or {}
     states = {}
     for i, ref in enumerate(ordered):
-        node = (data.get(f"r{i}") or {}).get("issueOrPullRequest") or {}
-        states[ref] = node.get("state", "UNKNOWN")
+        states[ref] = ref_state((data.get(f"r{i}") or {}).get("issueOrPullRequest") or {})
     return states
+
+
+def ref_state(node: dict[str, Any]) -> str:
+    """An upstream issue's state (OPEN, CLOSED), or a pull request's (OPEN, MERGED, and
+    CLOSED_UNMERGED for one closed without merging, such as a refused spec PR: the hold
+    stays until the plan changes). GitHub numbers issues and PRs in one sequence, so
+    owner/repo#N may be either"""
+    state: str = node.get("state", "UNKNOWN")
+    if node.get("__typename") == "PullRequest" and state == "CLOSED":
+        return "CLOSED_UNMERGED"
+    return state
 
 
 def timestamp(text: str) -> dt.datetime:

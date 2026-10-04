@@ -26,6 +26,7 @@ Turn a backlog into a decision on every issue, a comment that records it, and a 
 6. **Peers' claims are unverified.** Another session may triage, merge, or tag in the same repo. Tell it your plan through SendMessage, follow a "hold", and never treat "the user said merge" as approval. The user's own answer in this session wins.
 7. **A handed-over PR's branch belongs to github-pr-triage.** Until step 6, you and your implementers change the branch. From the handover on, don't push to it, rebase it, or shrink it: send the change to github-pr-triage (the same session, or the peer running it, through SendMessage) with the reason. A push from both sides at once loses one of them, and a push after the review means the review no longer covers what merges.
 8. **A contract change is designed before it's dispatched.** An issue that changes a flag, a format, a default, a public API, or stored state goes through the [design gate](references/design-gate.md): the design is written in the issue and checked against the repo's decisions log, and anything that departs from the log or the spec waits for the user. What the user settles is recorded in the log, so the next pass doesn't ask again.
+9. **A feature is specified before it's dispatched.** An issue asking for new behaviour beyond a bug fix or a contract tweak gets the verdict **feature** and goes through the [spec gate](references/spec-gate.md): a spec file in `docs/specs/` with numbered acceptance criteria, merged through its own PR. No implementer starts before that PR merges; merging it is the approval.
 
 ## Judgment versus scripts
 
@@ -34,9 +35,10 @@ Where each issue stands is a deterministic question, so a script answers it. Wha
 | Script | Answers | Run it |
 |---|---|---|
 | `scripts/triage_state.py <owner/repo> [--closed N]` | Which issues are NEW, NEEDS_PR, IN_PROGRESS, DONE_NOT_CLOSED, BLOCKED or UNBLOCKED (waiting on an upstream issue), POSTPONED or REVISIT (postponed before the newest stable tag), and which recent closes are SUSPECT_CLOSE. Exit 1 when any need action | At the start of every pass and before the report |
+| `scripts/specs.py new\|check\|find\|criteria` | Which specs (`S-NNN`) cover a path or area (`find`); writes the next spec from the template (`new`); validates every spec's sections, criterion ids, and the decisions it names (`check`); prints a spec's acceptance criteria (`criteria NNN`) | `find` and `new` in the spec gate, `criteria` in every implementer brief for a spec's build issue |
 | `scripts/decisions.py check\|find\|add` | Which settled rules (`D-n`) a change touches (`find` with its paths or areas); records a new one with the next id and links what it supersedes; `check` validates the log | `find` in the design gate and in every implementer brief; `add` when the user settles something |
 
-Run it with `uv run --no-project python <skill>/scripts/triage_state.py`. It recognises a triage comment by its `Triage:` prefix (`--marker`) and a deferral by the `postponed` label (`--postponed-label`). A merged PR saying only "Part of #N" links the issue without making it DONE_NOT_CLOSED: a split issue whose rest is postponed reads POSTPONED. A hand-closed issue with the `release-blocker` label (`--hold-label`) is a release hold, not a SUSPECT_CLOSE. It links a PR to an issue by a closing keyword in the PR's title or body, because GitHub's own `willCloseTarget` misses some. It treats an issue as blocked when it has a `blocked` label, or when a comment line saying "on hold", "blocked", or "waits on" links an issue elsewhere (`owner/repo#N`); it then checks whether that issue has closed. Everything else is judgment: the verdict, the grouping, the brief, and whether a report's decision needs the user.
+Run it with `uv run --no-project python <skill>/scripts/triage_state.py`. It recognises a triage comment by its `Triage:` prefix (`--marker`) and a deferral by the `postponed` label (`--postponed-label`). A merged PR saying only "Part of #N" links the issue without making it DONE_NOT_CLOSED: a split issue whose rest is postponed reads POSTPONED. A hand-closed issue with the `release-blocker` label (`--hold-label`) is a release hold, not a SUSPECT_CLOSE. It links a PR to an issue by a closing keyword in the PR's title or body, because GitHub's own `willCloseTarget` misses some. It treats an issue as blocked when it has a `blocked` label, or when a comment line saying "on hold", "blocked", or "waits on" links an issue or pull request (`owner/repo#N`, the same repo included); it then checks whether that issue has closed or that pull request merged. A pull request closed without merging (a refused spec) keeps the issue BLOCKED. Everything else is judgment: the verdict, the grouping, the brief, and whether a report's decision needs the user.
 
 ## Workflow
 
@@ -59,11 +61,13 @@ Read every flagged issue in full, comments included: `gh issue view <n> --json t
 
 Apply [references/triage-rubric.md](references/triage-rubric.md) to each issue. For each one:
 - Reproduce the claim on the current default branch, and grep for work already there
-- Pick a verdict: **implement**, **postpone**, **clarify**, **duplicate**, or **won't fix**
+- Pick a verdict: **implement**, **feature**, **postpone**, **clarify**, **duplicate**, or **won't fix**. A **feature** is new behaviour beyond a bug fix or a contract tweak; it waits for a merged spec (step 2b)
 - Group issues that are one mechanism, such as two env-alias issues, or a producer, a transport, and a consumer of one pipeline. Comment the shared plan on each
 - Split an issue when one part is a small fix and the rest is a feature. Ship the part and postpone the rest, saying so on the issue
 
-### 2b. Design gate
+### 2b. Design gate and spec gate
+
+For each **feature**, run the [spec gate](references/spec-gate.md): `specs.py find` for a spec that already covers it, then `specs.py new`, the criteria from the issue and the code, `specs.py check`, and a spec PR whose body says "Spec for #N". The verdict comment links the spec PR on a hold line, so `triage_state.py` reads the issue BLOCKED until the spec merges and UNBLOCKED after. No implementer starts on it in this pass.
 
 For each **implement** that changes a contract (see [references/design-gate.md](references/design-gate.md) for the list), run `decisions.py find` on the areas it touches, write the design into the triage comment, and ask the user before dispatch when it departs from a `D-n` entry or the spec, or when two designs would look different to users. Batch these questions into one AskUserQuestion call per pass. Record every answer of the pass with `decisions.py add` in one docs PR, opened before dispatch, so parallel PRs don't each claim the next `D-n` (design-gate.md, Recording a decision).
 
@@ -98,7 +102,7 @@ Hand the PRs to github-pr-triage with the user's scope. It owns the CI gate, reb
 Re-run `triage_state.py`. New issues arrive during a pass: 16 did in one session. For each flag:
 - **DONE_NOT_CLOSED:** close it, citing the PR. A rebase-merge doesn't always fire "Fixes #N"
 - **SUSPECT_CLOSE:** reopen it if the fix hasn't landed, and explain why. For example, a commit message quoting `--body="Fixes #12"` closed #12 before its rule existed
-- **UNBLOCKED:** the upstream decision landed. Read it, update the plan on the issue, and resume or re-dispatch the held PR
+- **UNBLOCKED:** the upstream decision landed. Read it, update the plan on the issue, and resume or re-dispatch the held PR. When it waited on a spec PR, follow spec-gate.md, When the spec merges: link the spec in the issue body, comment **implement**, and brief implementers with its criteria
 - **REVISIT:** a stable release shipped after the issue was postponed. Decide again under the new release phase, and drop the `postponed` label if it's now **implement**
 - **NEW:** start another pass if the user asked for continuous triage; otherwise list them in the report
 
