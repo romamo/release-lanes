@@ -23,7 +23,7 @@ When in doubt between a contract tweak and a feature, ask whether a reviewer wou
 3. **Check it.** `specs.py check` must pass: the sections, the criterion ids, and the decisions named
 4. **Open the spec PR** on a `spec/NNN-<slug>` branch. Its body links the issue as "Spec for #N", never with a closing keyword or "Part of #N": `triage_state.py` would read either as the issue's fix and report IN_PROGRESS, then DONE_NOT_CLOSED once the spec merges
 5. **Comment the verdict** on the issue: **feature**, the spec PR's link, and the hold line (see [comments.md](comments.md), Feature). The hold line names the spec PR as `owner/repo#N`, so `triage_state.py` reports the issue BLOCKED while the spec PR is open and UNBLOCKED once it merges
-6. **Wait for the merge.** No implementer starts on a feature before its spec merges. A spec PR closed without merging keeps the issue BLOCKED: the spec was refused, so decide again (a new spec, **clarify**, or **won't fix**) and replace the hold line
+6. **Wait for the merge.** No implementer starts on a feature before its spec merges. A spec PR closed without merging makes the issue SPEC_REFUSED, which needs action: the spec was refused, so decide again in a new triage comment. Revise the spec in a new PR (and name it on a new hold line), postpone, or won't fix. The newer triage comment settles the refused PR, so it stops counting
 
 ## When the spec merges
 

@@ -65,6 +65,7 @@ The bump, registry, and install commands per ecosystem (Python, Node, Rust, Go, 
 | DONE_NOT_CLOSED | Its PR merged, the issue is still open | Close it, citing the PR |
 | SUSPECT_CLOSE | Closed by a commit that only quoted "Fixes #N" | Check the fix landed; reopen if not |
 | BLOCKED | Waiting on an open upstream issue, or on a spec PR not yet merged | Nothing, until it closes or merges |
+| SPEC_REFUSED | The PR it waits on (its spec PR) closed without merging | Decide again: revise the spec in a new PR, postpone, or won't fix |
 | UNBLOCKED | The upstream issue it waited on has closed, or its spec PR merged | Resume |
 | POSTPONED | Labelled `postponed` | Skip it |
 | REVISIT | Postponed before the newest stable release | Decide again |

@@ -56,8 +56,9 @@ bot.
   its own PR before any implementer starts. `specs.py` writes the next spec (`new`),
   validates them (`check`), lists the specs a path or area touches (`find`), and prints a
   spec's criteria for the implementer brief (`criteria`). `triage_state.py` reads a hold
-  on a pull request of the same repo: BLOCKED while it is open or closed unmerged,
-  UNBLOCKED once it merges (#54)
+  on a pull request of the same repo: BLOCKED while it is open, UNBLOCKED once it
+  merges, and the new action state SPEC_REFUSED (exit 1) once it closes unmerged, until
+  a newer triage comment decides again (#54)
 
 ### Fixed
 

@@ -14,7 +14,11 @@ For each open issue:
                    still owed, so the issue reads as its other state
   BLOCKED          labelled blocked, or a comment says it is on hold / blocked /
                    waiting on an upstream issue that is still open, or on a pull
-                   request (such as a spec PR) that is open or closed unmerged
+                   request (such as a spec PR) that is still open
+  SPEC_REFUSED     a pull request it waits on (such as its spec PR) closed without
+                   merging, and no triage comment came after the hold: decide again
+                   (revise the spec in a new PR, postpone, or won't fix). A newer
+                   triage comment is that decision, and the refused PR stops counting
   UNBLOCKED        every upstream issue it waits on has closed, and every pull
                    request merged: resume it
   POSTPONED        has the postponed label
@@ -29,7 +33,7 @@ For the N most recently closed issues (default 20):
                    carries --hold-label (a release hold is meant to close by hand)
 
 Exit 0 when nothing needs action, 1 when any issue is NEW, NEEDS_PR, UNBLOCKED,
-REVISIT, DONE_NOT_CLOSED, or SUSPECT_CLOSE, 2 on bad input (an issue with more than 100
+SPEC_REFUSED, REVISIT, DONE_NOT_CLOSED, or SUSPECT_CLOSE, 2 on bad input (an issue with more than 100
 labels) or a gh failure. It pages past 100 open issues and an issue's 50 comments or 50
 cross-references, and back through tags to the newest stable one, with one query when
 nothing is capped. A page GitHub rejects for its resource limits is asked again at half
@@ -222,7 +226,7 @@ def resource_limited(response: dict[str, Any]) -> bool:
     return bool(errors) and all(isinstance(e, dict) and e.get("type") == RESOURCE_LIMITS for e in errors)
 
 
-ACTION = {"NEW", "NEEDS_PR", "UNBLOCKED", "REVISIT", "DONE_NOT_CLOSED", "SUSPECT_CLOSE"}
+ACTION = {"NEW", "NEEDS_PR", "UNBLOCKED", "SPEC_REFUSED", "REVISIT", "DONE_NOT_CLOSED", "SUSPECT_CLOSE"}
 HOLD = re.compile(r"\b(?:on hold|blocked|waits? on|waiting on|pending|depends on)\b", re.IGNORECASE)
 UPSTREAM = re.compile(r"(?:https://github\.com/)?(?P<owner>[\w.-]+)/(?P<name>[\w.-]+)(?:#|/issues/|/pull/)(?P<num>\d+)")
 STABLE = re.compile(r"^v?\d+\.\d+\.\d+$")
@@ -418,13 +422,19 @@ def merged_mentions(issue: dict[str, Any]) -> list[int]:
 
 
 def upstream_refs(issue: dict[str, Any]) -> list[tuple[str, str, int]]:
-    """Issues elsewhere that a hold comment says this one waits on"""
-    refs: set[tuple[str, str, int]] = set()
-    for c in issue["comments"]["nodes"]:
+    """Issues and pull requests that a hold comment says this one waits on"""
+    return sorted(hold_refs(issue))
+
+
+def hold_refs(issue: dict[str, Any]) -> dict[tuple[str, str, int], int]:
+    """Each issue or pull request a hold comment names, with the index of the newest
+    comment naming it"""
+    refs: dict[tuple[str, str, int], int] = {}
+    for i, c in enumerate(issue["comments"]["nodes"]):
         for line in c["body"].splitlines():
             if HOLD.search(line):
-                refs.update((m["owner"], m["name"], int(m["num"])) for m in UPSTREAM.finditer(line))
-    return sorted(refs)
+                refs.update(((m["owner"], m["name"], int(m["num"])), i) for m in UPSTREAM.finditer(line))
+    return refs
 
 
 def upstream_states(refs: set[tuple[str, str, int]]) -> dict[tuple[str, str, int], str]:
@@ -448,8 +458,8 @@ def upstream_states(refs: set[tuple[str, str, int]]) -> dict[tuple[str, str, int
 
 def ref_state(node: dict[str, Any]) -> str:
     """An upstream issue's state (OPEN, CLOSED), or a pull request's (OPEN, MERGED, and
-    CLOSED_UNMERGED for one closed without merging, such as a refused spec PR: the hold
-    stays until the plan changes). GitHub numbers issues and PRs in one sequence, so
+    CLOSED_UNMERGED for one closed without merging, such as a refused spec PR: the issue
+    reads SPEC_REFUSED until a newer triage comment decides again). GitHub numbers issues and PRs in one sequence, so
     owner/repo#N may be either"""
     state: str = node.get("state", "UNKNOWN")
     if node.get("__typename") == "PullRequest" and state == "CLOSED":
@@ -498,9 +508,15 @@ def classify_open(
         return "IN_PROGRESS", note
     if merged:
         return "DONE_NOT_CLOSED", note
-    waits = upstream_refs(issue)
+    named = hold_refs(issue)
+    comments = issue["comments"]["nodes"]
+    verdict = max((i for i, c in enumerate(comments) if c["body"].lstrip().startswith(marker)), default=-1)
+    # A refused PR named before the newest triage comment was decided again: it holds nothing
+    waits = sorted(r for r, i in named.items() if states.get(r) != "CLOSED_UNMERGED" or i >= verdict)
     if waits or "blocked" in labels:
         shown = " ".join(f"{o}/{n}#{k}:{states.get((o, n, k), '?').lower()}" for o, n, k in waits)
+        if any(states.get(r) == "CLOSED_UNMERGED" for r in waits):
+            return "SPEC_REFUSED", shown
         still = [r for r in waits if states.get(r) != "CLOSED" and states.get(r) != "MERGED"]
         if waits and not still:
             return "UNBLOCKED", shown
@@ -576,6 +592,7 @@ def main() -> int:
         "SUSPECT_CLOSE",
         "DONE_NOT_CLOSED",
         "UNBLOCKED",
+        "SPEC_REFUSED",
         "REVISIT",
         "NEW",
         "NEEDS_PR",
