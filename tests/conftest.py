@@ -8,7 +8,7 @@ import pytest
 
 from shipyard.github import Milestone
 from shipyard.gitrepo import Git
-from shipyard.policy import Policy
+from shipyard.policy import ALIAS_PATH, CONFIG_PATH, Policy, config_path
 
 POLICY = """\
 name = "demo"
@@ -119,7 +119,19 @@ class Repo:
 
     @property
     def policy(self) -> Policy:
-        return Policy.load(self.root / ".github" / "release-policy.toml")
+        return Policy.load(config_path(self.root))
+
+    @property
+    def policy_file(self) -> str:
+        """The policy file shipyard reads here, relative to the root"""
+        return str(config_path(self.root).relative_to(self.root))
+
+    def use_alias(self) -> None:
+        """Move the policy to its alias name on main, as a repository set up before
+        shipyard.toml has it"""
+        self.git.run("mv", str(CONFIG_PATH), str(ALIAS_PATH))
+        self.git.run("commit", "-q", "-m", "Policy under its alias name")
+        self.git.run("push", "-q", "origin", "main")
 
     def at(self, when: dt.datetime) -> None:
         """Make the next commits and tags carry this time"""
@@ -174,7 +186,7 @@ def repo(tmp_path: Path) -> Iterator[Repo]:
     git = Git(root, "bot", "bot@example.com")
     r = Repo(root, git, FakeGitHub())
     r.at(T0 - dt.timedelta(days=30))
-    r.write(".github/release-policy.toml", POLICY)
+    r.write(str(CONFIG_PATH), POLICY)
     r.write("CHANGELOG.md", CHANGELOG)
     r.write("pyproject.toml", PYPROJECT)
     r.write("uv.lock", UV_LOCK)

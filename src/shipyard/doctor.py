@@ -10,7 +10,7 @@ from shipyard.changelog import Changelog
 from shipyard.errors import ReleaseError
 from shipyard.gitrepo import REMOTE, Git
 from shipyard.land import BLOCKING_BRANCH, WORK_PREFIX, blocked
-from shipyard.policy import POLICY_PATH, BumpFrom, Policy, VersionFiles
+from shipyard.policy import ALIAS_PATH, CONFIG_PATH, BumpFrom, Policy, VersionFiles, config_path
 from shipyard.stamp import project_version
 
 CALLER = Path(".github") / "workflows" / "release.yml"
@@ -32,11 +32,15 @@ def doctor(root: Path) -> list[Check]:
         checks.append(Check("PASS" if ok else ("WARN" if warn else "FAIL"), name, detail))
 
     try:
-        policy = Policy.load(root / POLICY_PATH)
+        found = config_path(root)
+        policy = Policy.load(found)
     except ReleaseError as exc:
         add(False, "policy", str(exc))
         return checks
-    add(True, "policy", f"mode {policy.mode}, lanes {', '.join(policy.lanes)}")
+    read = found.relative_to(root)
+    add(True, "policy", f"{read}: mode {policy.mode}, lanes {', '.join(policy.lanes)}")
+    if read == ALIAS_PATH:
+        add(False, "config", f"{ALIAS_PATH} is the alias; rename it to {CONFIG_PATH} (git mv)", warn=True)
 
     git = Git(root)
     add(git.ok("remote", "get-url", "origin"), "remote", "an 'origin' remote to push releases to")

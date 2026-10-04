@@ -82,7 +82,7 @@ uvx --from git+https://github.com/romamo/shipyard@v0 shipyard init --ci ci.yml
 uvx --from git+https://github.com/romamo/shipyard@v0 shipyard doctor
 ```
 
-`init` writes `.github/release-policy.toml` in `mode = "dry-run"` and
+`init` writes `.github/shipyard.toml` in `mode = "dry-run"` and
 `.github/workflows/release.yml`, which wires shipyard's reusable workflows to your CI.
 `doctor` checks what shipyard needs:
 
@@ -117,7 +117,9 @@ routine that doesn't merge, read its first runs, then decide.
 
 ### The policy
 
-`.github/release-policy.toml`, read on every run:
+`.github/shipyard.toml`, read on every run. A repository set up earlier may keep the
+same keys in `.github/release-policy.toml`, which still works; `doctor` suggests the
+rename, and a repository may not have both:
 
 ```toml
 name = "demo"

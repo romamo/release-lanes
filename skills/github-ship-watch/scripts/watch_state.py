@@ -5,7 +5,7 @@ recent releases, and the issue intake.
 Usage: watch_state.py <owner/repo> [--repo-dir PATH] [--releases N] [--grace MIN]
                       [--tool SPEC] [--json]
 
-Release bot (a repo with .github/release-policy.toml):
+Release bot (a repo with .github/shipyard.toml, or its alias .github/release-policy.toml):
   BOT_FAILED      the bot's latest finished run failed (cancelled runs are ignored:
                   a newer push cancels the settle wait on purpose)
   BOT_STALLED     a shipyard bot in release mode has a release due now, no run of
@@ -47,7 +47,7 @@ from pathlib import Path
 SKILLS = Path(__file__).resolve().parents[2]
 SHIPPED = SKILLS / "github-pr-triage" / "scripts" / "shipped.py"
 TRIAGE_STATE = SKILLS / "github-issue-triage" / "scripts" / "triage_state.py"
-POLICY = Path(".github/release-policy.toml")
+POLICIES = (Path(".github/shipyard.toml"), Path(".github/release-policy.toml"))  # the config, then its alias
 VERSION_TAG = re.compile(r"^v\d+\.\d+")  # skips moving major tags such as v0
 ACTION = {"BOT_FAILED", "BOT_STALLED", "NOT_PUBLISHED", "UNANNOUNCED", "ISSUES"}
 ACTIVE = {"queued", "in_progress", "waiting", "pending", "requested"}
@@ -92,9 +92,18 @@ def parse_time(text: str) -> dt.datetime:
 # -- release bot ---------------------------------------------------------------------------
 
 
+def policy_file(repo_dir: Path) -> Path | None:
+    """The release policy shipyard reads, or None without one; both names is an error, as in shipyard"""
+    found = [p for p in POLICIES if (repo_dir / p).is_file()]
+    if len(found) > 1:
+        raise SystemExit(f"error: both {found[0]} and {found[1]} exist; shipyard refuses a repo with both")
+    return found[0] if found else None
+
+
 def bot_workflow(repo_dir: Path) -> tuple[str, bool] | None:
     """The bot's workflow file and whether it is a shipyard bot, or None without a bot"""
-    if not (repo_dir / POLICY).is_file():
+    policy = policy_file(repo_dir)
+    if policy is None:
         return None
     workflows = repo_dir / ".github" / "workflows"
     caller = workflows / "release.yml"
@@ -102,7 +111,7 @@ def bot_workflow(repo_dir: Path) -> tuple[str, bool] | None:
         return "release.yml", True
     if (workflows / "release-bot.yml").is_file():
         return "release-bot.yml", False
-    raise SystemExit(f"error: {POLICY} exists but neither release.yml nor release-bot.yml calls a bot")
+    raise SystemExit(f"error: {policy} exists but neither release.yml nor release-bot.yml calls a bot")
 
 
 def bot_rows(runs: list[Run], due: str | None, now: dt.datetime, grace: dt.timedelta, name: str) -> list[Row]:
@@ -126,7 +135,7 @@ def fetch_runs(repo: str, workflow: str) -> list[Run]:
     return [Run(r["status"], r["conclusion"] or "", parse_time(r["createdAt"]), r["url"]) for r in json.loads(out)]
 
 
-def planned_release(repo: str, repo_dir: Path, branch: str, tool: str) -> str | None:
+def planned_release(repo: str, repo_dir: Path, policy: Path, branch: str, tool: str) -> str | None:
     """What the shipyard planner would release now on the default branch, or None"""
     work = repo_dir / "tmp" / f"ship-watch-{os.getpid()}"
     run(["git", "worktree", "add", "-q", "--detach", str(work), f"origin/{branch}"], cwd=repo_dir)
@@ -136,7 +145,7 @@ def planned_release(repo: str, repo_dir: Path, branch: str, tool: str) -> str | 
     finally:
         run(["git", "worktree", "remove", "--force", str(work)], cwd=repo_dir)
     decision = json.loads(out)
-    policy_mode = re.search(r'^mode\s*=\s*"(\w[\w-]*)"', (repo_dir / POLICY).read_text(), re.MULTILINE)
+    policy_mode = re.search(r'^mode\s*=\s*"(\w[\w-]*)"', (repo_dir / policy).read_text(), re.MULTILINE)
     if decision["action"] != "release" or policy_mode is None or policy_mode.group(1) != "release":
         return None
     return str(decision["reason"])
@@ -252,11 +261,12 @@ def main() -> int:
 
     rows: list[Row] = []
     bot = bot_workflow(repo_dir)
-    if bot is None:
+    policy = policy_file(repo_dir)
+    if bot is None or policy is None:
         rows.append(Row("BOT_NONE", args.repo, 'no release policy: releases by "tag X"'))
     else:
         workflow, shipyard = bot
-        due = planned_release(args.repo, repo_dir, branch, args.tool) if shipyard else None
+        due = planned_release(args.repo, repo_dir, policy, branch, args.tool) if shipyard else None
         rows += bot_rows(fetch_runs(args.repo, workflow), due, now, grace, workflow)
 
     tags = version_tags(repo_dir)

@@ -20,6 +20,16 @@ bot.
   resource limits is asked again at half the size, down to 10 issues, and one still
   rejected there fails with one error line instead of gh's line per node (#24)
 
+### Added
+
+- `.github/shipyard.toml`, the one config file every shipyard layer will read: `shipyard
+  init` writes it, and `doctor` names the file it read. `.github/release-policy.toml` keeps
+  working as an alias with the same keys, and `doctor` warns to rename it with `git mv`; a
+  repo with both files fails. `init` refuses when either file exists, and `--force` replaces
+  the alias with `shipyard.toml`. ship-watch finds either file. A repo whose `release.yml`
+  pins shipyard to an older tag than this release must keep `release-policy.toml` until it
+  moves the pin (#28)
+
 ## [0.6.0] - 2026-10-04
 
 ### Added

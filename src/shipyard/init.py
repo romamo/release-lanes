@@ -8,7 +8,7 @@ from pathlib import Path
 from shipyard.doctor import CALLER
 from shipyard.errors import ReleaseError
 from shipyard.gitrepo import Git
-from shipyard.policy import POLICY_PATH, Style, VersionFiles
+from shipyard.policy import ALIAS_PATH, CONFIG_PATH, Style, VersionFiles
 
 BOT_REPO = "romamo/shipyard"
 BOT_REF = "v0"
@@ -129,7 +129,7 @@ def caller_text(d: Detected, ci: str) -> str:
     return f"""name: Release
 
 # shipyard: https://github.com/{BOT_REPO}. The policy in
-# .github/release-policy.toml decides what releases and when; this file only wires
+# .github/shipyard.toml decides what releases and when; this file only wires
 # shipyard's workflows to this repository's CI.
 
 on:
@@ -196,13 +196,28 @@ jobs:
 """
 
 
-def init(root: Path, ci: str, force: bool) -> list[Path]:
+@dataclass(frozen=True, slots=True)
+class Initialized:
+    written: tuple[Path, ...]
+    removed: Path | None  # the alias policy file, replaced by .github/shipyard.toml under --force
+
+
+def init(root: Path, ci: str, force: bool) -> Initialized:
+    """Write .github/shipyard.toml and the caller workflow. Either policy name, or the caller,
+    already there refuses without force; with force, the files are overwritten and an alias
+    .github/release-policy.toml is removed, so the repository keeps one policy file."""
     d = detect(root)
-    written = []
-    for path, text in ((root / POLICY_PATH, policy_text(d)), (root / CALLER, caller_text(d, ci))):
-        if path.exists() and not force:
-            raise ReleaseError(f"{path.relative_to(root)} exists; pass --force to overwrite it")
+    files = ((root / CONFIG_PATH, policy_text(d)), (root / CALLER, caller_text(d, ci)))
+    present = [p for p in (root / ALIAS_PATH, *(path for path, _ in files)) if p.exists()]
+    if present and not force:
+        names = ", ".join(str(p.relative_to(root)) for p in present)
+        raise ReleaseError(f"{names} {'exists' if len(present) == 1 else 'exist'}; pass --force to overwrite")
+    for path, text in files:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
-        written.append(path)
-    return written
+    alias = root / ALIAS_PATH
+    removed = None
+    if alias.exists():
+        alias.unlink()
+        removed = alias
+    return Initialized(tuple(path for path, _ in files), removed)
