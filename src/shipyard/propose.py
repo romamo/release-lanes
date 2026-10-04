@@ -10,7 +10,7 @@ from shipyard.autonomy import HOLD_LABEL, Autonomy
 from shipyard.changelog import Changelog, Entry
 from shipyard.doctor import CALLER
 from shipyard.errors import ReleaseError
-from shipyard.github import PROPOSAL_LABEL, GitHub, Issue
+from shipyard.github import OPEN_LIMIT, PROPOSAL_LABEL, GitHub, Issue
 from shipyard.gitrepo import Git
 from shipyard.planner import Proposal
 from shipyard.policy import Lane, Policy
@@ -92,7 +92,13 @@ def _find(github: GitHub, mark: str) -> tuple[Issue, bool] | None:
     """The open proposal whose body holds the marker, and whether it has PROPOSAL_LABEL: by
     the label, whatever the repository's size; else by scanning the newest open issues, for
     a proposal opened before the label, which its next update labels"""
-    labelled = [i for i in github.labelled_issues(PROPOSAL_LABEL) if not i.closed and mark in i.body]
+    proposals = github.open_labelled_issues(PROPOSAL_LABEL)
+    if len(proposals) >= OPEN_LIMIT:  # more may be cut off: refuse rather than open a duplicate
+        raise ReleaseError(
+            f"{len(proposals)} open issues carry the {PROPOSAL_LABEL} label, as many as shipyard reads;"
+            " close the stale ones"
+        )
+    labelled = [i for i in proposals if mark in i.body]
     if labelled:
         return min(labelled, key=lambda i: i.number), True
     found = github.find_issue(mark)
@@ -134,7 +140,7 @@ def close_released(policy: Policy, github: GitHub, lane: Lane, version: Version,
         return f"release autonomy is {policy.autonomy.release}: no proposal to close"
     fix = f"grant `issues: write` to the land job in {CALLER}"
     try:
-        found = github.find_issue(marker(lane))
+        found = find_proposal(github, marker(lane))
         if found is None:
             return f"no open proposal for the {lane} lane"
         text = f"Released {version.tag} on the {lane} lane" + (f" in {run}" if run else "") + "."

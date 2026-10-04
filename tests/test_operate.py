@@ -827,3 +827,15 @@ def test_a_deploy_proposal_is_labelled_and_approved_by_its_label(setup: tuple[Re
     run(repo, http, minutes(71))
     assert list(repo.github.issues) == [number, number + 1]  # no duplicate
     assert approve(repo.policy, repo.github, "production", dry_run=False).endswith(f"closed #{number}")
+
+
+def test_a_deployed_proposal_is_closed_when_found_by_its_label_past_the_scan(setup: tuple[Repo, FakeHttp]) -> None:
+    repo, http = setup
+    configure(repo, 'deploy.production = "propose"\n')
+    run(repo, http, minutes(61))
+    [number] = repo.github.issues
+    repo.github.create_issue("Bug", "something broke")
+    repo.github.scan_limit = 1
+    repo.github.deploy("production", "v1.1.0rc1", minutes(62), S.IN_PROGRESS, S.SUCCESS)
+    http.answer(PRODUCTION, '{"version": "v1.1.0rc1"}')
+    assert run(repo, http, minutes(70))["production"].action.endswith(f"closed proposal #{number}: v1.1.0rc1 deployed")

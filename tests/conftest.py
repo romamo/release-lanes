@@ -168,6 +168,11 @@ class FakeGitHub:
         found = [*self.issues.values(), *self.closed_issues.values()]
         return sorted((i for i in found if label in self.labels.get(i.number, ())), key=lambda i: -i.number)
 
+    def open_labelled_issues(self, label: str) -> list[Issue]:
+        return sorted(
+            (i for i in self.issues.values() if label in self.labels.get(i.number, ())), key=lambda i: -i.number
+        )
+
     def update_issue(self, number: int, title: str, body: str, labels: Sequence[str] = ()) -> None:
         self.issues[number] = Issue(number, title, body)
         have = self.labels.get(number, ())

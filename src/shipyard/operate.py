@@ -671,7 +671,7 @@ def _close_deployed(github: GitHub, seen: Observed, dry_run: bool) -> str | None
     later one, whoever deployed it; what it did"""
     if seen.current is None or seen.tag is None:
         return None
-    issue = github.find_issue(deploy_marker(seen.env.name))
+    issue = find_proposal(github, deploy_marker(seen.env.name))
     if issue is None:
         return None
     found = _TAG_LINE.search(issue.body)

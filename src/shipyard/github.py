@@ -13,6 +13,7 @@ from typing import Any, Protocol
 from shipyard.errors import ReleaseError
 
 PROPOSAL_LABEL = "shipyard-proposal"  # on every issue proposing a release or a deploy
+OPEN_LIMIT = 100  # open issues read per label: proposals are one per lane and per environment
 _LABEL_DESCRIPTIONS = {PROPOSAL_LABEL: "Opened by shipyard: a release or deploy waiting for a person"}
 
 
@@ -108,6 +109,10 @@ class GitHub(Protocol):
 
     def labelled_issues(self, label: str) -> list[Issue]:
         """The issues with the label, open and closed, newest first (the newest 100)"""
+        ...
+
+    def open_labelled_issues(self, label: str) -> list[Issue]:
+        """The open issues with the label, newest first (the newest OPEN_LIMIT)"""
         ...
 
     def close_issue(self, number: int, comment: str) -> None: ...
@@ -240,6 +245,16 @@ class GhCli:
             Issue(int(i["number"]), i["title"], i["body"], None if i["state"] == "OPEN" else _time(i["closedAt"]))
             for i in found
         ]
+        return sorted(issues, key=lambda i: i.number, reverse=True)
+
+    def open_labelled_issues(self, label: str) -> list[Issue]:
+        found = json.loads(
+            self._gh(
+                "issue", "list", "--label", label, "--state", "open", "--json", "number,title,body",
+                "--limit", str(OPEN_LIMIT),
+            )
+        )  # fmt: skip
+        issues = [Issue(int(i["number"]), i["title"], i["body"]) for i in found]
         return sorted(issues, key=lambda i: i.number, reverse=True)
 
     def _api(self, *args: str) -> Any:
