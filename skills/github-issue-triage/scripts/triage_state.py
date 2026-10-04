@@ -34,6 +34,7 @@ Needs the gh CLI, authenticated. Python 3.10+, standard library only.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import re
 import subprocess
@@ -196,13 +197,26 @@ def upstream_states(refs: set[tuple[str, str, int]]) -> dict[tuple[str, str, int
     return states
 
 
-def latest_stable(tags: list[dict[str, Any]], pattern: re.Pattern[str] = STABLE) -> tuple[str, str] | None:
+def timestamp(text: str) -> dt.datetime:
+    """A GitHub ISO 8601 time; tagger dates carry an offset, comment dates a "Z", which
+    fromisoformat rejects before Python 3.11"""
+    try:
+        moment = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        moment = None
+    if moment is None or moment.tzinfo is None:
+        sys.stderr.write(f"error: gh returned a time without a timezone or not ISO 8601: {text!r}\n")
+        raise SystemExit(2)
+    return moment
+
+
+def latest_stable(tags: list[dict[str, Any]], pattern: re.Pattern[str] = STABLE) -> tuple[dt.datetime, str] | None:
     stable = []
     for t in tags:
         target = t["target"] or {}
         date = (target.get("tagger") or {}).get("date") or target.get("committedDate")
         if date and pattern.match(t["name"]):
-            stable.append((date, t["name"]))
+            stable.append((timestamp(date), t["name"]))
     return max(stable) if stable else None
 
 
@@ -211,7 +225,7 @@ def classify_open(
     marker: str,
     postponed: str,
     states: dict[tuple[str, str, int], str],
-    stable: tuple[str, str] | None,
+    stable: tuple[dt.datetime, str] | None,
 ) -> tuple[str, str]:
     labels = {n["name"] for n in issue["labels"]["nodes"]}
     triaged = [c for c in issue["comments"]["nodes"] if c["body"].lstrip().startswith(marker)]
@@ -232,12 +246,13 @@ def classify_open(
             return "UNBLOCKED", shown
         return "BLOCKED", shown or "labelled blocked"
     if postponed in labels:
-        if stable and triaged and triaged[0]["createdAt"] < stable[0]:
+        # Comments come oldest first: a re-decision after the tag clears REVISIT
+        if stable and triaged and timestamp(triaged[-1]["createdAt"]) < stable[0]:
             return "REVISIT", f"postponed before {stable[1]}"
         return "POSTPONED", note
     if not triage:
         return "NEW", note
-    if re.search(r"\bimplement\b", triage[0], re.IGNORECASE):
+    if re.search(r"\bimplement\b", triage[-1], re.IGNORECASE):
         return "NEEDS_PR", note
     return "TRIAGED", note
 
