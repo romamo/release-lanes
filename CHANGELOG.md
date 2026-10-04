@@ -12,6 +12,9 @@ bot.
 - A scheduled or hand-started run of the prepare workflow no longer cancels a push run
   waiting out `quiet_minutes`: only a newer push shares the settle job's concurrency
   group, and any other run gets a group of its own (#6)
+- `prepare` names a branch `shipyard` on origin that blocks the `shipyard/<tag>` work
+  branch, instead of failing with git's raw `cannot lock ref` error, and `doctor` checks
+  for it as `work branch` (#7)
 
 ## [0.5.0] - 2026-10-03
 

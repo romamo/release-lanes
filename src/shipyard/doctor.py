@@ -8,7 +8,8 @@ from pathlib import Path
 
 from shipyard.changelog import Changelog
 from shipyard.errors import ReleaseError
-from shipyard.gitrepo import Git
+from shipyard.gitrepo import REMOTE, Git
+from shipyard.land import BLOCKING_BRANCH, WORK_PREFIX, blocked
 from shipyard.policy import POLICY_PATH, BumpFrom, Policy, VersionFiles
 from shipyard.stamp import project_version
 
@@ -39,6 +40,19 @@ def doctor(root: Path) -> list[Check]:
 
     git = Git(root)
     add(git.ok("remote", "get-url", "origin"), "remote", "an 'origin' remote to push releases to")
+    # origin's branches as last fetched: doctor reads the clone and doesn't call the remote
+    work = f"{WORK_PREFIX}<tag>"
+    if git.ok("show-ref", "--verify", "-q", f"refs/remotes/{REMOTE}/{BLOCKING_BRANCH}"):
+        add(False, "work branch", blocked(work))
+    elif git.ok("show-ref", "--verify", "-q", f"refs/heads/{BLOCKING_BRANCH}"):
+        add(
+            False,
+            "work branch",
+            f"a local branch '{BLOCKING_BRANCH}' would block the work branch {work} once pushed to origin",
+            warn=True,
+        )
+    else:
+        add(True, "work branch", f"no branch '{BLOCKING_BRANCH}' on origin to block {work}")
     tags = git.tags()
     stable = [t.version for t in tags if t.version.is_stable]
     add(

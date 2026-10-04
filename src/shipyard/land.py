@@ -13,12 +13,20 @@ from shipyard.stamp import notes, stamp, sync
 from shipyard.version import Version
 
 WORK_PREFIX = "shipyard/"  # the branch a release commit waits on while CI runs
+# A branch named the prefix itself blocks every work branch: git can't hold both
+# refs/heads/X and refs/heads/X/...
+BLOCKING_BRANCH = WORK_PREFIX.rstrip("/")
 _SYNC_ATTEMPTS = 5
 _TAG_RETRY_WAITS = (2, 5, 10, 0)  # seconds after each failed attempt; the last is not waited
 
 
 def work_branch(version: Version) -> str:
     return f"{WORK_PREFIX}{version.tag}"
+
+
+def blocked(work: str) -> str:
+    """The problem and the fix when origin's BLOCKING_BRANCH stands in the way of a work branch"""
+    return f"origin has a branch '{BLOCKING_BRANCH}', which blocks the work branch {work}; delete or rename it"
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +65,8 @@ def prepare(
         return Prepared(changed, sha, False)
     if git.remote_branch(work_branch(version)) is not None:
         return Prepared(changed, sha, False)
+    if git.remote_branch(BLOCKING_BRANCH) is not None:
+        raise ReleaseError(blocked(work_branch(version)))
     if error := git.push(f"{sha}:refs/heads/{work_branch(version)}"):
         raise ReleaseError(f"pushing {work_branch(version)} was rejected: {error}")
     return Prepared(changed, sha, True)

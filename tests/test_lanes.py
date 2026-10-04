@@ -245,6 +245,26 @@ def test_land_refuses_an_existing_tag(repo: Repo) -> None:
         land(repo.git, repo.policy, repo.github, decision.lane, decision.version, prepared.sha, decision.base, day)
 
 
+def test_prepare_names_a_branch_that_blocks_the_work_branch(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A")
+    repo.git.run("push", "-q", "origin", "main:refs/heads/shipyard", "main:refs/heads/shipyard-x")
+    decision = plan(repo, at_day(1))
+    assert decision.version is not None and decision.lane is not None
+    day = at_day(1).date()
+    args = (repo.git, repo.policy, decision.lane, decision.version, decision.base, day)
+    work = work_branch(decision.version)
+    with pytest.raises(ReleaseError) as caught:
+        prepare(*args, commit=True, push=True)
+    assert str(caught.value) == (
+        f"origin has a branch 'shipyard', which blocks the work branch {work}; delete or rename it"
+    )
+    assert repo.git.remote_branch(work) is None
+
+    repo.git.run("push", "-q", "origin", ":refs/heads/shipyard")  # shipyard-x stays: it blocks nothing
+    assert prepare(*args, commit=True, push=True).pushed
+    assert repo.git.remote_branch(work) is not None
+
+
 def _reject_tags(repo: Repo, times: int | None) -> None:
     """Make origin refuse tag pushes: the next `times` ones, or every one when None"""
     origin = Path(repo.git.run("remote", "get-url", "origin").strip())

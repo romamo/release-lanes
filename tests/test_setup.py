@@ -145,3 +145,26 @@ def test_init_ignores_a_placeholder_version(repo: Repo) -> None:
     repo.write("pyproject.toml", '[project]\nname = "demo"\nversion = "0.0.0"\n')
     written = init(repo.root, "ci.yml", force=True)
     assert Policy.load(written[0]).version_files.value == "none"
+
+
+def test_doctor_fails_a_branch_on_origin_that_blocks_the_work_branch(repo: Repo) -> None:
+    def check() -> tuple[str, str]:
+        [found] = [c for c in doctor(repo.root) if c.name == "work branch"]
+        return found.status, found.detail
+
+    repo.git.run("push", "-q", "origin", "main:refs/heads/shipyard-x", "main:refs/heads/shipyard/v1.0.1")
+    repo.git.run("fetch", "-q", "origin")
+    assert check()[0] == "PASS"
+
+    repo.git.run("branch", "shipyard", "main")  # local only: pushes to origin don't see it
+    assert check() == (
+        "WARN",
+        "a local branch 'shipyard' would block the work branch shipyard/<tag> once pushed to origin",
+    )
+
+    repo.git.run("push", "-q", "origin", ":refs/heads/shipyard/v1.0.1", "shipyard:refs/heads/shipyard")
+    repo.git.run("fetch", "-q", "--prune", "origin")
+    assert check() == (
+        "FAIL",
+        "origin has a branch 'shipyard', which blocks the work branch shipyard/<tag>; delete or rename it",
+    )
