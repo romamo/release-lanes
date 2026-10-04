@@ -67,7 +67,7 @@ The bump, registry, and install commands per ecosystem (Python, Node, Rust, Go, 
 | BLOCKED | Waiting on an open upstream issue, a spec PR not yet merged, or (a build issue) an issue its body says it depends on | Nothing, until it closes or merges |
 | UNFILLED | A `Depends on` line of its body still names a `specs.py split` placeholder such as `#{B1}` | Put in the dependency's issue number |
 | SPEC_REFUSED | The PR it waits on (its spec PR) closed without merging | Decide again: revise the spec in a new PR, postpone, or won't fix |
-| UNBLOCKED | The upstream issue it waited on has closed, its spec PR merged, or its last dependency closed | Resume |
+| UNBLOCKED | The upstream issue it waited on has closed, its spec PR merged, or its last dependency closed | Resume; a dependency noted `:not_planned` never landed, so decide again first |
 | POSTPONED | Labelled `postponed` | Skip it |
 | REVISIT | Postponed before the newest stable release | Decide again |
 | TRIAGED | Triaged, with nothing pending | Nothing |

@@ -216,6 +216,7 @@ def test_a_hold_on_a_spec_pr_lifts_only_when_it_merges(ts: ModuleType) -> None:
         ({"__typename": "PullRequest", "state": "CLOSED"}, "SPEC_REFUSED"),
         ({"__typename": "PullRequest", "state": "MERGED"}, "UNBLOCKED"),
         ({"__typename": "Issue", "state": "CLOSED"}, "UNBLOCKED"),
+        ({"__typename": "Issue", "state": "CLOSED", "stateReason": "NOT_PLANNED"}, "UNBLOCKED"),
     ):
         states = {ref: ts.ref_state(node)}
         assert ts.classify_open(item, "Triage:", "postponed", states, None, REPO)[0] == state, node
@@ -547,6 +548,17 @@ def test_a_build_issue_is_blocked_until_its_dependency_closes(ts: ModuleType) ->
     both = issue(body="Depends on #3\nDepends on other/lib#4\n")
     states = {("o", "r", 3): "CLOSED", ("other", "lib", 4): "OPEN"}
     assert ts.classify_open(both, "Triage:", "postponed", states, None, ("o", "r"))[0] == "BLOCKED"
+
+
+def test_a_dependency_closed_as_not_planned_unblocks_but_says_so(ts: ModuleType) -> None:
+    # Its code never landed: the issue is UNBLOCKED (decide again), and the note says why
+    node = {"__typename": "Issue", "state": "CLOSED", "stateReason": "NOT_PLANNED"}
+    assert ts.ref_state(node) == "NOT_PLANNED"
+    assert ts.ref_state({**node, "stateReason": "COMPLETED"}) == "CLOSED"
+    item = issue(("2026-09-01T10:00:00Z", "Triage: implement, a build issue of S-007"), body="Depends on #3\n")
+    states = {("o", "r", 3): ts.ref_state(node)}
+    verdict = ts.classify_open(item, "Triage:", "postponed", states, None, ("o", "r"))
+    assert verdict == ("UNBLOCKED", "o/r#3:not_planned")
 
 
 def test_a_stacked_pr_on_an_open_dependency_reads_in_progress(ts: ModuleType) -> None:

@@ -29,7 +29,9 @@ For each open issue:
                    (revise the spec in a new PR, postpone, or won't fix). A newer
                    triage comment is that decision, and the refused PR stops counting
   UNBLOCKED        every upstream issue it waits on has closed, and every pull
-                   request merged: resume it
+                   request merged: resume it. One closed as not planned shows as
+                   owner/repo#N:not_planned in the note: its work never landed, so
+                   decide whether the issue still makes sense before resuming
   POSTPONED        has the postponed label
   REVISIT          postponed before the newest stable tag: decide again. Stable means
                    the tag matches --stable-tag-regex (default: vX.Y.Z, no pre-release)
@@ -489,7 +491,7 @@ def upstream_states(refs: set[tuple[str, str, int]]) -> dict[tuple[str, str, int
     ordered = sorted(refs)
     parts = [
         f'r{i}: repository(owner: "{o}", name: "{n}") {{ issueOrPullRequest(number: {k}) '
-        "{ __typename ... on Issue { state } ... on PullRequest { state } } }"
+        "{ __typename ... on Issue { state stateReason } ... on PullRequest { state } } }"
         for i, (o, n, k) in enumerate(ordered)
     ]
     proc = subprocess.run(
@@ -503,11 +505,14 @@ def upstream_states(refs: set[tuple[str, str, int]]) -> dict[tuple[str, str, int
 
 
 def ref_state(node: dict[str, Any]) -> str:
-    """An upstream issue's state (OPEN, CLOSED), or a pull request's (OPEN, MERGED, and
-    CLOSED_UNMERGED for one closed without merging, such as a refused spec PR: the issue
-    reads SPEC_REFUSED until a newer triage comment decides again). GitHub numbers issues and PRs in one sequence, so
-    owner/repo#N may be either"""
+    """An upstream issue's state (OPEN, CLOSED, and NOT_PLANNED for one closed as not
+    planned: it holds nothing, but its work never landed), or a pull request's (OPEN,
+    MERGED, and CLOSED_UNMERGED for one closed without merging, such as a refused spec PR:
+    the issue reads SPEC_REFUSED until a newer triage comment decides again). GitHub
+    numbers issues and PRs in one sequence, so owner/repo#N may be either"""
     state: str = node.get("state", "UNKNOWN")
+    if node.get("__typename") == "Issue" and state == "CLOSED" and node.get("stateReason") == "NOT_PLANNED":
+        return "NOT_PLANNED"
     if node.get("__typename") == "PullRequest" and state == "CLOSED":
         return "CLOSED_UNMERGED"
     return state
@@ -569,7 +574,7 @@ def classify_open(
     if waits or "blocked" in labels:
         if any(states.get(r) == "CLOSED_UNMERGED" for r in waits):
             return "SPEC_REFUSED", shown
-        still = [r for r in waits if states.get(r) != "CLOSED" and states.get(r) != "MERGED"]
+        still = [r for r in waits if states.get(r) not in ("CLOSED", "NOT_PLANNED", "MERGED")]
         if waits and not still:
             return "UNBLOCKED", shown
         return "BLOCKED", shown or "labelled blocked"
