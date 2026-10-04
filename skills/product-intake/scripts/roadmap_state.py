@@ -15,14 +15,15 @@ milestone's due date to the next (default 2).
   OVERDUE        an open milestone past its due date with issues still open
   WIP_OVER       the open milestones hold more open issues than wip
   UNPLANNED      an accepted opportunity (open, labelled --accepted-label) in no milestone
-                 and no open proposal; the note ranks it
+                 and in no proposal that is open or approved and not applied yet; the
+                 note ranks it
   PROPOSAL_OPEN  an open --proposal-label issue: waiting for the maintainer's approval
   APPROVED       a proposal closed as completed with a comment starting "approve", whose
                  milestone doesn't exist yet or lacks an opportunity it lists (and that
                  milestone isn't closed): create it, or add them
   UNREADABLE     a proposal whose body lacks the marker line
                  <!-- shipyard:milestone title="<title>" due="YYYY-MM-DD" -->
-  NEXT           with no proposal open, the unplanned opportunities that fit the free
+  NEXT           with no proposal open or waiting to be applied, the unplanned opportunities that fit the free
                  capacity (wip less the open issues in open milestones), and the next due
                  date (the latest open milestone's due date, or today, plus cadence weeks)
 
@@ -110,7 +111,7 @@ class Row:
 
 @dataclass(frozen=True)
 class Candidate:
-    """An accepted opportunity in no milestone and no open proposal"""
+    """An accepted opportunity in no milestone and no pending proposal"""
 
     number: int
     title: str
@@ -235,16 +236,18 @@ def plan(
     by_title = {m["title"]: m for m in milestones}
     open_opps = {o["number"]: o for o in opps if o["state"] == "OPEN"}
     proposed: set[int] = set()
-    open_proposal = False
+    held = False  # an open proposal, or an approved one not applied yet, holds the next plan
     for p in proposals:
         listed = sorted(evidence(p["body"], owner, name, "opportunities"))
         marker = MARKER.search(p["body"] or "")
         if p["state"] == "OPEN":
-            open_proposal = True
+            held = True
             proposed.update(listed)
         if marker is None:
             if p["state"] == "OPEN" or approved(p):
                 rows.append(Row("UNREADABLE", p["number"], p["title"], "no shipyard:milestone marker line", listed))
+                held = True
+                proposed.update(listed)
             continue
         title, due = marker["title"], marker["due"]
         if p["state"] == "OPEN":
@@ -253,12 +256,16 @@ def plan(
             milestone = by_title.get(title)
             if milestone is None:
                 rows.append(Row("APPROVED", p["number"], p["title"], f"create milestone {title} due {due}", listed))
+                held = True
+                proposed.update(listed)
             elif milestone["state"] == "OPEN":
                 placed = {n: (o["milestone"] or {}).get("title") for n, o in open_opps.items()}
                 missing = [n for n in listed if n in placed and placed[n] != title]
                 if missing:
                     shown = ", ".join(f"#{n}" for n in missing)
                     rows.append(Row("APPROVED", p["number"], p["title"], f"add {shown} to {title}", missing))
+                    held = True
+                    proposed.update(missing)
 
     unplanned = [
         o for o in open_opps.values() if accepted in labels(o) and not o["milestone"] and o["number"] not in proposed
@@ -282,7 +289,7 @@ def plan(
         if c.load > config.wip:
             note += f"; larger than wip {config.wip}: split it"
         rows.append(Row("UNPLANNED", c.number, c.title, note))
-    if not open_proposal:
+    if not held:
         chosen = next_milestone(candidates, free)
         if chosen:
             latest = max((d for d in (day(m["dueOn"]) for m in open_ms) if d is not None), default=today)

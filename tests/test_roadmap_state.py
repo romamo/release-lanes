@@ -225,6 +225,19 @@ def test_an_approved_proposal_is_applied_once(rs: ModuleType, specs: Path) -> No
     assert 30 not in {r.number for r in rows}
 
 
+def test_an_approved_proposal_holds_the_next_plan_until_applied(rs: ModuleType, specs: Path) -> None:
+    """Approved, the milestone not created yet: its opportunities aren't proposed a second time"""
+    approve: dict[str, Any] = {"state": "CLOSED", "reason": "COMPLETED", "comments": ("approve",)}
+    opportunities = [opportunity(1, 2), opportunity(2, 1), opportunity(3, 1)]
+    rows = plan(rs, Fake([], opportunities, [proposal(30, "- #1\n- #2", **approve)]), specs)
+    assert states(rows) == [("APPROVED", 30), ("UNPLANNED", 3)]
+    half = [opportunity(1, 2, milestone="0.12.0"), opportunity(2, 1), opportunity(3, 1)]
+    rows = plan(rs, Fake([milestone(1, "0.12.0", opened=1)], half, [proposal(30, "- #1\n- #2", **approve)]), specs)
+    assert states(rows) == [("APPROVED", 30), ("UNPLANNED", 3), ("MILESTONE", 1)]
+    unreadable = proposal(31, "- #1\n- #2", marker=False, **approve)
+    assert states(plan(rs, Fake([], opportunities, [unreadable]), specs)) == [("UNREADABLE", 31), ("UNPLANNED", 3)]
+
+
 def test_a_proposal_closed_without_approval_or_unreadable(rs: ModuleType, specs: Path) -> None:
     declined = proposal(30, "- #1", state="CLOSED", reason="NOT_PLANNED", comments=("Not now",))
     unapproved = proposal(31, "- #1", state="CLOSED", reason="COMPLETED", comments=("I disapprove",))

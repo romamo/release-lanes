@@ -128,7 +128,7 @@ Without the section, the script plans with these defaults. `[autonomy] intake` c
 | APPROVED | A proposal was approved, and its milestone is missing or lacks an opportunity it lists | Apply it (Approval, below) |
 | UNREADABLE | A proposal lacks its marker line | Fix the body from the template, or ask the maintainer what it proposes |
 | NEXT | No proposal is open, and accepted opportunities fit the free capacity | Write the proposal (below) |
-| UNPLANNED | An accepted opportunity in no milestone and no open proposal, with its rank | Nothing by itself: NEXT holds the ones that fit |
+| UNPLANNED | An accepted opportunity in no milestone and no pending proposal, with its rank | Nothing by itself: NEXT holds the ones that fit |
 | PROPOSAL_OPEN | A proposal waits for the maintainer | Nothing; list it in the report |
 | MILESTONE | An open milestone's progress and due date | Report it |
 
@@ -137,7 +137,7 @@ What the script decides:
 - **Evidence** is an opportunity's requests plus their thumbs-up and its own
 - **Load** is the issues an opportunity adds to a milestone: itself plus its spec's build issues (the spec's Issues section, from the `docs/specs/NNN-*.md` its body links), or itself plus one while no spec is merged
 - **Rank** orders by evidence per load, then evidence, then the oldest first
-- **NEXT** fills the free capacity (`wip` less the open issues already in open milestones) in rank order, passing over one that doesn't fit, and dates the milestone `cadence` weeks after the latest open milestone's due date (or today). One proposal is open at a time: an open one holds its opportunities and the next plan
+- **NEXT** fills the free capacity (`wip` less the open issues already in open milestones) in rank order, passing over one that doesn't fit, and dates the milestone `cadence` weeks after the latest open milestone's due date (or today). One proposal is pending at a time: an open one, or an approved one not yet applied (APPROVED, UNREADABLE), holds its opportunities and the next plan
 - **Approval** is the proposal closed as completed with a comment starting "approve" (or "approved")
 
 ### Propose the next milestone
