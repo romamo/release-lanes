@@ -81,7 +81,7 @@ Follow [references/landing.md](references/landing.md). In short:
   - The PR needs a rebase: force-push with lease, with permission
   - The PR has already merged: follow-up PR
 - Stacked PRs merge with merge commits, and each next PR is retargeted to the default branch before it merges
-- After every rebase, run `scripts/changelog_guard.py check --base origin/<default>`: a clean rebase can silently move new entries into a released section. On exit 1 run `move` with the same base, then `check` again, then the release planner's dry run where the repo has one, and read the Unreleased section: wording a later merge made stale (a rename) is yours to fix
+- After every rebase, run `scripts/changelog_guard.py check --base origin/<default>`: a clean rebase can silently move new entries into a released section. On exit 1 run `move` with the same base, then `check` again, amend, then the release planner's dry run where the repo has one (it reads the committed CHANGELOG), and read the Unreleased section: wording a later merge made stale (a rename) is yours to fix
 - Resolve bullet-list conflicts (CHANGELOG) with `scripts/changelog_guard.py union <file>`. Never union counts or versions: recompute those from each side's baseline and run the test
 - After each merge, re-run step 1's state check: the next PR may now conflict
 

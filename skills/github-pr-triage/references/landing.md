@@ -66,11 +66,12 @@ scripts/changelog_guard.py check --base origin/<default>
 # on exit 1:
 scripts/changelog_guard.py move --base origin/<default>
 scripts/changelog_guard.py check --base origin/<default>
+git commit --amend --no-edit CHANGELOG.md  # the planner reads the committed CHANGELOG, not the working tree
 # then the release planner's dry run, where the repo has one (shipyard: `shipyard plan --dry-run`)
 awk '/^## \[Unreleased\]/{p=1; print; next} /^## \[/{p=0} p' CHANGELOG.md
 ```
 
-`check` exits 1 on a line added outside Unreleased, on a bullet under Unreleased with no `###` heading above it, and on the same `###` heading twice under Unreleased. `move` carries each misplaced entry, continuation lines included, under its own heading in Unreleased: it appends to the heading when Unreleased has it, and otherwise creates it in Keep a Changelog order (Added, Changed, Deprecated, Removed, Fixed, Security, then any other heading). The released section ends up as the base has it. `move` exits 2 and changes nothing when an added line isn't a whole entry (a line added to a released entry, loose text, a bullet with no heading above it); move those by hand, and merge a duplicate heading by hand too. Then amend, re-run the checks that read the CHANGELOG (docs checks, doc tests), and the full suite if code also changed during the rebase. When you stack several fixes, give their entries one shared `### Fixed` heading, not one heading each.
+`check` exits 1 on a line added outside Unreleased, on a bullet under Unreleased with no `###` heading above it, and on the same `###` heading twice under Unreleased. `move` carries each misplaced entry, continuation lines included, under its own heading in Unreleased: it appends to the heading when Unreleased has it, and otherwise creates it in Keep a Changelog order (Added, Changed, Deprecated, Removed, Fixed, Security, then any other heading). The released section ends up as the base has it. `move` exits 2 and changes nothing when an added line isn't a whole entry (a line added to a released entry, loose text, a bullet with no heading above it) or a line was removed from a released section; move those by hand, and merge a duplicate heading by hand too. Amend before the planner's dry run, then re-run the checks that read the CHANGELOG (docs checks, doc tests), and the full suite if code also changed during the rebase. When you stack several fixes, give their entries one shared `### Fixed` heading, not one heading each.
 
 Read the printed Unreleased section before pushing. The tools place entries but can't judge their wording: an entry that names a skill or flag by a name a later merge changed needs an edit by hand.
 
