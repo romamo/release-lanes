@@ -1,6 +1,6 @@
 [project]
 name = "shipyard"
-version = "0.10.0"
+version = "0.10.1"
 description = "Issue to release on GitHub: agent skills that triage issues and land pull requests, and release lanes cut by policy from a hand-written CHANGELOG"
 readme = "README.md"
 license = "MIT"
