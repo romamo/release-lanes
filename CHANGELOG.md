@@ -71,6 +71,14 @@ bot.
   templates, the spec gate, github-issue-resolve, product-intake, and `docs/flow.md`
   say so, and tests hold both scripts to the new templates (#78)
 
+### Fixed
+
+- `changelog_guard.py move` no longer leaves an entry headless when a union kept the
+  PR's `###` heading line above the other side's lines: an entry right under a release
+  heading goes under the nearest `###` heading above it, joining that heading in
+  Unreleased or creating it in Keep a Changelog order, and `move` refuses a bullet with
+  no `###` heading anywhere above it instead of moving it as a block (#82)
+
 ## [0.10.1] - 2026-10-04
 
 ### Fixed

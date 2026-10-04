@@ -4,7 +4,8 @@
 check --base REF   exit 1 if lines added (or removed) since REF fall outside Unreleased, or if
                    Unreleased has a bullet with no ### heading or the same ### heading twice
 move --base REF    move entries added since REF that sit in a released section under Unreleased,
-                   each under its own ### heading (created in Keep a Changelog order if missing)
+                   each under its own ### heading (created in Keep a Changelog order if missing);
+                   an entry right under a ## heading goes under the nearest ### heading above it
 union FILE         resolve conflict blocks by keeping both sides, ours first, with a blank line
                    between a heading and the other side
 
@@ -141,7 +142,8 @@ def cmd_move(path: Path, base: str) -> int:
     if edited:
         fail(f"lines removed from a released section since {base} (base lines {edited}); fix them by hand")
     entries, involved, stray = misplaced_entries(lines, outside)
-    if not involved:
+    uses_headings = any(line.startswith(CATEGORY) for line in lines)
+    if not involved and not (entries and uses_headings):  # a moved block would leave a bullet headless
         return move_block(path, lines, start, outside)
     if start in outside:
         fail(f"the '{UNRELEASED}' heading itself is new since {base}; move the entries by hand")
@@ -169,18 +171,25 @@ def misplaced_entries(
 ) -> tuple[list[tuple[int, str | None, list[str]]], bool, list[int]]:
     """The entries made of added lines outside Unreleased, as (line, the ### heading they sat
     under or None, their lines), whether any added line sits under a ### heading, and the added lines
-    that belong to no added entry (text, a continuation of a released entry, a ## heading)"""
+    that belong to no added entry (text, a continuation of a released entry, a ## heading).
+
+    An added entry right under a ## heading takes the nearest ### heading above it. That is the
+    shape a union leaves when git moved the PR's heading line, identical to the other side's, out of
+    the conflict block: the heading stays above the other side's lines, which end in a ## heading,
+    and the PR's entry follows with no heading of its own (#82)"""
     added = set(outside)
     entries: list[tuple[int, str | None, list[str]]] = []
     stray: list[int] = []
     involved = False
     heading: str | None = None
+    above: str | None = None  # the nearest ### heading, across ## headings
     current: list[str] | None = None
     blanks: list[str] = []
     for n, line in enumerate(lines, 1):
         new = n in added
         if line.startswith(CATEGORY):
             heading, current, blanks = line[len(CATEGORY) :].strip(), None, []
+            above = heading
         elif line.startswith("#"):
             heading, current, blanks = None, None, []
             if new:
@@ -188,7 +197,7 @@ def misplaced_entries(
         elif line.startswith(BULLET):
             current, blanks = ([line], []) if new else (None, [])
             if current is not None:
-                entries.append((n, heading, current))
+                entries.append((n, heading if heading is not None else above, current))
         elif not line.strip():
             if new and current is not None:
                 blanks.append(line)
@@ -204,7 +213,7 @@ def misplaced_entries(
             if new:
                 stray.append(n)
             current, blanks = None, []
-        involved = involved or (new and heading is not None)
+        involved = involved or (new and (heading is not None or above is not None))
     return entries, involved, stray
 
 
