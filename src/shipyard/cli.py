@@ -24,13 +24,15 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
+from shipyard.agents import AgentsConfig
 from shipyard.doctor import CALLER, doctor
 from shipyard.errors import ReleaseError
-from shipyard.gate import WORK, ClaudeCli, gate, watch
+from shipyard.gate import ClaudeCli, check_checkout, gate, refresh, watch
 from shipyard.github import GhCli, GitHub
 from shipyard.gitrepo import Git
 from shipyard.init import init
 from shipyard.land import cleanup, land, prepare
+from shipyard.launchd import DEFAULT_TOOL, build, install, remove
 from shipyard.planner import Event, Hotfix, Planner, Proposal
 from shipyard.policy import ALIAS_PATH, CONFIG_PATH, Lane, Policy, config_path
 from shipyard.propose import propose
@@ -131,18 +133,26 @@ def _parser() -> argparse.ArgumentParser:
         help=f"overwrite existing files; an existing {ALIAS_PATH} is replaced by {CONFIG_PATH}",
     )
 
-    p = sub.add_parser("gate", help="start a Claude Code session only when the repo's state needs one")
-    p.add_argument("slug", metavar="owner/name", help="the GitHub repo; --repo is its checkout")
-    p.add_argument(
-        "--prompt",
-        required=True,
-        help="the session's prompt, {repo} replaced, e.g. '/github-issue-triage {repo} merge when green'",
+    p = sub.add_parser(
+        "gate", help=f"start a Claude Code session only when the repo's state needs one ([agents] in {CONFIG_PATH})"
     )
-    p.add_argument("--prs", action="store_true", help="open pull requests count as work (merge when green)")
-    p.add_argument("--retry-hours", type=float, default=24, help="relaunch on unchanged findings after this")
+    p.add_argument("slug", metavar="owner/name", help="the GitHub repo; --repo is its checkout")
     p.add_argument("--claude-arg", action="append", default=[], help="extra flag for the session (repeatable)")
-    p.add_argument("--dry-run", action="store_true", help="decide and print; start or stop nothing")
+    p.add_argument(
+        "--refresh",
+        action="store_true",
+        help="move this detached, clean gate checkout to origin's default branch before reading it",
+    )
+    p.add_argument("--dry-run", action="store_true", help="decide and print; start, stop, or move nothing")
     p.add_argument("--json", action="store_true", help="print the decision as JSON")
+
+    p = sub.add_parser("launchd", help="run the gate for a dedicated checkout every few minutes (macOS)")
+    p.add_argument("slug", metavar="owner/name", help="the GitHub repo; --repo is its gate checkout")
+    p.add_argument("--every", type=int, default=15, help="minutes between runs (default: 15)")
+    p.add_argument("--tool", default=DEFAULT_TOOL, help=f"where uvx gets shipyard (default: {DEFAULT_TOOL})")
+    p.add_argument("--claude-arg", action="append", default=[], help="extra flag for the session (repeatable)")
+    p.add_argument("--print", action="store_true", help="print the job's plist; install nothing")
+    p.add_argument("--remove", action="store_true", help="unload and delete the repo's job")
     return parser
 
 
@@ -171,6 +181,8 @@ def main(argv: list[str], github: GitHub | None = None) -> int:
         return 1 if any(c.status == "FAIL" for c in checks) else 0
     if args.command == "gate":
         return _gate(root, args)
+    if args.command == "launchd":
+        return _launchd(root, args)
 
     policy = Policy.load(config_path(root))
     git = Git(root, policy.bot_name, policy.bot_email)
@@ -241,18 +253,14 @@ def main(argv: list[str], github: GitHub | None = None) -> int:
 
 
 def _gate(root: Path, args: argparse.Namespace) -> int:
-    if args.retry_hours <= 0:
-        raise ReleaseError("--retry-hours must be positive")
-    work = WORK | {"PRS_OPEN"} if args.prs else WORK
     decision, launched = gate(
         Git(root),
         args.slug,
-        args.prompt,
+        lambda: AgentsConfig.load(root),
         ClaudeCli(args.claude_arg),
         lambda: watch(args.slug, root),
         dt.datetime.now(dt.UTC),
-        dt.timedelta(hours=args.retry_hours),
-        work,
+        args.refresh,
         args.dry_run,
     )
     if args.json:
@@ -270,6 +278,26 @@ def _gate(root: Path, args: argparse.Namespace) -> int:
         print(f"  {finding.line()}")
     if launched:
         print(f"  launched {launched}: claude attach {launched}")
+    return 0
+
+
+def _launchd(root: Path, args: argparse.Namespace) -> int:
+    home = Path.home()
+    if args.remove:
+        removed = remove(args.slug, home)
+        print(f"removed {removed}" if removed else f"no launchd job for {args.slug}")
+        return 0
+    git = Git(root)
+    check_checkout(git, args.slug)
+    job = build(args.slug, root, args.every, args.tool, args.claude_arg, home, os.environ.get("PATH", ""))
+    if args.print:
+        sys.stdout.write(job.document.decode())
+        return 0
+    refresh(git)  # a dedicated checkout, at the default branch's head
+    agents = AgentsConfig.load(root)  # the job would fail on every run without it
+    install(job)
+    print(f"installed {job.plist}: every {args.every} min, log {job.log}")
+    print(f"prompt: {agents.prompt}")
     return 0
 
 

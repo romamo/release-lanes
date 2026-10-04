@@ -1,6 +1,6 @@
 # Design: agent modes
 
-Status: mode 1 in progress, 2026-10-04
+Status: mode 1 built (`shipyard gate`, `shipyard launchd`), 2026-10-04
 
 shipyard is stateless code. It decides whether a repo needs an agent, and when it does, it
 starts a session in a **persistent Claude Code install**: Claude Code on your Mac, or on an
@@ -22,29 +22,49 @@ transcripts stay searchable.
 
 ## The gate
 
-```
-shipyard --repo ~/PycharmProjects/treaty gate romamo/treaty \
-  --prompt '/github-issue-triage {repo} merge when green' [--prs]
+The repo decides what the session does, in the `[agents]` section of
+`.github/shipyard.toml` (D-4); the host decides where and how often it runs:
+
+```toml
+[agents]
+prompt = "/github-issue-triage {repo} merge when green"
+prs = true          # open pull requests count as work
+retry_hours = 24    # unchanged findings start a new session after this
 ```
 
-Run it from launchd (or any scheduler) every 15 minutes. Each run:
+```
+shipyard --repo ~/PycharmProjects/treaty/tmp/shipyard-gate gate romamo/treaty --refresh
+shipyard --repo ~/PycharmProjects/treaty/tmp/shipyard-gate launchd romamo/treaty --every 15
+```
+
+The gate runs in a dedicated checkout: a detached worktree inside the trusted repo, never
+the user's working copy, where the session would branch and commit. Each run:
 
 1. Checks that the checkout's `origin` is the repo
 2. Lists this repo's gate sessions with `claude agents --json`. A session whose state is
    `blocked` waits on you: **WAITING**, stop. One that is `working` or busy: **RUNNING**,
-   stop. Both stop before the slow state read
-3. Reads the state with github-ship-watch's `watch_state.py` (bundled in the wheel). The
-   rows that need an agent are its action states, plus open PRs with `--prs`. None:
-   **QUIET**, stop. No model call has happened
-4. Compares the rows with the last launch's fingerprint. The same rows within
-   `--retry-hours` (24): **UNCHANGED**, stop. A session that left an item alone on purpose
+   stop. Both stop before anything else is read or moved
+3. With `--refresh`, moves the detached, clean checkout to the head of origin's default
+   branch, so the session reads the current config, `CLAUDE.md`, and skills
+4. Reads `[agents]`, then the state with github-ship-watch's `watch_state.py` (bundled in
+   the wheel). The rows that need an agent are its action states, plus open PRs when
+   `prs = true`. None: **QUIET**, stop. No model call has happened
+5. Compares the rows with the last launch's fingerprint. The same rows within
+   `retry_hours`: **UNCHANGED**, stop. A session that left an item alone on purpose
    doesn't wake a new one every tick
-5. **LAUNCH**: stops this repo's finished sessions (`claude stop` keeps their
+6. **LAUNCH**: stops this repo's finished sessions (`claude stop` keeps their
    conversation), starts `claude --bg -n "shipyard <repo> <time>" "<prompt>"` in the
    checkout with the rows appended to the prompt, and records the launch
 
 `--dry-run` prints the decision and touches nothing. `--claude-arg` passes flags to the
-session, such as `--permission-mode`.
+session, such as `--permission-mode`; it is the host's choice, so it stays a flag.
+
+`shipyard launchd` writes `~/Library/LaunchAgents/dev.shipyard.gate.<owner>.<repo>.plist`
+with `StartInterval`, `RunAtLoad`, and a log under `~/Library/Logs/shipyard/`. launchd gives
+jobs a minimal PATH, so the job carries one built from where claude, gh, git, and uvx live,
+skipping temporary folders: cmux, for one, puts a `claude` shim in one that vanishes when
+the app restarts. Install refuses a checkout that isn't dedicated or has no `[agents]`
+section, so a job never fails the same way on every tick.
 
 ### What Claude Code provides
 
@@ -70,16 +90,15 @@ Everything else comes from GitHub and from `claude agents`.
 
 ## Next
 
-1. **Setup:** shipyard-setup writes the launchd job (`StartInterval`, the checkout as
-   `WorkingDirectory`) and asks for the prompt and scope. launchd runs a missed interval
-   when the Mac wakes; cron doesn't
-2. **Pull requests in the fingerprint:** `--prs` counts open PRs by number, so a new push
-   to an open PR waits for `--retry-hours`. A `pr_state` that lists heads, reviews, and CI
+1. **Pull requests in the fingerprint:** `prs = true` counts open PRs by number, so a new
+   push to an open PR waits for `retry_hours`. A `pr_state` that lists heads, reviews, and CI
    fixes that
-3. **Trust filter:** pass issues and PRs from owners and collaborators automatically;
+2. **Trust filter:** pass issues and PRs from owners and collaborators automatically;
    leave the rest for an interactive session. An unattended session reads their text with
    the whole workspace in reach
-4. **Mode 2:** the `needs-decision` protocol in the skills, then `--mode headless`
+3. **Mode 2:** the `needs-decision` protocol in the skills, then `--mode headless`
+4. **The stop switch:** whether an open `shipyard-hold` issue (D-8) should also stop
+   launches, or only the merges a session would make
 5. **Your own sessions:** the gate counts only the sessions it started. If you are
    triaging the same repo by hand, the launched session finds you through `ListAgents`, as
    the skills already require

@@ -7,6 +7,23 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- `shipyard gate <owner/repo>` starts a Claude Code background session (`claude --bg`)
+  for a repo only when its state needs one: it reads the state with code, skips while a
+  session it started is still working or waits on you, skips findings unchanged since
+  the last launch, and passes the findings in the prompt. The prompt, whether open PRs
+  count as work, and the retry window come from a new `[agents]` section of
+  `.github/shipyard.toml`. `--refresh` moves a dedicated, detached checkout to the
+  default branch first. The wheel now bundles the skills
+- `shipyard launchd <owner/repo>` runs the gate from launchd every few minutes on a
+  Mac, with a PATH built from where claude, gh, git, and uvx live outside temporary
+  folders. Each pass is a new session, and a quiet tick makes no model call
+- shipyard-setup connects the agent side: `setup_state.py` reports releases, the
+  `[agents]` section, the plugin in `.claude/settings.json`, and the labels the skills
+  read, and `--fix` enables the plugin and creates the labels. The gate on launchd is a
+  new choice for where agents run
+
 ## [0.8.0] - 2026-10-04
 
 ### Added
@@ -30,12 +47,6 @@ bot.
   about it only once a stage is set to propose or a hold is open. Each `deploy.<name>` must
   name an environment in `[environments]`. Deploy and rollback autonomy take effect once
   shipyard deploys (#32)
-- `shipyard gate <owner/repo> --prompt '<prompt>'` starts a Claude Code background
-  session (`claude --bg`) for a repo only when its state needs one: it reads the state
-  with code, skips while a session it started is still working or waits on you, skips
-  findings unchanged since the last launch for `--retry-hours`, and passes the findings
-  in the prompt. Run it from launchd instead of `/loop`, so each pass is a new session
-  and a quiet tick makes no model call. The wheel now bundles the skills
 
 ## [0.7.0] - 2026-10-04
 

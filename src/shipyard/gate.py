@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from shipyard.agents import AgentsConfig
 from shipyard.errors import ReleaseError
 from shipyard.gitrepo import Git
 
@@ -241,31 +242,58 @@ def check_checkout(git: Git, repo: str) -> None:
         raise ReleaseError(f"{git.root}'s origin is {origin}, not {repo}")
 
 
+def require_dedicated(git: Git) -> None:
+    """A gate checkout is detached and clean: one with a branch or changes is someone's
+    working copy, and a session started there would branch and commit in it"""
+    hint = "create one with `git worktree add --detach <path> origin/<default>`"
+    if git.run("rev-parse", "--abbrev-ref", "HEAD").strip() != "HEAD":
+        raise ReleaseError(f"the gate needs a detached checkout; {git.root} is on a branch ({hint})")
+    if git.run("status", "--porcelain", "--untracked-files=no").strip():
+        raise ReleaseError(f"the gate needs a clean checkout; {git.root} has changes ({hint})")
+
+
+def refresh(git: Git) -> None:
+    """Move a dedicated gate checkout to the head of origin's default branch, so the session
+    reads the current [agents] section, CLAUDE.md, and skills"""
+    require_dedicated(git)
+    head = git.run("ls-remote", "--symref", "origin", "HEAD")
+    found = re.search(r"^ref: refs/heads/(\S+)\s+HEAD$", head, re.MULTILINE)
+    if found is None:
+        raise ReleaseError(f"origin of {git.root} names no default branch")
+    git.run("fetch", "-q", "origin", found.group(1))
+    git.run("checkout", "-q", "--detach", "FETCH_HEAD")
+
+
 def gate(
     git: Git,
     repo: str,
-    template: str,
+    config: Callable[[], AgentsConfig],
     claude: Claude,
     findings: Callable[[], list[Finding]],
     now: dt.datetime,
-    retry: dt.timedelta,
-    work_states: frozenset[str] = WORK,
+    refresh_checkout: bool = False,
     dry_run: bool = False,
 ) -> tuple[Decision, str | None]:
     """Decide, and on LAUNCH stop the finished sessions and start a new one. Returns the
-    decision and the launched session's id"""
+    decision and the launched session's id. A busy session ends the run before the checkout
+    moves, the config is read, or the state is read"""
     check_checkout(git, repo)
     record = state_dir(git) / RECORD
     sessions = claude.sessions(git.root, repo)
-    pending = busy(sessions)  # before the slow state read
+    pending = busy(sessions)
     if pending is not None:
         return pending, None
+    if refresh_checkout and not dry_run:
+        refresh(git)
+    agents = config()
+    work_states = WORK | {"PRS_OPEN"} if agents.prs else WORK
+    retry = dt.timedelta(hours=agents.retry_hours)
     decision = decide(findings(), sessions, load_launch(record), now, retry, work_states)
     if decision.action is not Action.LAUNCH or dry_run:
         return decision, None
     for session in decision.stop:
         claude.stop(session)
     name = f"{session_name(repo)} {now:%Y-%m-%d %H:%M}"
-    launched = claude.launch(git.root, name, prompt(template, repo, decision.work, now))
+    launched = claude.launch(git.root, name, prompt(agents.prompt, repo, decision.work, now))
     save_launch(record, Launch(fingerprint(decision.work), launched, now))
     return decision, launched

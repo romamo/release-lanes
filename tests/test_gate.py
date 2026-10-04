@@ -3,11 +3,13 @@
 import datetime as dt
 import json
 import subprocess
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 
+from shipyard.agents import AgentsConfig
 from shipyard.errors import ReleaseError
 from shipyard.gate import (
     RECORD,
@@ -22,15 +24,23 @@ from shipyard.gate import (
     parse_launched,
     parse_sessions,
     prompt,
+    refresh,
     skills_dir,
     state_dir,
 )
 from shipyard.gitrepo import Git
+from shipyard.policy import Policy
+
+from .conftest import POLICY
 
 NOW = dt.datetime(2026, 10, 4, 12, 0, tzinfo=dt.UTC)
 DAY = dt.timedelta(hours=24)
 ISSUES = Finding("ISSUES", "romamo/demo", "NEW #12 #14; NEEDS_PR #9")
 QUIET_ROWS = [Finding("BOT_OK", "release.yml", ""), Finding("PRS_OPEN", "romamo/demo", "#3")]
+
+
+def cfg(text: str = "/t", prs: bool = False) -> AgentsConfig:
+    return AgentsConfig(prompt=text, prs=prs, retry_hours=24)
 
 
 def bg(id: str, status: str | None, state: str | None) -> Session:
@@ -145,7 +155,7 @@ def test_the_watch_script_is_found() -> None:
 
 def test_a_launch_is_recorded_and_not_repeated(checkout: Git) -> None:
     claude = FakeClaude([bg("old", "idle", "done")])
-    decision, launched = gate(checkout, "romamo/demo", "/triage {repo}", claude, lambda: [ISSUES], NOW, DAY)
+    decision, launched = gate(checkout, "romamo/demo", lambda: cfg("/triage {repo}"), claude, lambda: [ISSUES], NOW)
     assert (decision.action, launched, claude.stopped) == (Action.LAUNCH, "s1", ["old"])
     name, text = claude.launched[0]
     assert name == "shipyard romamo/demo 2026-10-04 12:00" and text.startswith("/triage romamo/demo")
@@ -153,7 +163,7 @@ def test_a_launch_is_recorded_and_not_repeated(checkout: Git) -> None:
 
     later = NOW + dt.timedelta(minutes=15)
     claude.listed = [bg("s1", "idle", "done")]
-    decision, launched = gate(checkout, "romamo/demo", "/triage {repo}", claude, lambda: [ISSUES], later, DAY)
+    decision, launched = gate(checkout, "romamo/demo", lambda: cfg("/triage {repo}"), claude, lambda: [ISSUES], later)
     assert (decision.action, launched, len(claude.launched)) == (Action.UNCHANGED, None, 1)
 
 
@@ -162,20 +172,20 @@ def test_a_busy_session_skips_the_state_read(checkout: Git) -> None:
         raise AssertionError("the state read should not run")
 
     claude = FakeClaude([bg("a", "busy", "working")])
-    decision, _ = gate(checkout, "romamo/demo", "/triage {repo}", claude, unread, NOW, DAY)
+    decision, _ = gate(checkout, "romamo/demo", lambda: cfg("/triage {repo}"), claude, unread, NOW)
     assert decision.action is Action.RUNNING
 
 
 def test_a_dry_run_launches_nothing(checkout: Git) -> None:
     claude = FakeClaude([bg("old", "idle", "done")])
-    decision, launched = gate(checkout, "romamo/demo", "/t", claude, lambda: [ISSUES], NOW, DAY, dry_run=True)
+    decision, launched = gate(checkout, "romamo/demo", lambda: cfg("/t"), claude, lambda: [ISSUES], NOW, dry_run=True)
     assert (decision.action, launched, claude.launched, claude.stopped) == (Action.LAUNCH, None, [], [])
     assert not (state_dir(checkout) / RECORD).exists()
 
 
 def test_a_checkout_of_another_repo_is_refused(checkout: Git) -> None:
     with pytest.raises(ReleaseError, match="not romamo/other"):
-        gate(checkout, "romamo/other", "/t", FakeClaude(), lambda: [], NOW, DAY)
+        gate(checkout, "romamo/other", lambda: cfg("/t"), FakeClaude(), lambda: [], NOW)
 
 
 def test_a_malformed_record_fails(checkout: Git) -> None:
@@ -183,4 +193,107 @@ def test_a_malformed_record_fails(checkout: Git) -> None:
     record.parent.mkdir(parents=True)
     record.write_text("{}", encoding="utf-8")
     with pytest.raises(ReleaseError, match="malformed"):
-        gate(checkout, "romamo/demo", "/t", FakeClaude(), lambda: [ISSUES], NOW, DAY)
+        gate(checkout, "romamo/demo", lambda: cfg("/t"), FakeClaude(), lambda: [ISSUES], NOW)
+
+
+def test_prs_in_the_config_make_open_prs_work(checkout: Git) -> None:
+    rows = [Finding("PRS_OPEN", "romamo/demo", "#3")]
+    decision, _ = gate(checkout, "romamo/demo", lambda: cfg(), FakeClaude(), lambda: rows, NOW, dry_run=True)
+    assert decision.action is Action.QUIET
+    decision, _ = gate(checkout, "romamo/demo", lambda: cfg(prs=True), FakeClaude(), lambda: rows, NOW, dry_run=True)
+    assert decision.action is Action.LAUNCH
+
+
+def write_config(root: Path, text: str, name: str = "shipyard.toml") -> None:
+    (root / ".github").mkdir(exist_ok=True)
+    (root / ".github" / name).write_text(text, encoding="utf-8")
+
+
+def test_the_agents_section_loads_without_release_keys(tmp_path: Path) -> None:
+    write_config(tmp_path, '[agents]\nprompt = "/github-issue-triage {repo} merge when green"\nprs = true\n')
+    assert AgentsConfig.load(tmp_path) == AgentsConfig("/github-issue-triage {repo} merge when green", True, 24)
+
+
+def test_the_alias_file_works_too(tmp_path: Path) -> None:
+    write_config(tmp_path, '[agents]\nprompt = "/t"\nretry_hours = 6\n', "release-policy.toml")
+    assert AgentsConfig.load(tmp_path).retry_hours == 6
+
+
+@pytest.mark.parametrize(
+    ("text", "message"),
+    [
+        ('name = "demo"\n', "no \\[agents\\] section"),
+        ('[agents]\nprompt = "  "\n', "prompt must not be empty"),
+        ('[agents]\nprompt = "/t"\nretry_hours = 0\n', "retry_hours must be in 1..168"),
+        ('[agents]\nprompt = "/t"\nmerge = true\n', "unknown keys \\['merge'\\]"),
+        ("[agents]\nprs = true\n", "prompt is required"),
+    ],
+)
+def test_a_bad_agents_section_fails(tmp_path: Path, text: str, message: str) -> None:
+    write_config(tmp_path, text)
+    with pytest.raises(ReleaseError, match=message):
+        AgentsConfig.load(tmp_path)
+
+
+def test_no_config_file_names_the_gate(tmp_path: Path) -> None:
+    with pytest.raises(ReleaseError, match="add an \\[agents\\] section"):
+        AgentsConfig.load(tmp_path)
+
+
+def test_the_release_policy_accepts_and_checks_agents() -> None:
+    policy = Policy.parse(tomllib.loads(POLICY + '\n[agents]\nprompt = "/t"\n'), "policy")
+    assert policy.agents == AgentsConfig("/t", False, 24)
+    assert Policy.parse(tomllib.loads(POLICY), "policy").agents is None
+    with pytest.raises(ReleaseError, match="unknown keys"):
+        Policy.parse(tomllib.loads(POLICY + '\n[agents]\nprompt = "/t"\nwhen = 1\n'), "policy")
+
+
+def git_(*args: str, cwd: Path) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout
+
+
+@pytest.fixture
+def gate_checkout(tmp_path: Path) -> tuple[Git, Path]:
+    """A detached gate checkout and a second clone that pushes to the same origin"""
+    origin = tmp_path / "origin.git"
+    git_("init", "-q", "--bare", "-b", "main", str(origin), cwd=tmp_path)
+    pusher = tmp_path / "pusher"
+    git_("clone", "-q", str(origin), str(pusher), cwd=tmp_path)
+    for k, v in (("user.name", "t"), ("user.email", "t@t")):
+        git_("config", k, v, cwd=pusher)
+    git_("commit", "-q", "--allow-empty", "-m", "one", cwd=pusher)
+    git_("push", "-q", "origin", "main", cwd=pusher)
+    root = tmp_path / "gate"
+    git_("clone", "-q", str(origin), str(root), cwd=tmp_path)
+    git_("checkout", "-q", "--detach", cwd=root)
+    git_("commit", "-q", "--allow-empty", "-m", "two", cwd=pusher)
+    git_("push", "-q", "origin", "main", cwd=pusher)
+    return Git(root), pusher
+
+
+def test_refresh_moves_a_detached_checkout_to_the_default_branch(gate_checkout: tuple[Git, Path]) -> None:
+    git, pusher = gate_checkout
+    refresh(git)
+    assert git.run("rev-parse", "HEAD") == git_("rev-parse", "HEAD", cwd=pusher)
+    assert git.run("rev-parse", "--abbrev-ref", "HEAD").strip() == "HEAD"
+
+
+def test_refresh_refuses_a_working_copy(gate_checkout: tuple[Git, Path]) -> None:
+    git, _ = gate_checkout
+    git.run("checkout", "-q", "main")
+    with pytest.raises(ReleaseError, match="is on a branch"):
+        refresh(git)
+    git.run("checkout", "-q", "--detach")
+    (git.root / "tracked.txt").write_text("x", encoding="utf-8")
+    git.run("add", "tracked.txt")
+    with pytest.raises(ReleaseError, match="has changes"):
+        refresh(git)
+
+
+def test_a_busy_session_reads_no_config(checkout: Git) -> None:
+    def unread() -> AgentsConfig:
+        raise AssertionError("the config should not be read")
+
+    claude = FakeClaude([bg("a", "idle", "blocked")])
+    decision, _ = gate(checkout, "romamo/demo", unread, claude, lambda: [], NOW, refresh_checkout=True)
+    assert decision.action is Action.WAITING

@@ -269,6 +269,8 @@ The workflows call these; you can run them locally too.
 | `sync` | Bring a stable release made off main into main, to recover a failed sync |
 | `notes` | Print a release's notes |
 | `settle-minutes` | Print how long to wait after a push |
+| `gate` | Start a Claude Code session for a repo only when its state needs one, with the config's `[agents]` prompt ([agent modes](docs/design/agent-modes.md)) |
+| `launchd` | Run `gate` for a dedicated checkout every few minutes on a Mac |
 
 Exit codes: `0` done, a plan may decide to skip; `1` doctor found a failure; `2` bad input
 or a state shipyard refuses to act on.
