@@ -7,6 +7,12 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- "Where the agents run" in the README, and a last hand-over step in `shipyard-setup`
+  that asks whether the skills run on demand, on a `/loop`, or as a cloud `/schedule`
+  routine, and whether a routine may merge
+
 ### Changed
 
 - The `release-lanes-setup` skill is now `shipyard-setup`: `/shipyard-setup` (or

@@ -99,6 +99,22 @@ run summary, then set `mode = "release"`.
 An agent can do the whole setup with the skill in
 [`skills/shipyard-setup`](skills/shipyard-setup/SKILL.md).
 
+### Where the agents run
+
+Releasing runs in GitHub Actions and needs nothing else. The skills (triage, landing,
+shipped notices) run wherever you start them:
+
+| Option | Runs | Good for |
+|---|---|---|
+| On demand | in your Claude Code session, when you invoke a skill | getting started; you see each step |
+| `/loop 30m /github-ship-watch <owner/repo> — watch and triage` | in an open session | a working day; stops when the session closes |
+| A `/schedule` routine | in the cloud, with your computer off | hands-off intake and shipped notices |
+
+A routine merges only when its prompt says "merge when green"; without it, it stops at open
+pull requests. A cloud routine may not load the plugin, so its prompt clones shipyard
+itself (the prompt is in [docs/flow.md](docs/flow.md#keeping-it-running)). Start with a
+routine that doesn't merge, read its first runs, then decide.
+
 ### The policy
 
 `.github/release-policy.toml`, read on every run:
