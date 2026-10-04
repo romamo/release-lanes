@@ -1,9 +1,11 @@
 import datetime as dt
+from pathlib import Path
 
 import pytest
 
 from shipyard.changelog import Changelog, Entry
 from shipyard.errors import ReleaseError
+from shipyard.github import PROPOSAL_LABEL, GhCli
 from shipyard.policy import Lane, Policy, Style
 from shipyard.schedule import Freeze, Window
 from shipyard.version import Part, Version
@@ -279,3 +281,31 @@ class TestEnvironments:
         text = POLICY.replace("[lanes.dev]\nquiet_minutes = 30\n", "") + self.BASE.replace('"rc"', '"dev"')
         with pytest.raises(ReleaseError, match="lane dev is not enabled"):
             self.load(text)
+
+
+class TestLabelCreation:
+    """A label another run created meanwhile: gh label create fails with GitHub's 422 (#65)"""
+
+    @staticmethod
+    def gh(tmp_path: Path, create_error: str) -> GhCli:
+        script = tmp_path / "gh"
+        script.write_text(
+            "#!/bin/sh\n"
+            'case "$1 $2" in\n'
+            "  'label list') echo '[]' ;;\n"
+            f"  'label create') echo '{create_error}' >&2; exit 1 ;;\n"
+            "  'issue create') echo https://github.com/o/demo/issues/7 ;;\n"
+            "  *) exit 2 ;;\n"
+            "esac\n",
+            encoding="utf-8",
+        )
+        script.chmod(0o755)
+        return GhCli(tmp_path, gh=str(script))
+
+    def test_already_exists_counts_as_created(self, tmp_path: Path) -> None:
+        exists = f'label with name "{PROPOSAL_LABEL}" already exists; use `--force` to update its color'
+        assert self.gh(tmp_path, exists).create_issue("t", "b", (PROPOSAL_LABEL,)) == 7
+
+    def test_another_failure_still_fails(self, tmp_path: Path) -> None:
+        with pytest.raises(ReleaseError, match=f"gh label create {PROPOSAL_LABEL} failed: HTTP 403"):
+            self.gh(tmp_path, "HTTP 403: Resource not accessible").create_issue("t", "b", (PROPOSAL_LABEL,))
