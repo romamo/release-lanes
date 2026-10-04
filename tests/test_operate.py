@@ -616,7 +616,45 @@ def test_a_closed_incident_is_not_opened_again(failing: tuple[Repo, FakeHttp]) -
     repo.github.close_issue(number, "Known; fixing it")
     found = run(repo, http, minutes(30))
     assert repo.github.issues == {}
-    assert f"incident #{number} for v1.1.0rc1 was closed; shipyard opens no other for it" in found["production"].action
+    assert f"incident #{number} for v1.1.0rc1 was closed while it failed" in found["production"].action
+
+
+def test_failing_again_after_the_incident_closed_opens_another(failing: tuple[Repo, FakeHttp]) -> None:
+    repo, http = failing
+    configure(repo, 'rollback = "observe"\n')
+    fail_three_times(repo, http)
+    first = incident(repo).number
+    http.answer(PRODUCTION, "ok")
+    run(repo, http, minutes(30))  # healthy again
+    repo.github.now = minutes(35)
+    repo.github.close_issue(first, "Resolved")
+    http.answer(PRODUCTION, "", status=503)
+    for at in (40, 50):
+        run(repo, http, minutes(at))
+    found = run(repo, http, minutes(60))
+    # a stretch of failed checks begun after the close: the person closed the old one, not this
+    second = incident(repo).number
+    assert second != first and "state=failing" in incident(repo).body
+    assert f"opened incident #{second}" in found["production"].action
+
+
+def test_the_rollback_tag_failing_after_its_incident_closed_opens_another(failing: tuple[Repo, FakeHttp]) -> None:
+    repo, http = failing
+    fail_three_times(repo, http)
+    first = incident(repo).number
+    repo.github.deploy("production", "v1.0.0", minutes(25), S.IN_PROGRESS, S.SUCCESS)  # the rollback ran
+    http.answer(PRODUCTION, '{"version": "1.0.0"}')
+    run(repo, http, minutes(30))
+    repo.github.now = minutes(35)
+    repo.github.close_issue(first, "Resolved")
+    http.answer(PRODUCTION, "", status=503)
+    for at in (40, 50):
+        run(repo, http, minutes(at))
+    found = run(repo, http, minutes(60))
+    issue = incident(repo)
+    assert issue.number != first and "env=production tag=v1.0.0 to=- state=failing" in issue.body
+    assert f"opened incident #{issue.number}; no rollback" in found["production"].action
+    assert repo.github.dispatched == [ROLLBACK]  # never back to v1.1.0rc1, whose checks failed
 
 
 def test_a_dry_run_opens_no_incident(failing: tuple[Repo, FakeHttp]) -> None:
@@ -632,6 +670,18 @@ def test_an_incident_shows_no_secret_of_the_health_url_and_caps_the_body() -> No
     assert shown_url("https://user:pw@Example.com:8443/health?token=s3cret#x") == "https://example.com:8443/health"
     quoted = excerpt("`x`" + "a" * 1000)
     assert len(quoted) == 300 and quoted.startswith("'x'") and quoted.endswith("...")
+
+
+def test_an_incident_quotes_no_token_of_the_health_body() -> None:
+    body = (
+        '{"error": "db down", "password": "hunter2", "api_key":"k-123", "Authorization": "Bearer abc.def"}'
+        " dsn=postgres://app:s3cret@db:5432/x token=ghp_0123456789abcdefABCDEF0123456789abcd"
+    )
+    quoted = excerpt(body)
+    for secret in ("hunter2", "k-123", "abc.def", "s3cret", "ghp_0123456789abcdefABCDEF0123456789abcd"):
+        assert secret not in quoted
+    assert '"error": "db down"' in quoted and "postgres://[redacted]@db:5432/x" in quoted
+    assert excerpt("x " + "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZg") == "x [redacted]"  # a long opaque run
 
 
 def test_the_operate_section_is_read_strictly(repo: Repo) -> None:

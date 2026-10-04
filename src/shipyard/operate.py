@@ -114,9 +114,31 @@ class Probe:
     excerpt: str = ""  # the start of the body, on one line, for an incident to quote
 
 
+_REDACTED = "[redacted]"
+_SECRET_VALUE = re.compile(  # the value after a key that names a secret: "password": "x", token=x
+    r"""(?i)(["']?[\w-]*(?:passw|pwd|secret|token|api[_-]?key|auth|cookie|session|credential)[\w-]*["']?"""
+    r"""\s*[:=]\s*)("[^"]*"|'[^']*'|[^\s,;&}]+)"""
+)
+_BEARER = re.compile(r"(?i)\b(bearer|basic)\s+[^\s\"',;}]+")
+_URL_USER = re.compile(r"(\w+://)[^/\s@]+@")  # credentials in a URL the body names
+_OPAQUE = re.compile(r"(?<![\w+/=.-])(?=[\w+/=.-]*\d)(?=[\w+/=.-]*[A-Za-z])[\w+/=.-]{32,}")  # a key or hash
+
+
+def _redacted(match: re.Match[str]) -> str:
+    value = match[2]
+    quote = value[0] if value[0] in "\"'" else ""
+    return f"{match[1]}{quote}{_REDACTED}{quote}"
+
+
 def excerpt(body: str) -> str:
-    """The start of a health body on one line, capped, with no backticks to break a code span"""
+    """The start of a health body on one line, capped, with no backticks to break a code span
+    and nothing that looks like a secret: a secret key's value, a bearer token, a URL's
+    credentials, or a long opaque string (an incident is an issue anyone with read sees)"""
     flat = " ".join(body.split()).replace("`", "'")
+    flat = _SECRET_VALUE.sub(_redacted, flat)
+    flat = _BEARER.sub(lambda m: f"{m[1]} {_REDACTED}", flat)
+    flat = _URL_USER.sub(lambda m: f"{m[1]}{_REDACTED}@", flat)
+    flat = _OPAQUE.sub(_REDACTED, flat)
     return flat if len(flat) <= _EXCERPT_LIMIT else flat[: _EXCERPT_LIMIT - 3] + "..."
 
 
@@ -415,7 +437,16 @@ def _incident(
     if seen.current is None or seen.probe is None or seen.tag is None:
         return None
     env = seen.env.name
-    mine = [i for i in known if i.env == env and seen.tag in (i.tag, i.to)]
+    # an incident closed before the current stretch of failed checks began is history: the
+    # person closed that failure, not this one, which opens another
+    since = seen.failing_since
+    mine = [
+        i
+        for i in known
+        if i.env == env
+        and seen.tag in (i.tag, i.to)
+        and not (since is not None and i.issue.closed_at is not None and i.issue.closed_at < since)
+    ]
     incident = mine[0] if mine else None
     would = "would " if dry_run else ""
     if seen.probe.healthy:
@@ -429,7 +460,10 @@ def _incident(
     if seen.failed_checks < policy.operate.rollback_after:
         return None
     if incident is not None and incident.issue.closed:
-        return f"incident #{incident.number} for {incident.tag.tag} was closed; shipyard opens no other for it"
+        return (
+            f"incident #{incident.number} for {incident.tag.tag} was closed while it failed; shipyard opens"
+            " another only if it fails again after recovering"
+        )
     if incident is None:
         rollback = _rollback(policy, github, seen, tags, hold, dry_run)
         if dry_run:

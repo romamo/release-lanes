@@ -162,9 +162,7 @@ class FakeGitHub:
         self.comments.setdefault(number, []).append(body)
 
     def labelled_issues(self, label: str) -> list[Issue]:
-        found = [replace(i, closed=False) for i in self.issues.values()] + [
-            replace(i, closed=True) for i in self.closed_issues.values()
-        ]
+        found = [*self.issues.values(), *self.closed_issues.values()]
         return sorted((i for i in found if label in self.labels.get(i.number, ())), key=lambda i: -i.number)
 
     def update_issue(self, number: int, title: str, body: str) -> None:
@@ -172,7 +170,7 @@ class FakeGitHub:
         self.edits += 1
 
     def close_issue(self, number: int, comment: str) -> None:
-        self.closed_issues[number] = self.issues.pop(number)
+        self.closed_issues[number] = replace(self.issues.pop(number), closed_at=self.now)
         self.closed[number] = comment
 
     def deployments(self, environment: str) -> list[Deployment]:

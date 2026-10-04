@@ -24,7 +24,11 @@ class Issue:
     number: int
     title: str
     body: str
-    closed: bool = False
+    closed_at: dt.datetime | None = None  # None while open
+
+    @property
+    def closed(self) -> bool:
+        return self.closed_at is not None
 
 
 class DeploymentState(StrEnum):
@@ -216,11 +220,14 @@ class GhCli:
     def labelled_issues(self, label: str) -> list[Issue]:
         found = json.loads(
             self._gh(
-                "issue", "list", "--label", label, "--state", "all", "--json", "number,title,body,state",
+                "issue", "list", "--label", label, "--state", "all", "--json", "number,title,body,state,closedAt",
                 "--limit", "100",
             )
         )  # fmt: skip
-        issues = [Issue(int(i["number"]), i["title"], i["body"], i["state"] != "OPEN") for i in found]
+        issues = [
+            Issue(int(i["number"]), i["title"], i["body"], None if i["state"] == "OPEN" else _time(i["closedAt"]))
+            for i in found
+        ]
         return sorted(issues, key=lambda i: i.number, reverse=True)
 
     def _api(self, *args: str) -> Any:

@@ -270,11 +270,12 @@ incident_label = "incident"       # the label of the incident issue, which holds
   since the checks began failing (still queued, say), means it was
 - **The incident** is one issue per environment and bad tag, labelled `incident_label`: the
   environment, the tag, the failing check's status, the start of its body (capped, on one
-  line), the health URL without its query string or credentials, and the rollback's run or
+  line, with secret-looking values redacted), the health URL without its query string or credentials, and the rollback's run or
   why there was none. It opens under every autonomy level and under the hold. Later runs
   don't open another: they comment when the environment is healthy again, and when the
   rollback's tag fails its checks too, where shipyard stops instead of rolling back a
-  second time. A closed incident isn't opened again for the same tag
+  second time. Closing an incident while its checks still fail silences that stretch of
+  failures; failing again after the close (on either tag) opens a new incident
 - **An open incident holds releases**: the planner treats `incident_label` like
   `blocker_label`, for the lanes in `[gates] blocker_lanes`. Close it by hand, or let a
   hotfix pull request's "Fixes #N" close it, and releases flow again. A repository with no
