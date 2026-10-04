@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-10-04
+
 ### Fixed
 
 - `doctor`'s `work branch` check asks origin for a `shipyard` branch, as `prepare` does,
@@ -120,7 +122,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/romamo/shipyard/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/romamo/shipyard/compare/v0.5.2...HEAD
+[0.5.2]: https://github.com/romamo/shipyard/compare/v0.5.1...v0.5.2
 [0.5.1]: https://github.com/romamo/shipyard/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/romamo/shipyard/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/romamo/shipyard/compare/v0.3.1...v0.4.0
