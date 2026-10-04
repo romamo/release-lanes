@@ -362,3 +362,52 @@ def test_an_error_besides_resource_limits_is_not_retried(ts: ModuleType, capsys:
     assert exc.value.code == 2
     assert len(calls) == 1
     assert "NOT_FOUND" in capsys.readouterr().err
+
+
+class BackwardGitHub:
+    """Issue #7's comments and the repo's tags, both paged backwards by a cursor that is the
+    index of the oldest item served, so it holds across sizes (as checked live on pypa/pip).
+    A page asked with a cursor at more than ``limit`` is rejected, so the size shrinks
+    mid-pagination"""
+
+    def __init__(self, ts: ModuleType, comments: int, tags: int, limit: int) -> None:
+        self.names = {ts.QUERY: "QUERY", ts.COMMENTS_PAGE: "COMMENTS_PAGE", ts.TAGS_PAGE: "TAGS_PAGE"}
+        self.comments = chatter(comments)
+        # Only the oldest tag is stable, so the fetch pages back through all of them
+        self.tags = [tag("v1.0.0", "2026-01-01T00:00:00Z")] + [
+            tag(f"v1.0.1rc{i}", f"2026-02-{1 + i // 24:02d}T{i % 24:02d}:00:00Z") for i in range(tags - 1)
+        ]
+        self.cap, self.limit = ts.COMMENTS_CAP, limit
+        self.calls: list[tuple[str, int]] = []
+
+    def __call__(self, query: str, variables: dict[str, str | int]) -> dict[str, Any]:
+        name, cursor = self.names[query], variables.get("cursor")
+        size = variables["size"]
+        assert isinstance(size, int)
+        self.calls.append((name, size))
+        if name == "QUERY":
+            # The first query holds the newest 50 comments and the newest 50 tags
+            newest = backward(self.tags[-50:], str(len(self.tags) - 50))
+            return {"data": {"repository": first_page([open_issue(7, self.comments[-self.cap :])], tags=newest)}}
+        if cursor is not None and size > self.limit:
+            return rejected(size)
+        items = self.comments if name == "COMMENTS_PAGE" else self.tags
+        end = len(items) if cursor is None else int(cursor)
+        start = max(end - size, 0)
+        page = backward(items[start:end], str(start) if start else None)
+        if name == "COMMENTS_PAGE":
+            return {"data": {"repository": {"issue": {"comments": page}}}}
+        return {"data": {"repository": {"tags": page}}}
+
+
+def test_backward_pages_back_off_mid_pagination(ts: ModuleType) -> None:
+    gh = BackwardGitHub(ts, comments=180, tags=160, limit=30)
+    data = ts.fetch("o/r", 20, run=gh)
+    assert data["open"]["nodes"][0]["comments"]["nodes"] == gh.comments
+    assert data["tags"]["nodes"] == gh.tags
+    assert ts.latest_stable(data["tags"]["nodes"])[1] == "v1.0.0"
+    # Comments: the newest 100 fit; the 80 older are rejected at 100 and 50, then read at 25.
+    # Tags: the first query held 50; the 110 older are read at 25 after the same back-off
+    comments = [("COMMENTS_PAGE", 100), ("COMMENTS_PAGE", 100), ("COMMENTS_PAGE", 50)] + [("COMMENTS_PAGE", 25)] * 4
+    tags = [("TAGS_PAGE", 100), ("TAGS_PAGE", 50)] + [("TAGS_PAGE", 25)] * 5
+    assert gh.calls == [("QUERY", 100), *comments, *tags]
