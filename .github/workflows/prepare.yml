@@ -40,11 +40,13 @@ permissions:
   contents: read
 
 jobs:
-  # The only job a newer run may cancel: it holds no state, and cancelling it stops this
-  # run before anything is written
+  # The only job a newer run may cancel, and only a newer push does: it holds no state, and
+  # cancelling it stops this run before anything is written. A schedule or workflow_dispatch
+  # run gets a group of its own, so it cancels no push run's wait (#6). In a reusable
+  # workflow github.event_name is the caller's event
   settle:
     concurrency:
-      group: shipyard-settle
+      group: ${{ github.event_name == 'push' && 'shipyard-settle' || format('shipyard-settle-{0}', github.run_id) }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     steps:

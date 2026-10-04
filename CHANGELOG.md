@@ -7,6 +7,12 @@ bot.
 
 ## [Unreleased]
 
+### Fixed
+
+- A scheduled or hand-started run of the prepare workflow no longer cancels a push run
+  waiting out `quiet_minutes`: only a newer push shares the settle job's concurrency
+  group, and any other run gets a group of its own (#6)
+
 ## [0.5.0] - 2026-10-03
 
 ### Added
