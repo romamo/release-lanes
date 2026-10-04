@@ -3,8 +3,9 @@
 <!--
 Copy this file to docs/postmortems/YYYY-MM-DD-<slug>.md, named for the day the incident
 opened. The watch (github-ship-watch, POSTMORTEM_DUE) reads the Incident lines below on the
-default branch: keep one line per incident this postmortem covers, exactly in this form, with
-the real repo and issue number. A postmortem merges through a pull request like any change;
+default branch: keep one line per incident this postmortem covers, in this form (or with the
+issue's URL, or #N for this repo), with the real repo and issue number. An incident closed as
+not planned or as a duplicate needs no postmortem. A postmortem merges through a pull request like any change;
 the maintainer's merge is the approval.
 -->
 

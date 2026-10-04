@@ -400,6 +400,20 @@ def test_an_environment_deployed_only_before_the_window_still_counts_as_deployed
     assert by_name(mx, d)["Deploy frequency"].value is None  # no data, not the releases
 
 
+class FirstDeployedLater(FakeGitHub):
+    """The repo's only deployment came after an earlier window's end"""
+
+    def deployments(self, v: dict[str, Any]) -> dict[str, Any]:
+        return ok({"deployments": page([deployment("production", day(1), "SUCCESS")], totalCount=1)})
+
+
+def test_a_repo_that_first_deployed_after_the_window_counts_releases_in_it(mx: ModuleType) -> None:
+    earlier = mx.Window(END - dt.timedelta(days=14), END - dt.timedelta(days=7))
+    d = mx.fetch("o/r", earlier, frozenset(), "incident", "release-blocker", run=FirstDeployedLater(mx))
+    assert not d.deployed
+    assert mx.deploy_frequency(d, earlier).detail == "no deployments, and no stable release in the window"
+
+
 def backward(nodes: list[Any], cursor: str | None = None) -> dict[str, Any]:
     """A comments page read newest first: cursor leads to older comments"""
     return {"pageInfo": {"hasPreviousPage": cursor is not None, "startCursor": cursor}, "nodes": nodes}

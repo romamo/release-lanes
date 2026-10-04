@@ -174,10 +174,14 @@ def dedupe(titles: list[str], issues: list[dict[str, Any]]) -> list[Verdict]:
     """Each proposed title: the open issue whose title matches it, or none"""
     open_titles = {normal(i["title"]): i for i in sorted(issues, key=lambda i: int(i["number"]))}
     verdicts = []
+    proposed: dict[str, str] = {}
     for title in titles:
         key = normal(title)
         if not key:
             raise fail(f"an empty proposal title: {title!r}")
+        if key in proposed:  # both would read NEW and open twice
+            raise fail(f"two proposals share a title: {proposed[key]!r} and {title!r}")
+        proposed[key] = title
         match = open_titles.get(key)
         verdicts.append(Verdict(title, int(match["number"]), match["title"]) if match else Verdict(title, None, ""))
     return verdicts

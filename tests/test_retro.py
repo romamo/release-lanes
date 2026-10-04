@@ -55,6 +55,13 @@ def test_an_empty_proposal_title_is_refused(rt: ModuleType) -> None:
     assert refused.value.code == 2
 
 
+def test_two_proposals_with_one_title_are_refused(rt: ModuleType, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as refused:
+        rt.dedupe(["Add a lint", "add a LINT."], [])
+    assert refused.value.code == 2
+    assert "two proposals share a title" in capsys.readouterr().err
+
+
 def test_refused_and_reworked_pulls_are_the_windows(rt: ModuleType) -> None:
     pulls = [
         pull(1, None, day(2)),  # refused

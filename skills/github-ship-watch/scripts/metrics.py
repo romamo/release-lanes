@@ -10,7 +10,7 @@ Measures, each over the --days before --until (default now; a date is its 00:00 
 time needs its offset, such as the "start" a --json run prints, which gives the window
 before it):
   Deploy frequency   deployments that reached success, by environment (created in the
-                     window); for a repo that has never deployed, stable GitHub releases
+                     window); for a repo with no deployment by the window's end, stable GitHub releases
                      (not a draft or a pre-release) published in the window
   Lead time          for each merged PR first shipped by a stable release published in the
                      window: its first commit's author date to that release (median, p90).
@@ -465,8 +465,10 @@ def fetch(
         "deployments",
         lambda n: timestamp(n["createdAt"]) < window.start and (not environments or n["environment"] in environments),
     )
+    # Deployed by the window's end: with --until, a repo that first deployed later still
+    # counted its releases then
     chosen = [d for d in deploys if not environments or d["environment"] in environments]
-    deployed = bool(chosen) if environments else bool(deploys)
+    deployed = any(timestamp(d["createdAt"]) <= window.end for d in chosen)
     in_window = [d for d in chosen if timestamp(d["createdAt"]) in window]
     for d in in_window:
         if d["statuses"]["pageInfo"]["hasNextPage"] and not _succeeded(d):
