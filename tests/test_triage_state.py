@@ -284,3 +284,130 @@ def test_graphql_errors_fail(ts: ModuleType, capsys: pytest.CaptureFixture[str])
         ts.fetch("o/r", 20, run=run)
     assert exc.value.code == 2
     assert "Resource limits" in capsys.readouterr().err
+
+
+# Back-off (#24): GitHub rejects a costly page with one RESOURCE_LIMITS_EXCEEDED error per
+# node it dropped; the fetch asks again at half the size, down to MIN_PAGE
+
+
+def rejected(nodes: int) -> dict[str, Any]:
+    error = {"type": "RESOURCE_LIMITS_EXCEEDED", "message": "Resource limits for this query exceeded."}
+    return {"data": {"repository": None}, "errors": [dict(error) for _ in range(nodes)]}
+
+
+class HeavyGitHub:
+    """A repo with ``count`` open issues that rejects any open-issue page bigger than
+    ``limit`` (``first_limit`` for the first query). A cursor is the index of the next
+    issue, so it holds across page sizes, as GitHub's do"""
+
+    def __init__(self, ts: ModuleType, count: int, limit: int, first_limit: int | None = None) -> None:
+        self.names = {ts.QUERY: "QUERY", ts.OPEN_PAGE: "OPEN_PAGE"}
+        self.issues = [open_issue(n) for n in range(count, 0, -1)]
+        self.limits = {"QUERY": limit if first_limit is None else first_limit, "OPEN_PAGE": limit}
+        self.calls: list[tuple[str, int]] = []
+
+    def __call__(self, query: str, variables: dict[str, str | int]) -> dict[str, Any]:
+        name, size = self.names[query], variables["size"]
+        assert isinstance(size, int)
+        self.calls.append((name, size))
+        if size > self.limits[name]:
+            return rejected(size)
+        start = int(variables.get("cursor", 0))
+        end = start + size
+        page = forward(self.issues[start:end], str(end) if end < len(self.issues) else None)
+        if name == "QUERY":
+            return {"data": {"repository": {"open": page, "tags": backward([]), "closed": {"nodes": []}}}}
+        return {"data": {"repository": {"open": page}}}
+
+
+def test_a_rejected_first_query_is_asked_again_at_half_the_size(ts: ModuleType) -> None:
+    gh = HeavyGitHub(ts, count=120, limit=30)
+    data = ts.fetch("o/r", 20, run=gh)
+    assert [i["number"] for i in data["open"]["nodes"]] == list(range(120, 0, -1))
+    assert {classify(ts, i) for i in data["open"]["nodes"]} == {"NEW"}
+    # 100, 50, then 25 fits; later pages start at 25 instead of being rejected at 50 first
+    assert gh.calls == [("QUERY", 100), ("QUERY", 50), ("QUERY", 25)] + [("OPEN_PAGE", 25)] * 4
+
+
+def test_a_rejected_later_page_backs_off_from_its_cursor(ts: ModuleType) -> None:
+    gh = HeavyGitHub(ts, count=160, limit=30, first_limit=100)
+    data = ts.fetch("o/r", 20, run=gh)
+    assert [i["number"] for i in data["open"]["nodes"]] == list(range(160, 0, -1))
+    assert gh.calls == [("QUERY", 100), ("OPEN_PAGE", 50)] + [("OPEN_PAGE", 25)] * 3
+
+
+def test_a_page_rejected_at_the_floor_fails_with_one_line(ts: ModuleType, capsys: pytest.CaptureFixture[str]) -> None:
+    gh = HeavyGitHub(ts, count=120, limit=ts.MIN_PAGE - 1)
+    with pytest.raises(SystemExit) as exc:
+        ts.fetch("o/r", 20, run=gh)
+    assert exc.value.code == 2
+    assert gh.calls == [("QUERY", 100), ("QUERY", 50), ("QUERY", 25), ("QUERY", 12), ("QUERY", 10)]
+    assert capsys.readouterr().err.splitlines() == [
+        "error: o/r: GitHub's resource limits rejected the first query (open issues, tags, recent closes)"
+        " even at 10 per page"
+    ]
+
+
+def test_an_error_besides_resource_limits_is_not_retried(ts: ModuleType, capsys: pytest.CaptureFixture[str]) -> None:
+    calls: list[str] = []
+
+    def run(query: str, variables: dict[str, str | int]) -> dict[str, Any]:
+        calls.append(query)
+        response = rejected(2)
+        response["errors"].append({"type": "NOT_FOUND", "message": "Could not resolve to a Repository"})
+        return response
+
+    with pytest.raises(SystemExit) as exc:
+        ts.fetch("o/r", 20, run=run)
+    assert exc.value.code == 2
+    assert len(calls) == 1
+    assert "NOT_FOUND" in capsys.readouterr().err
+
+
+class BackwardGitHub:
+    """Issue #7's comments and the repo's tags, both paged backwards by a cursor that is the
+    index of the oldest item served, so it holds across sizes (as checked live on pypa/pip).
+    A page asked with a cursor at more than ``limit`` is rejected, so the size shrinks
+    mid-pagination"""
+
+    def __init__(self, ts: ModuleType, comments: int, tags: int, limit: int) -> None:
+        self.names = {ts.QUERY: "QUERY", ts.COMMENTS_PAGE: "COMMENTS_PAGE", ts.TAGS_PAGE: "TAGS_PAGE"}
+        self.comments = chatter(comments)
+        # Only the oldest tag is stable, so the fetch pages back through all of them
+        self.tags = [tag("v1.0.0", "2026-01-01T00:00:00Z")] + [
+            tag(f"v1.0.1rc{i}", f"2026-02-{1 + i // 24:02d}T{i % 24:02d}:00:00Z") for i in range(tags - 1)
+        ]
+        self.cap, self.limit = ts.COMMENTS_CAP, limit
+        self.calls: list[tuple[str, int]] = []
+
+    def __call__(self, query: str, variables: dict[str, str | int]) -> dict[str, Any]:
+        name, cursor = self.names[query], variables.get("cursor")
+        size = variables["size"]
+        assert isinstance(size, int)
+        self.calls.append((name, size))
+        if name == "QUERY":
+            # The first query holds the newest 50 comments and the newest 50 tags
+            newest = backward(self.tags[-50:], str(len(self.tags) - 50))
+            return {"data": {"repository": first_page([open_issue(7, self.comments[-self.cap :])], tags=newest)}}
+        if cursor is not None and size > self.limit:
+            return rejected(size)
+        items = self.comments if name == "COMMENTS_PAGE" else self.tags
+        end = len(items) if cursor is None else int(cursor)
+        start = max(end - size, 0)
+        page = backward(items[start:end], str(start) if start else None)
+        if name == "COMMENTS_PAGE":
+            return {"data": {"repository": {"issue": {"comments": page}}}}
+        return {"data": {"repository": {"tags": page}}}
+
+
+def test_backward_pages_back_off_mid_pagination(ts: ModuleType) -> None:
+    gh = BackwardGitHub(ts, comments=180, tags=160, limit=30)
+    data = ts.fetch("o/r", 20, run=gh)
+    assert data["open"]["nodes"][0]["comments"]["nodes"] == gh.comments
+    assert data["tags"]["nodes"] == gh.tags
+    assert ts.latest_stable(data["tags"]["nodes"])[1] == "v1.0.0"
+    # Comments: the newest 100 fit; the 80 older are rejected at 100 and 50, then read at 25.
+    # Tags: the first query held 50; the 110 older are read at 25 after the same back-off
+    comments = [("COMMENTS_PAGE", 100), ("COMMENTS_PAGE", 100), ("COMMENTS_PAGE", 50)] + [("COMMENTS_PAGE", 25)] * 4
+    tags = [("TAGS_PAGE", 100), ("TAGS_PAGE", 50)] + [("TAGS_PAGE", 25)] * 5
+    assert gh.calls == [("QUERY", 100), *comments, *tags]

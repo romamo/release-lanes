@@ -30,7 +30,9 @@ Exit 0 when nothing needs action, 1 when any issue is NEW, NEEDS_PR, UNBLOCKED,
 REVISIT, DONE_NOT_CLOSED, or SUSPECT_CLOSE, 2 on bad input (an issue with more than 100
 labels) or a gh failure. It pages past 100 open issues and an issue's 50 comments or 50
 cross-references, and back through tags to the newest stable one, with one query when
-nothing is capped. Needs the gh CLI, authenticated. Python 3.10+, standard library only.
+nothing is capped. A page GitHub rejects for its resource limits is asked again at half
+the size, down to 10 items; one rejected at 10 fails with one error line. Needs the gh
+CLI, authenticated. Python 3.10+, standard library only.
 """
 
 from __future__ import annotations
@@ -79,9 +81,9 @@ OPEN_ISSUE = (
 
 QUERY = (
     """
-query($owner: String!, $name: String!, $closed: Int!) {
+query($owner: String!, $name: String!, $size: Int!, $closed: Int!) {
   repository(owner: $owner, name: $name) {
-    open: issues(states: OPEN, first: 100, orderBy: {field: CREATED_AT, direction: DESC}) {
+    open: issues(states: OPEN, first: $size, orderBy: {field: CREATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }"""
     + OPEN_ISSUE
     + """
@@ -120,13 +122,13 @@ query($owner: String!, $name: String!, $closed: Int!) {
 )
 
 # Follow-up queries, each run only for a connection that an earlier page reports as capped
-# (comments: one that filled its page). Older open issues carry more history: a page of 100
-# tripped GitHub's resource limits on astral-sh/uv, so later pages hold 50
+# (comments: one that filled its page). Every query takes its page size as $size, which
+# halves when GitHub rejects the page for its resource limits (see SIZES and sized)
 OPEN_PAGE = (
     """
-query($owner: String!, $name: String!, $cursor: String!) {
+query($owner: String!, $name: String!, $size: Int!, $cursor: String!) {
   repository(owner: $owner, name: $name) {
-    open: issues(states: OPEN, first: 50, after: $cursor, orderBy: {field: CREATED_AT, direction: DESC}) {
+    open: issues(states: OPEN, first: $size, after: $cursor, orderBy: {field: CREATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }"""
     + OPEN_ISSUE
     + """
@@ -136,20 +138,20 @@ query($owner: String!, $name: String!, $cursor: String!) {
 """
 )
 COMMENTS_PAGE = """
-query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+query($owner: String!, $name: String!, $size: Int!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
-      comments(last: 100, before: $cursor) { pageInfo { hasPreviousPage startCursor } nodes { body createdAt } }
+      comments(last: $size, before: $cursor) { pageInfo { hasPreviousPage startCursor } nodes { body createdAt } }
     }
   }
 }
 """
 TIMELINE_PAGE = (
     """
-query($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
+query($owner: String!, $name: String!, $size: Int!, $number: Int!, $cursor: String!) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
-      timelineItems(itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT], first: 100, after: $cursor) {
+      timelineItems(itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT], first: $size, after: $cursor) {
         pageInfo { hasNextPage endCursor }"""
     + OPEN_TIMELINE
     + """
@@ -161,10 +163,10 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
 )
 REFS_PAGE = (
     """
-query($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
+query($owner: String!, $name: String!, $size: Int!, $number: Int!, $cursor: String!) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
-      refs: timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], first: 100, after: $cursor) {
+      refs: timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], first: $size, after: $cursor) {
         pageInfo { hasNextPage endCursor }"""
     + CLOSED_REFS
     + """
@@ -176,9 +178,10 @@ query($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
 )
 TAGS_PAGE = (
     """
-query($owner: String!, $name: String!, $cursor: String!) {
+query($owner: String!, $name: String!, $size: Int!, $cursor: String!) {
   repository(owner: $owner, name: $name) {
-    tags: refs(refPrefix: "refs/tags/", last: 100, before: $cursor, orderBy: {field: TAG_COMMIT_DATE, direction: ASC}) {
+    tags: refs(refPrefix: "refs/tags/", last: $size, before: $cursor,
+               orderBy: {field: TAG_COMMIT_DATE, direction: ASC}) {
       pageInfo { hasPreviousPage startCursor }
       """
     + TAG_NODES
@@ -190,9 +193,32 @@ query($owner: String!, $name: String!, $cursor: String!) {
 )
 
 COMMENTS_CAP = 50  # comments(last: 50) in OPEN_ISSUE
+# Each query's first page size, and what a page holds, for the error line. Older open
+# issues carry more history: a page of 100 tripped GitHub's resource limits on
+# astral-sh/uv, so later open-issue pages start at 50
+SIZES = {QUERY: 100, OPEN_PAGE: 50, COMMENTS_PAGE: 100, TIMELINE_PAGE: 100, REFS_PAGE: 100, TAGS_PAGE: 100}
+# A rejected page halves down to this floor; one that fails at the floor ends the run.
+# At 10 open issues a page asks for a tenth of the first query, so a page still rejected
+# there holds an issue too heavy for any size, and pypa/pip's 957 issues would already
+# take some 100 calls of about 5 seconds each
+MIN_PAGE = 10
+RESOURCE_LIMITS = "RESOURCE_LIMITS_EXCEEDED"
 Variables = dict[str, str | int]
 # Runs one GraphQL query with its variables and returns the parsed JSON response
 Runner = Callable[[str, Variables], dict[str, Any]]
+Sizes = dict[str, int]
+
+
+class ResourceLimitsExceeded(Exception):
+    """GitHub rejected a query as too costly to run; a smaller page may fit"""
+
+
+def resource_limited(response: dict[str, Any]) -> bool:
+    """Every error is GitHub's resource limit (gh prints one per rejected node), so a
+    smaller page may succeed; any other error is real"""
+    errors = response.get("errors")
+    return bool(errors) and all(isinstance(e, dict) and e.get("type") == RESOURCE_LIMITS for e in errors)
+
 
 ACTION = {"NEW", "NEEDS_PR", "UNBLOCKED", "REVISIT", "DONE_NOT_CLOSED", "SUSPECT_CLOSE"}
 HOLD = re.compile(r"\b(?:on hold|blocked|waits? on|waiting on|pending|depends on)\b", re.IGNORECASE)
@@ -209,6 +235,14 @@ def gh_graphql(query: str, variables: Variables) -> dict[str, Any]:
         cmd += ["-F" if isinstance(value, int) else "-f", f"{key}={value}"]
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
+        # gh exits 1 on a resource limit, with the response on stdout and its message once
+        # per rejected node on stderr: hand the response back to be retried smaller
+        try:
+            rejected = json.loads(proc.stdout)
+        except ValueError:
+            rejected = None
+        if isinstance(rejected, dict) and resource_limited(rejected):
+            return rejected
         sys.stderr.write(proc.stderr)
         raise SystemExit(2)
     response: dict[str, Any] = json.loads(proc.stdout)
@@ -222,6 +256,8 @@ def fail(message: str) -> NoReturn:
 
 def repository(run: Runner, query: str, variables: Variables) -> dict[str, Any]:
     response = run(query, variables)
+    if resource_limited(response):
+        raise ResourceLimitsExceeded
     if response.get("errors"):
         fail(f"GitHub GraphQL errors: {json.dumps(response['errors'])}")
     data = (response.get("data") or {}).get("repository")
@@ -239,12 +275,32 @@ def advance(cursor: str | None, seen: set[str], what: str) -> str:
     return cursor
 
 
-def issue_page(run: Runner, query: str, base: Variables, number: int, field: str, cursor: str | None) -> dict[str, Any]:
+def sized(run: Runner, query: str, variables: Variables, sizes: Sizes, what: str) -> dict[str, Any]:
+    """``repository`` at the query's page size, halving it while GitHub rejects the page for
+    its resource limits. The smaller size sticks for the query's later pages, and a cursor
+    from a bigger page stays valid. A page rejected at MIN_PAGE fails with one line"""
+    while True:
+        size = sizes[query]
+        try:
+            return repository(run, query, {**variables, "size": size})
+        except ResourceLimitsExceeded:
+            if size <= MIN_PAGE:
+                fail(
+                    f"{variables['owner']}/{variables['name']}: GitHub's resource limits rejected "
+                    f"{what} even at {size} per page"
+                )
+            sizes[query] = max(size // 2, MIN_PAGE)
+
+
+def issue_page(
+    run: Runner, query: str, base: Variables, sizes: Sizes, number: int, field: str, cursor: str | None
+) -> dict[str, Any]:
     """One page of an issue's connection; with no cursor, its first page (for comments, the newest)"""
     variables: Variables = {**base, "number": number}
     if cursor is not None:
         variables["cursor"] = cursor
-    issue = repository(run, query, variables).get("issue")
+    what = {"comments": "comments", "timelineItems": "cross-references", "refs": "cross-references"}[field]
+    issue = sized(run, query, variables, sizes, f"the {what} of #{number}").get("issue")
     if issue is None:
         fail(f"issue #{number} vanished while paging its {field}")
     page: dict[str, Any] = issue[field]
@@ -256,29 +312,29 @@ def check_labels(issue: dict[str, Any]) -> None:
         fail(f"bad input: issue #{issue['number']} has more than 100 labels, which triage_state.py does not page")
 
 
-def complete_comments(run: Runner, base: Variables, issue: dict[str, Any]) -> None:
+def complete_comments(run: Runner, base: Variables, sizes: Sizes, issue: dict[str, Any]) -> None:
     """Page an issue's comments backwards, keeping them oldest first. pageInfo on the first
     query's comments trips GitHub's resource limits on a busy repo, so a full first page
     (COMMENTS_CAP) is read again here with it"""
     if len(issue["comments"]["nodes"]) < COMMENTS_CAP:
         return
-    comments = issue_page(run, COMMENTS_PAGE, base, issue["number"], "comments", None)
+    comments = issue_page(run, COMMENTS_PAGE, base, sizes, issue["number"], "comments", None)
     issue["comments"] = comments
     seen: set[str] = set()
     while comments["pageInfo"]["hasPreviousPage"]:
         cursor = advance(comments["pageInfo"]["startCursor"], seen, f"comments on #{issue['number']}")
-        page = issue_page(run, COMMENTS_PAGE, base, issue["number"], "comments", cursor)
+        page = issue_page(run, COMMENTS_PAGE, base, sizes, issue["number"], "comments", cursor)
         comments["nodes"] = page["nodes"] + comments["nodes"]
         comments["pageInfo"] = page["pageInfo"]
 
 
-def complete_refs(run: Runner, query: str, base: Variables, issue: dict[str, Any], field: str) -> None:
+def complete_refs(run: Runner, query: str, base: Variables, sizes: Sizes, issue: dict[str, Any], field: str) -> None:
     """Page an issue's cross-references forwards, oldest first"""
     items = issue[field]
     seen: set[str] = set()
     while items["pageInfo"]["hasNextPage"]:
         cursor = advance(items["pageInfo"]["endCursor"], seen, f"cross-references on #{issue['number']}")
-        page = issue_page(run, query, base, issue["number"], field, cursor)
+        page = issue_page(run, query, base, sizes, issue["number"], field, cursor)
         items["nodes"] = items["nodes"] + page["nodes"]
         items["pageInfo"] = page["pageInfo"]
 
@@ -289,29 +345,33 @@ def fetch(repo: str, closed: int, stable_pattern: re.Pattern[str] = STABLE, run:
     if not owner or not name or "/" in name:
         fail(f"repo must be owner/name, got {repo!r}")
     base: Variables = {"owner": owner, "name": name}
-    data = repository(run, QUERY, {**base, "closed": closed})
+    sizes = dict(SIZES)
+    data = sized(run, QUERY, {**base, "closed": closed}, sizes, "the first query (open issues, tags, recent closes)")
 
     issues = data["open"]
+    # A first query that had to shrink says how heavy this repo's issues are
+    sizes[OPEN_PAGE] = min(sizes[OPEN_PAGE], sizes[QUERY])
     seen: set[str] = set()
     while issues["pageInfo"]["hasNextPage"]:
         cursor = advance(issues["pageInfo"]["endCursor"], seen, "open issues")
-        page = repository(run, OPEN_PAGE, {**base, "cursor": cursor})["open"]
+        what = f"the open issues after the first {len(issues['nodes'])}"
+        page = sized(run, OPEN_PAGE, {**base, "cursor": cursor}, sizes, what)["open"]
         issues["nodes"] = issues["nodes"] + page["nodes"]
         issues["pageInfo"] = page["pageInfo"]
     for issue in issues["nodes"]:
         check_labels(issue)
-        complete_comments(run, base, issue)
-        complete_refs(run, TIMELINE_PAGE, base, issue, "timelineItems")
+        complete_comments(run, base, sizes, issue)
+        complete_refs(run, TIMELINE_PAGE, base, sizes, issue, "timelineItems")
     for issue in data["closed"]["nodes"]:
         check_labels(issue)
-        complete_refs(run, REFS_PAGE, base, issue, "refs")
+        complete_refs(run, REFS_PAGE, base, sizes, issue, "refs")
 
     # Only the newest stable tag is used: page back until one is in hand, not through every tag
     tags = data["tags"]
     seen = set()
     while tags["pageInfo"]["hasPreviousPage"] and latest_stable(tags["nodes"], stable_pattern) is None:
         cursor = advance(tags["pageInfo"]["startCursor"], seen, "tags")
-        page = repository(run, TAGS_PAGE, {**base, "cursor": cursor})["tags"]
+        page = sized(run, TAGS_PAGE, {**base, "cursor": cursor}, sizes, "older tags")["tags"]
         tags["nodes"] = page["nodes"] + tags["nodes"]
         tags["pageInfo"] = page["pageInfo"]
     return data
