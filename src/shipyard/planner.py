@@ -3,9 +3,11 @@
 
 import datetime as dt
 import fnmatch
+import json
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from shipyard.autonomy import Autonomy, Hold, Stage
 from shipyard.changelog import Changelog, Entry
 from shipyard.errors import ReleaseError
 from shipyard.github import GitHub
@@ -27,15 +29,39 @@ class Hotfix:
 
 
 @dataclass(frozen=True, slots=True)
+class Proposal:
+    """A due release shipyard doesn't make by itself, and why: a person starts the lane"""
+
+    lane: Lane
+    version: Version
+    base: str
+    cause: str  # "release autonomy is propose", or "held by shipyard-hold #N"
+
+    def as_dict(self) -> dict[str, str]:
+        return {"lane": self.lane.value, "version": str(self.version), "base": self.base, "cause": self.cause}
+
+    @classmethod
+    def from_dict(cls, raw: object) -> Proposal:
+        if not isinstance(raw, dict) or set(raw) != {"lane", "version", "base", "cause"}:
+            raise ReleaseError(f"a proposal has lane, version, base, and cause; got {raw!r}")
+        if not all(isinstance(v, str) and v for v in raw.values()):
+            raise ReleaseError(f"a proposal's fields are non-empty strings; got {raw!r}")
+        if raw["lane"] not in set(Lane):
+            raise ReleaseError(f"a proposal's lane is one of {[ln.value for ln in Lane]}; got {raw['lane']!r}")
+        return cls(Lane(raw["lane"]), Version.parse(raw["version"]), raw["base"], raw["cause"])
+
+
+@dataclass(frozen=True, slots=True)
 class Decision:
     mode: Mode
-    action: str  # "release" or "skip"
+    action: str  # "release", "propose", or "skip"
     reason: str
     lane: Lane | None = None
     version: Version | None = None
     base: str = ""
     merges: tuple[str, ...] = ()  # a hotfix's merge commits, in PR order
     prs: tuple[int, ...] = ()
+    proposals: tuple[Proposal, ...] = ()  # with action "propose"
 
     def outputs(self) -> dict[str, str]:
         return {
@@ -47,6 +73,7 @@ class Decision:
             "base": self.base,
             "merges": " ".join(self.merges),
             "prs": " ".join(str(p) for p in self.prs),
+            "proposals": json.dumps([p.as_dict() for p in self.proposals]) if self.proposals else "",
         }
 
 
@@ -66,6 +93,7 @@ class Planner:
     github: GitHub
     now: dt.datetime
     _tags: list[Tag] = field(default_factory=list)
+    _hold: Hold | None = None
 
     def __post_init__(self) -> None:
         self._tags = self.git.tags()
@@ -228,6 +256,12 @@ class Planner:
                 return f"milestone {candidate.version.release} has no open issues"
         return None
 
+    def hold(self) -> Hold:
+        """The stop switch, read once per plan and only once a lane is due"""
+        if self._hold is None:
+            self._hold = Hold.read(self.github)
+        return self._hold
+
     def _held(self, lane: Lane) -> str | None:
         if lane in self.policy.freeze_lanes:
             for freeze in self.policy.freezes:
@@ -254,6 +288,7 @@ class Planner:
         head = self.git.sha("HEAD")
         lanes = [lane] if lane else [ln for ln in PRIORITY if ln in self.policy.lanes and ln is not Lane.HOTFIX]
         skipped = []
+        proposals = []
         for current in lanes:
             self.policy.rule(current)
             candidate = self._hotfix(hotfix) if hotfix else self._candidate(current, head)
@@ -271,6 +306,22 @@ class Planner:
             if held is not None:
                 skipped.append(f"{current}: {candidate.version} held, {held}")
                 continue
+            if lane is not None:
+                # a person started the lane: autonomy is the bot's, but the hold stops people
+                # too, except for a hotfix, the usual cure for the incident behind a hold
+                if self.hold().on and lane is not Lane.HOTFIX:
+                    skipped.append(
+                        f"{current}: {candidate.version} {self.hold().reason}; close it to release by hand"
+                        " (a hotfix can still be started by hand)"
+                    )
+                    continue
+            elif (level := self.policy.autonomy.effective(Stage.release(), self.hold())) is not Autonomy.ACT:
+                cause = self.policy.autonomy.cause(Stage.release(), self.hold())
+                if level is Autonomy.OBSERVE:
+                    skipped.append(f"{current}: {candidate.version} is due ({due}), but {cause}")
+                else:
+                    proposals.append(Proposal(current, candidate.version, candidate.base, cause))
+                continue
             return Decision(
                 mode,
                 "release",
@@ -281,4 +332,7 @@ class Planner:
                 candidate.merges,
                 candidate.prs,
             )
+        if proposals:
+            proposed = [f"{p.lane}: {p.version} is due, proposed instead of released: {p.cause}" for p in proposals]
+            return Decision(mode, "propose", "; ".join(proposed + skipped), proposals=tuple(proposals))
         return Decision(mode, "skip", "; ".join(skipped) or "no lane enabled")

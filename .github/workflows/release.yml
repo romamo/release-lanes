@@ -40,7 +40,7 @@ jobs:
       tool: "."
     permissions:
       contents: write
-      issues: read
+      issues: write
       pull-requests: read
 
   ci:

@@ -3,7 +3,9 @@ name: shipyard prepare
 # Called by a repository's release workflow (see `shipyard init`). On a push it
 # first waits for the batch of merges to end; then it plans, and when a lane is due it writes
 # the release commit and pushes it to a work branch for the caller's CI. In dry-run it shows
-# the release commit in the run summary and pushes nothing.
+# the release commit in the run summary and pushes nothing. When [autonomy] release is
+# propose, or an open shipyard-hold issue stops automatic releases, it opens or updates one
+# issue per due lane instead.
 
 on:
   workflow_call:
@@ -36,8 +38,8 @@ on:
         description: "The release commit; empty when nothing releases or in dry-run"
         value: ${{ jobs.prepare.outputs.sha }}
 
-permissions:
-  contents: read
+# No workflow-level permissions: each job sets its own, except propose, which takes the
+# caller's grant, so a caller that grants no `issues: write` still starts this workflow
 
 jobs:
   # The only job a newer run may cancel, and only a newer push does: it holds no state, and
@@ -49,6 +51,8 @@ jobs:
       group: ${{ github.event_name == 'push' && 'shipyard-settle' || format('shipyard-settle-{0}', github.run_id) }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v7
         if: github.event_name == 'push'
@@ -77,6 +81,9 @@ jobs:
       issues: read # release-blocker issues and milestones
       pull-requests: read # a hotfix's merge commits
     outputs:
+      action: ${{ steps.plan.outputs.action }}
+      mode: ${{ steps.plan.outputs.mode }}
+      proposals: ${{ steps.plan.outputs.proposals }}
       lane: ${{ steps.plan.outputs.lane }}
       version: ${{ steps.plan.outputs.version }}
       base: ${{ steps.plan.outputs.base }}
@@ -138,3 +145,38 @@ jobs:
           REASON: ${{ steps.plan.outputs.reason }} # may quote an issue title: never inline it
         run: |
           printf 'No release: %s\n' "$REASON" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report a proposal
+        if: steps.plan.outputs.action == 'propose'
+        env:
+          REASON: ${{ steps.plan.outputs.reason }} # may quote an issue title: never inline it
+          MODE: ${{ steps.plan.outputs.mode }}
+        run: |
+          printf 'Proposed, not released (%s): %s\n' "$MODE" "$REASON" >> "$GITHUB_STEP_SUMMARY"
+
+  # Opens or updates the issue for each lane the plan proposed. It sets no permissions, so
+  # it runs with the caller's grant: proposing needs `issues: write` on the caller's prepare
+  # job, and a caller without it fails here, after nothing was released
+  propose:
+    needs: prepare
+    if: needs.prepare.outputs.action == 'propose' && needs.prepare.outputs.mode == 'release'
+    concurrency:
+      group: shipyard
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+
+      - uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Open or update the proposal issues
+        shell: bash # -eo pipefail: a failed propose fails the step, though its output goes through tee
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOOL: ${{ inputs.tool }}
+          PROPOSALS: ${{ needs.prepare.outputs.proposals }}
+        run: |
+          uvx --from "$TOOL" shipyard propose --proposals "$PROPOSALS" | tee -a "$GITHUB_STEP_SUMMARY"

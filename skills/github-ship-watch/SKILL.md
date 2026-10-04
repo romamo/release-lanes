@@ -21,6 +21,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 2. **One repair per finding per pass.** Rerun a failed job once. If it fails again, the next pass reports it rather than looping on reruns
 3. **Read state right before acting.** Another session may be landing PRs or releasing in the same repo. Check `gh run list` before starting a lane, and follow a peer's hold (see github-pr-triage, hard rule 5)
 4. **A repo with `release-blocker` open is held on purpose.** A stalled bot behind a blocker isn't stalled: report it, don't start a lane
+5. **An open `shipyard-hold` issue stops the factory on purpose.** A person pulled the stop switch: report the hold (`gh issue list --label shipyard-hold`: its number and title), never start a lane or close the issue. A plan under the hold, or under `[autonomy] release = "propose"`, proposes instead of releasing, so it never reads as BOT_STALLED; the proposal issue is for a person to act on
 
 ## The script
 

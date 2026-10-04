@@ -230,10 +230,6 @@ def test_doctor_fails_a_local_uv_source(repo: Repo) -> None:
 
 def test_cli_plan_and_prepare(repo: Repo, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     repo.merge(1, "Added", "Feature A")
-    # no blocker label: the CLI talks to GitHub through gh, which this repo has no remote for
-    policy = repo.read(repo.policy_file).replace("[lanes.dev]", '[gates]\nblocker_label = ""\n\n[lanes.dev]')
-    repo.write(repo.policy_file, policy)
-    repo.git.run("commit", "-qam", "No blocker label")
     out = tmp_path / "out"
     code = main(
         [
@@ -248,7 +244,8 @@ def test_cli_plan_and_prepare(repo: Repo, tmp_path: Path, capsys: pytest.Capture
             "2026-10-06T08:00:00+00:00",
             "--github-output",
             str(out),
-        ]
+        ],
+        repo.github,
     )
     assert code == 0
     decision = json.loads(capsys.readouterr().out)

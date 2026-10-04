@@ -17,6 +17,19 @@ bot.
   `doctor` checks each workflow takes both inputs and that a job sets `environment:`, so
   GitHub records a deployment; `init` writes a commented example (#29)
 
+- `[autonomy]` in `.github/shipyard.toml` sets each stage to `observe`, `propose`, or `act`
+  (`release`, `deploy.<environment>`, and `rollback`, all `act` by default), and an open
+  issue labelled `shipyard-hold` turns every `act` into `propose`. Under `release =
+  "observe"` a due lane is only reported; under `"propose"`, or while a hold is open, the
+  new `propose` job of `prepare.yml` opens or updates one "Ready to release vX on <lane>"
+  issue per due lane instead of releasing. A lane started by hand still releases under
+  propose; under a hold only a hotfix started by hand does. `doctor` prints the effective
+  autonomy per stage and warns on an open hold. Proposing needs `issues: write` on the
+  prepare job of the calling workflow, which `shipyard init` now writes; `doctor` warns
+  about it only once a stage is set to propose or a hold is open. Each `deploy.<name>` must
+  name an environment in `[environments]`. Deploy and rollback autonomy take effect once
+  shipyard deploys (#32)
+
 ## [0.7.0] - 2026-10-04
 
 ### Fixed
