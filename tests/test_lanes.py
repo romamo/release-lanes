@@ -349,7 +349,7 @@ def test_land_deploys_each_environment_that_takes_the_lane(repo: Repo) -> None:
     # each environment that takes the lane, once; production is promoted from staging, and
     # nightly takes the dev lane
     assert repo.github.dispatched == [
-        ("deploy.yml", "main", "v1.1.0rc1", {"environment": "staging"}),
-        ("preview.yml", "main", "v1.1.0rc1", {"environment": "preview"}),
+        ("deploy.yml", "v1.1.0rc1", "v1.1.0rc1", {"environment": "staging"}),
+        ("preview.yml", "v1.1.0rc1", "v1.1.0rc1", {"environment": "preview"}),
     ]
     assert landed.published == ("github-release", "deploy.yml@staging", "preview.yml@preview")

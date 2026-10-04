@@ -16,6 +16,7 @@ from shipyard.policy import ALIAS_PATH, CONFIG_PATH, BumpFrom, Policy, VersionFi
 from shipyard.stamp import project_version
 
 CALLER = Path(".github") / "workflows" / "release.yml"
+OPERATE_CALLER = Path(".github") / "workflows" / "operate.yml"  # calls shipyard's operate.yml on a schedule
 _BOT_WORKFLOWS = ("prepare.yml", "land.yml")
 _LOCAL_USES = re.compile(r"uses:\s*\./\.github/workflows/(?P<file>[\w.-]+\.ya?ml)")
 
@@ -48,7 +49,10 @@ def doctor(root: Path, github: GitHub | None = None) -> list[Check]:
             " `tool` is this release or newer"
         )
         add(False, "config", detail, warn=True)
-    checks.extend(_autonomy(policy, github, root / CALLER))
+    autonomy, hold = _autonomy(policy, github, root / CALLER)
+    checks.extend(autonomy)
+    if (operated := _operate(policy, hold, root / OPERATE_CALLER)) is not None:
+        checks.append(operated)
 
     git = Git(root)
     add(git.ok("remote", "get-url", "origin"), "remote", "an 'origin' remote to push releases to")
@@ -182,7 +186,7 @@ def _sets_environment(path: Path, seen: set[Path]) -> bool:
     return False
 
 
-def _autonomy(policy: Policy, github: GitHub | None, caller: Path) -> list[Check]:
+def _autonomy(policy: Policy, github: GitHub | None, caller: Path) -> tuple[list[Check], Hold]:
     """The effective autonomy per stage, and the stop switch: an open hold is a WARN, and so
     is a caller that can't open the issue a hold or propose leads to, when one can"""
     checks = []
@@ -210,29 +214,62 @@ def _autonomy(policy: Policy, github: GitHub | None, caller: Path) -> list[Check
     detail = ", ".join(levels) + f"; {other} deploy environment {default}"
     if hold.on:
         detail += f" ({hold.reason})"
-    checks.append(Check("PASS", "autonomy", detail + "; deploy and rollback take effect once shipyard deploys"))
+    checks.append(
+        Check("PASS", "autonomy", detail + "; deploy acts in shipyard operate, rollback once shipyard rolls back")
+    )
     proposes = any(policy.autonomy.configured(stage) is Autonomy.PROPOSE for stage in policy.autonomy.stages())
-    if (proposes or hold.on) and caller.is_file() and _prepare_job_writes_issues(caller.read_text("utf-8")) is False:
+    if (
+        (proposes or hold.on)
+        and caller.is_file()
+        and _job_grants(caller.read_text("utf-8"), "prepare.yml", "issues") is False
+    ):
         why = hold.reason if hold.on else "the config sets a stage to propose"
         detail = (
             f"{why}, so a run opens a proposal issue, but the prepare job in {CALLER} grants no"
             " `issues: write`: change its `issues: read` to `issues: write`"
         )
         checks.append(Check("WARN", "permissions", detail))
-    return checks
+    return checks, hold
+
+
+def _operate(policy: Policy, hold: Hold, caller: Path) -> Check | None:
+    """The operate caller, only when an environment is promoted or has a health URL (D-9):
+    it runs on a schedule, writes deployment statuses, and starts deploy workflows"""
+    used = [e.name for e in policy.environments.values() if e.source is not None or e.health]
+    if not used:
+        return None
+    why = f"{', '.join(used)} {'uses' if len(used) == 1 else 'use'} from or health"
+    if not caller.is_file():
+        detail = f"{why}, but no {OPERATE_CALLER} runs shipyard operate: `shipyard init --operate` writes it"
+        return Check("WARN", "operate", detail)
+    text = caller.read_text(encoding="utf-8")
+    if _job_grants(text, "operate.yml", "deployments") is None:
+        return Check("WARN", "operate", f"{why}, but no job in {OPERATE_CALLER} calls shipyard's operate.yml")
+    needed = ["deployments", "actions"]
+    proposes = any(policy.autonomy.configured(s) is Autonomy.PROPOSE for s in policy.autonomy.stages())
+    if proposes or hold.on:
+        needed.append("issues")  # the proposal issue a deploy under propose or the hold opens
+    missing = [f"{name}: write" for name in needed if not _job_grants(text, "operate.yml", name)]
+    if missing:
+        return Check(
+            "WARN", "operate", f"the job in {OPERATE_CALLER} that calls operate.yml lacks {', '.join(missing)}"
+        )
+    return Check("PASS", "operate", f"{OPERATE_CALLER} runs shipyard operate with {', '.join(needed)}: write")
 
 
 _JOB = re.compile(r"^  (?P<name>[\w-]+):[ \t]*(?:#.*)?$", re.MULTILINE)
 
 
-def _prepare_job_writes_issues(text: str) -> bool | None:
-    """Whether the caller's job that calls prepare.yml grants `issues: write`; None when no
-    job calls it. A text check, not a YAML parse: a job runs to the next two-space key"""
+def _job_grants(text: str, workflow: str, permission: str) -> bool | None:
+    """Whether the caller's job that calls shipyard's workflow grants `<permission>: write`;
+    None when no job calls it. A text check, not a YAML parse: a job runs to the next
+    two-space key"""
     starts = [m.start() for m in _JOB.finditer(text)] + [len(text)]
     for start, end in zip(starts, starts[1:], strict=False):
         job = text[start:end]
-        if re.search(r"^\s+uses:\s*\S*\.github/workflows/prepare\.yml\b", job, re.MULTILINE):
-            return re.search(r"^\s+(?:issues:\s*write|permissions:\s*write-all)\b", job, re.MULTILINE) is not None
+        if re.search(rf"^\s+uses:\s*\S*\.github/workflows/{re.escape(workflow)}\b", job, re.MULTILINE):
+            grant = rf"^\s+(?:{permission}:\s*write|permissions:\s*write-all)\b"
+            return re.search(grant, job, re.MULTILINE) is not None
     return None
 
 

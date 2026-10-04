@@ -1,11 +1,13 @@
 """What the bot asks of GitHub, behind a protocol so tests pass their own"""
 
+import datetime as dt
 import json
 import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from shipyard.errors import ReleaseError
 
@@ -21,6 +23,46 @@ class Issue:
     number: int
     title: str
     body: str
+
+
+class DeploymentState(StrEnum):
+    """A deployment status's state, as GitHub's REST API names it"""
+
+    ERROR = "error"
+    FAILURE = "failure"
+    INACTIVE = "inactive"
+    IN_PROGRESS = "in_progress"
+    QUEUED = "queued"
+    PENDING = "pending"
+    SUCCESS = "success"
+    WAITING = "waiting"  # an Actions job held by the environment's protection rules
+
+
+@dataclass(frozen=True, slots=True)
+class Deployment:
+    """A GitHub deployment: what ran where. `ref` is the branch, tag, or sha it was made from"""
+
+    id: int
+    ref: str
+    sha: str
+    created_at: dt.datetime
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentStatus:
+    id: int  # increases with each status, so it orders them where created_at ties
+    state: DeploymentState
+    created_at: dt.datetime
+    description: str
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowRun:
+    """A run of a workflow: `status` is GitHub's (queued, in_progress, waiting, completed, ...)"""
+
+    id: int
+    status: str
+    created_at: dt.datetime
 
 
 class GitHub(Protocol):
@@ -47,6 +89,31 @@ class GitHub(Protocol):
     def create_issue(self, title: str, body: str) -> int: ...
 
     def update_issue(self, number: int, title: str, body: str) -> None: ...
+
+    def close_issue(self, number: int, comment: str) -> None: ...
+
+    def deployments(self, environment: str) -> list[Deployment]:
+        """The environment's deployments, newest first (the newest 100)"""
+        ...
+
+    def deployment_statuses(self, deployment: int) -> list[DeploymentStatus]:
+        """The deployment's statuses, oldest first (the newest 100)"""
+        ...
+
+    def create_deployment_status(self, deployment: int, state: DeploymentState, description: str) -> None:
+        """Add a status, leaving the environment's other deployments as they are"""
+        ...
+
+    def workflow_runs(self, workflow: str, ref: str) -> list[WorkflowRun]:
+        """The workflow's runs on the branch or tag, newest first (the newest 100)"""
+        ...
+
+
+def _time(text: str) -> dt.datetime:
+    when = dt.datetime.fromisoformat(text)
+    if when.tzinfo is None:
+        raise ReleaseError(f"GitHub sent a time without a zone: {text!r}")
+    return when
 
 
 class GhCli:
@@ -117,3 +184,48 @@ class GhCli:
 
     def update_issue(self, number: int, title: str, body: str) -> None:
         self._gh("issue", "edit", str(number), "--title", title, "--body", body)
+
+    def close_issue(self, number: int, comment: str) -> None:
+        self._gh("issue", "close", str(number), "--comment", comment)
+
+    def _api(self, *args: str) -> Any:
+        return json.loads(self._gh("api", *args))
+
+    def deployments(self, environment: str) -> list[Deployment]:
+        found = self._api(
+            "-X", "GET", "repos/{owner}/{repo}/deployments", "-f", f"environment={environment}", "-f", "per_page=100"
+        )
+        deployments = [Deployment(int(d["id"]), str(d["ref"]), str(d["sha"]), _time(d["created_at"])) for d in found]
+        return sorted(deployments, key=lambda d: d.id, reverse=True)
+
+    def deployment_statuses(self, deployment: int) -> list[DeploymentStatus]:
+        found = self._api(
+            "-X", "GET", f"repos/{{owner}}/{{repo}}/deployments/{deployment}/statuses", "-f", "per_page=100"
+        )
+        statuses = [
+            DeploymentStatus(int(s["id"]), DeploymentState(s["state"]), _time(s["created_at"]), s["description"] or "")
+            for s in found
+        ]
+        return sorted(statuses, key=lambda s: s.id)
+
+    def create_deployment_status(self, deployment: int, state: DeploymentState, description: str) -> None:
+        self._gh(
+            "api",
+            "-X",
+            "POST",
+            f"repos/{{owner}}/{{repo}}/deployments/{deployment}/statuses",
+            "-f",
+            f"state={state}",
+            "-f",
+            f"description={description}",
+            "-F",
+            "auto_inactive=false",
+        )
+
+    def workflow_runs(self, workflow: str, ref: str) -> list[WorkflowRun]:
+        found = self._api(
+            "-X", "GET", f"repos/{{owner}}/{{repo}}/actions/workflows/{workflow}/runs", "-f", f"branch={ref}",
+            "-f", "per_page=100",
+        )  # fmt: skip
+        runs = [WorkflowRun(int(r["id"]), str(r["status"]), _time(r["created_at"])) for r in found["workflow_runs"]]
+        return sorted(runs, key=lambda r: r.id, reverse=True)

@@ -141,7 +141,8 @@ def land(
         github.dispatch(workflow, policy.branch, version.tag)
         published.append(workflow)
     for env in deployed_from(policy.environments, lane):
-        github.dispatch(env.workflow, policy.branch, version.tag, env.inputs)
+        # on the tag, so the deployment GitHub records names it as its ref: operate reads it there
+        github.dispatch(env.workflow, version.tag, version.tag, env.inputs)
         published.append(f"{env.workflow}@{env.name}")
     return Landed(version.tag, placed, synced, tuple(published))
 

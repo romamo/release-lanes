@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from shipyard.autonomy import HOLD_LABEL
-from shipyard.github import Issue, Milestone
+from shipyard.github import Deployment, DeploymentState, DeploymentStatus, Issue, Milestone, WorkflowRun
 from shipyard.gitrepo import Git
 from shipyard.policy import ALIAS_PATH, CONFIG_PATH, Policy, config_path
 
@@ -99,6 +99,25 @@ class FakeGitHub:
     merges: dict[int, str] = field(default_factory=dict)
     releases: list[tuple[str, str, str, bool]] = field(default_factory=list)
     dispatched: list[tuple[str, str, str, dict[str, str]]] = field(default_factory=list)
+    closed: dict[int, str] = field(default_factory=dict)  # issues closed, with their comment
+    now: dt.datetime = T0  # when a status written now is created
+    envs: dict[str, list[Deployment]] = field(default_factory=dict)  # deployments by environment, newest first
+    statuses: dict[int, list[DeploymentStatus]] = field(default_factory=dict)  # by deployment, oldest first
+    status_writes: list[tuple[int, DeploymentState, str]] = field(default_factory=list)
+    runs: list[tuple[str, str, WorkflowRun]] = field(default_factory=list)  # (workflow, ref, run), as dispatched
+
+    def deploy(self, environment: str, ref: str, at: dt.datetime, *states: DeploymentState) -> int:
+        """Record a deployment of ref, with its statuses one minute apart from at; its id"""
+        number = 1000 + sum(len(d) for d in self.envs.values())
+        self.envs.setdefault(environment, []).insert(0, Deployment(number, ref, "0" * 40, at))
+        self.statuses[number] = []
+        for i, state in enumerate(states):
+            self._status(number, state, "", at + dt.timedelta(minutes=i))
+        return number
+
+    def _status(self, deployment: int, state: DeploymentState, description: str, at: dt.datetime) -> None:
+        number = 1 + sum(len(s) for s in self.statuses.values())
+        self.statuses[deployment].append(DeploymentStatus(number, state, at, description))
 
     def open_issues(self, label: str) -> list[str]:
         self.labels_read.append(label)
@@ -115,6 +134,10 @@ class FakeGitHub:
 
     def dispatch(self, workflow: str, ref: str, tag: str, inputs: Mapping[str, str] | None = None) -> None:
         self.dispatched.append((workflow, ref, tag, dict(inputs or {})))
+        self.runs.append((workflow, ref, WorkflowRun(len(self.runs) + 1, "queued", self.now)))
+
+    def workflow_runs(self, workflow: str, ref: str) -> list[WorkflowRun]:
+        return [run for w, r, run in reversed(self.runs) if (w, r) == (workflow, ref)]
 
     def find_issue(self, marker: str) -> Issue | None:
         hits = [i for i in self.issues.values() if marker in i.body]
@@ -128,6 +151,20 @@ class FakeGitHub:
     def update_issue(self, number: int, title: str, body: str) -> None:
         self.issues[number] = Issue(number, title, body)
         self.edits += 1
+
+    def close_issue(self, number: int, comment: str) -> None:
+        del self.issues[number]
+        self.closed[number] = comment
+
+    def deployments(self, environment: str) -> list[Deployment]:
+        return list(self.envs.get(environment, []))
+
+    def deployment_statuses(self, deployment: int) -> list[DeploymentStatus]:
+        return list(self.statuses[deployment])
+
+    def create_deployment_status(self, deployment: int, state: DeploymentState, description: str) -> None:
+        self.status_writes.append((deployment, state, description))
+        self._status(deployment, state, description, self.now)
 
 
 @dataclass

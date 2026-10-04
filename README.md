@@ -92,6 +92,8 @@ uvx --from git+https://github.com/romamo/shipyard@v0 shipyard doctor
 - A workflow for each `dispatch` entry that runs on `workflow_dispatch` with a `tag` input
 - For each environment, a workflow that runs on `workflow_dispatch` with `tag` and
   `environment` inputs, and a job that sets `environment:`
+- When an environment uses `from` or `health`, `.github/workflows/operate.yml` (from
+  `shipyard init --operate`) granting `deployments: write` and `actions: write`
 - No `[tool.uv.sources]` entry taken from a local path, which CI and users don't have
 - No branch named `shipyard` on origin, which would block the `shipyard/<tag>` work branches
 
@@ -203,11 +205,49 @@ bake_minutes = 60                 # how long staging stays healthy before promot
 
 An environment sets exactly one of `lane` (a lane the policy enables) or `from` (another
 environment, in a chain that ends at a `lane` one, with no cycle). After `land` publishes a
-release, it starts the workflow of every environment whose `lane` is the release's, with
-`-f tag=v<version> -f environment=<name>`, and lists it as `deploy.yml@staging`. The
-workflow's job sets `environment: ${{ inputs.environment }}`, so GitHub records a deployment
-for each run: those deployments, not shipyard, say what runs where. shipyard does not
-promote `from` environments yet; `health` and `bake_minutes` are read for that.
+release, it starts the workflow of every environment whose `lane` is the release's, on the
+tag, with `-f tag=v<version> -f environment=<name>`, and lists it as `deploy.yml@staging`.
+The workflow's job sets `environment: ${{ inputs.environment }}`, so GitHub records a
+deployment for each run, whose ref is the tag: those deployments, not shipyard, say what
+runs where.
+
+#### Operate: health, bake, and promotion
+
+With `from` or `health` in use, run `shipyard init --operate`. It writes
+`.github/workflows/operate.yml`, which runs `shipyard operate` every 10 minutes, one run at
+a time. Each run, for every environment:
+
+- **Current deployment**: the newest GitHub deployment there that reached `success`, and
+  its tag (the deployment's ref)
+- **Health**: a GET of `health` that answers 2xx within 10 s. When the body is a JSON
+  object with a string `version`, it must name the deployed release (`1.2.0` or `v1.2.0`),
+  so a stale instance answering 200 isn't counted healthy; any other body isn't read. An
+  environment without `health` is reported as such and bakes on time alone
+- **Health history**: recorded as statuses on that deployment, written only when the state
+  changes: `in_progress` while it bakes, `success` once baked, `failure` on a failed check.
+  Nothing is kept outside GitHub
+- **Bake and promotion**: an environment with `from` gets the source's tag once the source
+  has been healthy on it for `bake_minutes`, counted from the source deployment's success,
+  every check since passing. A failed check restarts the bake from the next passing one
+- **A missed deploy**: an environment with `lane` that is behind its lane's newest tag
+  (land's dispatch failed, say) gets that tag, 30 minutes after it was tagged. Hotfix
+  tags look like stable ones, so a `hotfix` environment isn't checked
+
+Either deploy follows `deploy.<environment>` in `[autonomy]` under the hold: `act` (the
+default) starts the environment's workflow on the tag; `propose`, or `act` while a
+`shipyard-hold` issue is open, opens one "Ready to promote vX to `<environment>`" issue and
+keeps it up to date; `observe` only reports. shipyard deploys a tag to an environment at
+most once: a deployment of that tag there, in any state, means it was tried, and so does a
+run of its workflow on the tag (still queued, or failed before its deploy job made a
+deployment); a failed one is not retried. Approve a proposal with `gh workflow run operate.yml -f
+approve=<environment> -f dry-run=false`: it deploys the proposed tag once and closes the
+issue, under `propose` or `observe`, but not while a hold is open. The run summary lists
+each environment's tag, health, and what the run did; `shipyard operate --dry-run` shows the
+same and changes nothing.
+
+The operate job needs `deployments: write` (statuses) and `actions: write` (deploys), and
+`issues: write` to open a proposal; `init --operate` grants them, and `doctor` warns when
+one is missing, only once an environment uses `from` or `health`.
 
 ### Autonomy and the stop switch
 
@@ -240,8 +280,9 @@ Opening the proposal issue needs `issues: write` on the prepare job in your
 grants `issues: read`, which is enough until a stage is set to `propose` or a hold is
 opened; from then on `doctor` warns until the prepare job grants `issues: write`. `doctor`
 prints the effective autonomy per stage and warns while a hold is open. Each `deploy.<name>`
-must name an environment in `[environments]`. `deploy` and `rollback` are read and checked
-now, and take effect once shipyard deploys and rolls back.
+must name an environment in `[environments]`. `deploy` takes effect in `shipyard operate`
+(see Operate above); `rollback` is read and checked now, and takes effect once shipyard
+rolls back.
 
 ### Versions
 
@@ -259,7 +300,8 @@ The workflows call these; you can run them locally too.
 
 | Command | What it does |
 |---|---|
-| `init` | Write the policy and the calling workflow |
+| `init` | Write the policy and the calling workflow; `--operate` writes the operate one |
+| `operate` | Check environment health, promote after the bake; `--approve <env>`, `--dry-run` |
 | `doctor` | Check the repository is ready; exit 1 on a failure |
 | `plan` | Decide whether a lane releases now; JSON on stdout |
 | `propose` | Open or update the issue for each release a plan proposed |

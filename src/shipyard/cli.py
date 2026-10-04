@@ -8,8 +8,9 @@
   cleanup         delete a release commit's work branch
   sync            bring a stable release made off main into main's CHANGELOG (recovery)
   notes           print a release's notes
+  operate         check environment health, promote after the bake, approve a proposed deploy
   doctor          check that the repository is ready for the bot
-  init            write a starting policy and the calling workflow
+  init            write a starting policy and the calling workflow (--operate: the operate one)
   gate            start a Claude Code session for the repo only when its state needs one
 
 Exit codes: 0 done (a plan may skip); 1 doctor found a failure; 2 bad input or a refused state.
@@ -25,14 +26,15 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from shipyard.agents import AgentsConfig
-from shipyard.doctor import CALLER, doctor
+from shipyard.doctor import CALLER, OPERATE_CALLER, doctor
 from shipyard.errors import ReleaseError
 from shipyard.gate import ClaudeCli, check_checkout, gate, refresh, watch
 from shipyard.github import GhCli, GitHub
 from shipyard.gitrepo import Git
-from shipyard.init import init
+from shipyard.init import init, init_operate
 from shipyard.land import cleanup, land, prepare
 from shipyard.launchd import DEFAULT_TOOL, build, install, remove
+from shipyard.operate import Http, UrllibHttp, approve, operate, summary
 from shipyard.planner import Event, Hotfix, Planner, Proposal
 from shipyard.policy import ALIAS_PATH, CONFIG_PATH, Lane, Policy, config_path
 from shipyard.propose import propose
@@ -123,6 +125,17 @@ def _parser() -> argparse.ArgumentParser:
     p = sub.add_parser("notes", help="print a release's notes, from its tag")
     p.add_argument("--version", required=True, type=Version.parse)
 
+    p = sub.add_parser("operate", help="check environment health, promote after the bake")
+    p.add_argument("--dry-run", action="store_true", help="report what it would do; write and start nothing")
+    p.add_argument("--approve", metavar="ENVIRONMENT", help="deploy the tag proposed for this environment, once")
+    p.add_argument("--now", help="ISO time with offset (default: now)")
+    p.add_argument(
+        "--step-summary",
+        type=Path,
+        default=os.environ.get("GITHUB_STEP_SUMMARY") or None,
+        help="also append the report here (default: $GITHUB_STEP_SUMMARY)",
+    )
+
     sub.add_parser("doctor", help="check that the repository is ready for the bot")
 
     p = sub.add_parser("init", help=f"write {CONFIG_PATH} and {CALLER}")
@@ -131,6 +144,11 @@ def _parser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help=f"overwrite existing files; an existing {ALIAS_PATH} is replaced by {CONFIG_PATH}",
+    )
+    p.add_argument(
+        "--operate",
+        action="store_true",
+        help=f"write only {OPERATE_CALLER}, which runs shipyard operate every 10 minutes",
     )
 
     p = sub.add_parser(
@@ -161,11 +179,15 @@ def _release_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--version", required=True, type=Version.parse)
 
 
-def main(argv: list[str], github: GitHub | None = None) -> int:
-    """github stands in for gh, as tests pass a fake"""
+def main(argv: list[str], github: GitHub | None = None, http: Http | None = None) -> int:
+    """github stands in for gh, and http for the health checks, as tests pass fakes"""
     args = _parser().parse_args(argv)
     root: Path = args.repo.resolve()
     hub = github or GhCli(root)
+    if args.command == "init" and args.operate:
+        print(f"wrote {init_operate(root, args.force).relative_to(root)}")
+        print("next: run `shipyard doctor`")
+        return 0
     if args.command == "init":
         initialized = init(root, args.ci, args.force)
         for path in initialized.written:
@@ -243,6 +265,16 @@ def main(argv: list[str], github: GitHub | None = None) -> int:
         newest = all(t.version <= args.version for t in git.tags() if t.version.is_stable)
         for changed in sync(git, policy, args.version, released, args.date or today, newest):
             print(f"synced {changed}")
+    elif args.command == "operate":
+        if args.approve:
+            report = approve(policy, hub, args.approve, args.dry_run) + "\n"
+        else:
+            reports = operate(policy, git.tags(), hub, http or UrllibHttp(), _now(args.now), args.dry_run)
+            report = summary(reports, args.dry_run)
+        sys.stdout.write(report)
+        if args.step_summary is not None:
+            with args.step_summary.open("a", encoding="utf-8") as out:
+                out.write(report)
     elif args.command == "notes":
         text = git.show(args.version.tag, policy.changelog)
         if text is None:

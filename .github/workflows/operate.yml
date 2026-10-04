@@ -1,0 +1,53 @@
+name: shipyard operate
+
+# Called on a schedule by a repository's operate workflow (see `shipyard init --operate`).
+# It checks the health of each environment in [environments], records it as GitHub
+# deployment statuses, and promotes a release to an environment with `from` once its source
+# baked it (or opens the issue a deploy under propose or a hold waits on). With `approve`,
+# it deploys the tag proposed for that environment, once, instead.
+
+on:
+  workflow_call:
+    inputs:
+      approve:
+        description: "An environment whose proposed deploy to run; empty runs the checks"
+        type: string
+        default: ""
+      dry-run:
+        type: boolean
+        default: false
+      tool:
+        description: "Where uvx installs shipyard from"
+        type: string
+        default: "git+https://github.com/romamo/shipyard@v0"
+
+# No permissions here or on the job: it runs with the caller's grant, as a reusable job that
+# asks for more than its caller grants fails to start. It needs contents: read, deployments:
+# write, actions: write, and issues: write to open a proposal issue
+
+jobs:
+  operate:
+    # One operate at a time: a run that overlapped the previous one could deploy twice
+    concurrency:
+      group: shipyard-operate
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0 # the release tags, to tell a missed deploy
+
+      - uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Operate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOOL: ${{ inputs.tool }}
+          APPROVE: ${{ inputs.approve }}
+          DRY_RUN: ${{ inputs.dry-run && '--dry-run' || '' }}
+        run: |
+          args=(operate)
+          [ -n "$APPROVE" ] && args+=(--approve "$APPROVE")
+          [ -n "$DRY_RUN" ] && args+=(--dry-run)
+          uvx --from "$TOOL" shipyard "${args[@]}"

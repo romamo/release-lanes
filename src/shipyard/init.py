@@ -5,7 +5,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from shipyard.doctor import CALLER
+from shipyard.doctor import CALLER, OPERATE_CALLER
 from shipyard.errors import ReleaseError
 from shipyard.gitrepo import Git
 from shipyard.policy import ALIAS_PATH, CONFIG_PATH, Style, VersionFiles
@@ -117,14 +117,15 @@ github_release = true
 
 # Environments a release deploys to. The workflow runs on workflow_dispatch with `tag` and
 # `environment` inputs, and its job sets `environment: ${{{{ inputs.environment }}}}`, so
-# GitHub records a deployment for each run.
+# GitHub records a deployment for each run. With from or health, run `shipyard init
+# --operate`: its workflow checks health every 10 minutes and promotes after the bake.
 # [environments.staging]
 # lane = "rc"                       # deploy every release of this lane when it lands
 # workflow = "deploy.yml"
 # health = "https://staging.example.com/health"
 #
 # [environments.production]
-# from = "staging"                  # promoted from staging; shipyard does not promote yet
+# from = "staging"                  # promoted from staging once it baked there
 # workflow = "deploy.yml"
 # health = "https://example.com/health"
 # bake_minutes = 60                 # how long staging stays healthy before promotion
@@ -216,6 +217,47 @@ jobs:
 """
 
 
+def operate_caller_text() -> str:
+    uses = f"{BOT_REPO}/.github/workflows"
+    return f"""name: Operate
+
+# shipyard: https://github.com/{BOT_REPO}. Every 10 minutes shipyard operate checks the
+# health of each environment in .github/shipyard.toml, records it as GitHub deployment
+# statuses, and promotes a release once its source environment baked it. Approve a deploy
+# that waits on a proposal issue with: gh workflow run operate.yml -f approve=<environment>
+# -f dry-run=false
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      approve:
+        description: "Deploy the tag proposed for this environment, once"
+        type: string
+        default: ""
+      dry-run:
+        description: "Show what it would do, change nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  operate:
+    uses: {uses}/operate.yml@{BOT_REF}
+    with:
+      approve: ${{{{ inputs.approve || '' }}}}
+      dry-run: ${{{{ inputs.dry-run || false }}}}
+    permissions:
+      contents: read # the config and the release tags
+      deployments: write # reads deployments and records health as their statuses
+      actions: write # starts the deploy workflows
+      issues: write # the hold, and the issue a deploy under propose or the hold opens
+"""
+
+
 @dataclass(frozen=True, slots=True)
 class Initialized:
     written: tuple[Path, ...]
@@ -241,3 +283,13 @@ def init(root: Path, ci: str, force: bool) -> Initialized:
         alias.unlink()
         removed = alias
     return Initialized(tuple(path for path, _ in files), removed)
+
+
+def init_operate(root: Path, force: bool) -> Path:
+    """Write the operate caller, for a repository whose environments use from or health"""
+    path = root / OPERATE_CALLER
+    if path.exists() and not force:
+        raise ReleaseError(f"{OPERATE_CALLER} exists; pass --force to overwrite")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(operate_caller_text(), encoding="utf-8")
+    return path

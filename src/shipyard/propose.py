@@ -78,18 +78,23 @@ def propose(git: Git, policy: Policy, github: GitHub, proposals: tuple[Proposal,
         text = git.show(proposal.base, policy.changelog)
         if text is None:
             raise ReleaseError(f"no {policy.changelog} at {proposal.base[:12]}")
-        wanted = (title(proposal), body(policy, proposal, Changelog(text, policy.style).pending()))
-        try:
-            found = github.find_issue(marker(proposal.lane))
-            if found is None:
-                done.append(Proposed(proposal, github.create_issue(*wanted), Outcome.OPENED))
-            elif (found.title, found.body.replace("\r\n", "\n").strip()) == (wanted[0], wanted[1].strip()):
-                done.append(Proposed(proposal, found.number, Outcome.UNCHANGED))
-            else:
-                github.update_issue(found.number, *wanted)
-                done.append(Proposed(proposal, found.number, Outcome.UPDATED))
-        except ReleaseError as exc:
-            fix = f"change `issues: read` to `issues: write` on the prepare job in {CALLER}"
-            hint = f"if GitHub refused it (403): {fix}"
-            raise ReleaseError(f"{exc}; {hint}") from exc
+        wanted = body(policy, proposal, Changelog(text, policy.style).pending())
+        fix = f"change `issues: read` to `issues: write` on the prepare job in {CALLER}"
+        number, outcome = upsert(github, marker(proposal.lane), title(proposal), wanted, fix)
+        done.append(Proposed(proposal, number, outcome))
     return done
+
+
+def upsert(github: GitHub, mark: str, title: str, body: str, fix: str) -> tuple[int, Outcome]:
+    """Open the issue whose body holds the marker, or bring it up to date; fix says how to
+    grant `issues: write` when GitHub refuses"""
+    try:
+        found = github.find_issue(mark)
+        if found is None:
+            return github.create_issue(title, body), Outcome.OPENED
+        if (found.title, found.body.replace("\r\n", "\n").strip()) == (title, body.strip()):
+            return found.number, Outcome.UNCHANGED
+        github.update_issue(found.number, title, body)
+        return found.number, Outcome.UPDATED
+    except ReleaseError as exc:
+        raise ReleaseError(f"{exc}; if GitHub refused it (403): {fix}") from exc

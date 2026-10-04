@@ -40,3 +40,6 @@ jobs:
           print(caller_text(Detected('demo', 'main', Style.KEEP_A_CHANGELOG, VersionFiles.NONE), 'ci.yml'))
           " > "$RUNNER_TEMP/release.yml"
           uvx --from actionlint-py actionlint -ignore 'ci.yml' "$RUNNER_TEMP/release.yml"
+          uv run python -c "from shipyard.init import operate_caller_text; print(operate_caller_text())" \
+            > "$RUNNER_TEMP/operate.yml"
+          uvx --from actionlint-py actionlint "$RUNNER_TEMP/operate.yml"
