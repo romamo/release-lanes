@@ -22,10 +22,11 @@ def ts() -> ModuleType:
     return module
 
 
-def issue(*comments: tuple[str, str], labels: tuple[str, ...] = ()) -> dict[str, Any]:
+def issue(*comments: tuple[str, str], labels: tuple[str, ...] = (), body: str = "") -> dict[str, Any]:
     """Comments as (createdAt, body), oldest first, as GitHub returns them"""
     return {
         "number": 7,
+        "body": body,
         "labels": {"nodes": [{"name": n} for n in labels]},
         "comments": {"nodes": [{"createdAt": at, "body": body} for at, body in comments]},
         "timelineItems": {"nodes": []},
@@ -131,6 +132,7 @@ def open_issue(
     return {
         "number": number,
         "title": f"issue {number}",
+        "body": "",
         "labels": {"pageInfo": {"hasNextPage": more_labels}, "nodes": [{"name": n} for n in labels]},
         "comments": {"nodes": comments or []},
         "timelineItems": timeline or forward([]),
@@ -487,3 +489,56 @@ def test_backward_pages_back_off_mid_pagination(ts: ModuleType) -> None:
     comments = [("COMMENTS_PAGE", 100), ("COMMENTS_PAGE", 100), ("COMMENTS_PAGE", 50)] + [("COMMENTS_PAGE", 25)] * 4
     tags = [("TAGS_PAGE", 100), ("TAGS_PAGE", 50)] + [("TAGS_PAGE", 25)] * 5
     assert gh.calls == [("QUERY", 100), *comments, *tags]
+
+
+# Build issues split from a spec (#71): "Depends on" lines in the issue body are holds
+
+
+def test_depends_on_lines_name_issues_in_any_form(ts: ModuleType) -> None:
+    body = (
+        "Builds part of spec S-007.\n\n"
+        "Depends on #3\n"
+        "- Depends on: other/lib#4, #5\n"
+        "depends on https://github.com/o/r/issues/6\n"
+        "This depends on #9 only mid-sentence\n"
+        "Depends on #{B1}, a placeholder never filled in\n"
+    )
+    refs = ts.dependency_refs(issue(body=body), ("o", "r"))
+    assert refs == [("o", "r", 3), ("o", "r", 5), ("o", "r", 6), ("other", "lib", 4)]
+
+
+def test_a_body_dependency_reads_a_plain_number_anywhere_on_its_line(ts: ModuleType) -> None:
+    # A hold comment counts a plain #N only right after a hold phrase (#68); a "Depends on"
+    # line of the body is the dependency itself, so every #N on it counts, in any case
+    body = "DEPENDS ON: the parser (#3) and the docs, #4\n"
+    assert ts.dependency_refs(issue(body=body), ("o", "r")) == [("o", "r", 3), ("o", "r", 4)]
+    comment = issue(("2026-09-01T10:00:00Z", "On hold: depends on the parser (#3)"))
+    assert ts.upstream_refs(comment, ("o", "r")) == []
+
+
+def test_a_build_issue_is_blocked_until_its_dependency_closes(ts: ModuleType) -> None:
+    item = issue(("2026-09-01T10:00:00Z", "Triage: implement, a build issue of S-007"), body="Depends on #3\n")
+    for state, expected in (("OPEN", "BLOCKED"), ("CLOSED", "UNBLOCKED")):
+        states = {("o", "r", 3): state}
+        verdict = ts.classify_open(item, "Triage:", "postponed", states, None, ("o", "r"))
+        assert verdict == (expected, f"o/r#3:{state.lower()}")
+    both = issue(body="Depends on #3\nDepends on other/lib#4\n")
+    states = {("o", "r", 3): "CLOSED", ("other", "lib", 4): "OPEN"}
+    assert ts.classify_open(both, "Triage:", "postponed", states, None, ("o", "r"))[0] == "BLOCKED"
+
+
+def test_a_stacked_pr_on_an_open_dependency_reads_in_progress(ts: ModuleType) -> None:
+    item = issue(body="Depends on #3\n")
+    item["timelineItems"] = {"nodes": [{"willCloseTarget": True, "source": {"number": 8, "state": "OPEN"}}]}
+    states = {("o", "r", 3): "OPEN"}
+    assert ts.classify_open(item, "Triage:", "postponed", states, None, ("o", "r"))[0] == "IN_PROGRESS"
+
+
+def test_the_wip_limit_leaves_room_for_the_oldest_ready_issues(ts: ModuleType) -> None:
+    rows = [
+        {"number": n, "state": s}
+        for n, s in ((9, "NEEDS_PR"), (4, "UNBLOCKED"), (5, "IN_PROGRESS"), (6, "IN_PROGRESS"), (7, "BLOCKED"))
+    ]
+    assert ts.wip_room(rows, 3) == {"wip": 3, "in_progress": 2, "room": 1, "ready": [4, 9]}
+    assert ts.wip_room(rows, 2)["room"] == 0
+    assert ts.wip_room(rows, 1)["room"] == 0

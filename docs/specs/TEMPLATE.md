@@ -30,7 +30,8 @@ proves one names the id.
 
 ## Issues
 
-The build issues, filled in once they are filed, one `owner/repo#N` per line.
+The build issues, filled in once they are filed: one `- owner/repo#N: S-NNN-1, S-NNN-2` per
+line, naming the criteria that issue delivers. Each criterion belongs to exactly one.
 
 ## Verification
 

@@ -35,15 +35,38 @@ The line under the title says where a spec stands; `specs.py check` accepts only
 | `approved` | The spec PR merged with it: the build may start | The spec PR, when it's ready for review |
 | `built` | Every build issue is closed or closing, and each criterion was checked on the code | The PR that closes the last build issue |
 
-`specs.py check` refuses a `built` spec that lists no build issues, or whose Verification section leaves out a criterion id. It also refuses the template's placeholder text left word for word: a `draft` may keep it, an `approved` spec may not in Problem, Behaviour, Acceptance criteria, or Out of scope, and a `built` spec in any section. `specs.py coverage` (in CI) refuses a `built` spec with a criterion no test names.
+`specs.py check` refuses a `built` spec that lists no build issues, or whose Verification section leaves out a criterion id, and an `approved` or `built` spec whose Issues lines leave a criterion out or give one to two build issues. It also refuses the template's placeholder text left word for word: a `draft` may keep it, an `approved` spec may not in Problem, Behaviour, Acceptance criteria, or Out of scope, and a `built` spec in any section. `specs.py coverage` (in CI) refuses a `built` spec with a criterion no test names.
 
 ## When the spec merges
 
-The issue reads UNBLOCKED. Then:
+The issue reads UNBLOCKED. Edit its body to link the merged spec, then split the spec into build issues.
 
-- Edit the issue body to link the merged spec, and fill the spec's Issues section with the build issues in the next docs change (a feature may split into several issues; file them now)
-- Comment **implement** on each build issue, naming the spec, and dispatch implementers as usual
-- Each implementer brief carries the spec's criteria, from `specs.py criteria NNN` (see [implementer-brief.md](implementer-brief.md)). A departure from a criterion is a "decision for you", never a quiet deviation
+### Split it into build issues
+
+A build issue is sized for one PR. Group the criteria that change the same code into one issue, and give a criterion that needs another's code its own issue that depends on the earlier one. A small spec is one build issue.
+
+1. **Propose the graph.** `specs.py split NNN --repo <owner/repo> --group 1,2 --group 3 --after 2:1` prints one build issue per `--group` of criterion numbers, in the order given, with its title, its body naming its `S-NNN-k` criteria, and a `Depends on <owner/repo>#{Bk}` line for each `--after B:A` (B depends on A, and A comes first). With no `--group`, every criterion goes into one issue. It splits only an `approved` spec that passes `check`, and only the criteria no build issue has yet, so a spec that gained criteria later splits again for just those. `--json` prints the same as one object
+2. **File them in order.** `gh issue create --body-file` for each, replacing every `{Bk}` with the number the earlier issue got. `triage_state.py` reads each `Depends on` line as a hold: the issue reads BLOCKED while its dependency is open, UNBLOCKED once it closes
+3. **Link each as a sub-issue** of the feature issue, where the repo allows it (GitHub's GraphQL `addSubIssue`; a repo without sub-issues skips this step):
+
+   ```bash
+   parent=$(gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){issue(number:$n){id}}}' \
+     -f o=<owner> -f r=<repo> -F n=<feature> -q .data.repository.issue.id)
+   gh api graphql -f query='mutation($p:ID!,$u:String!){addSubIssue(input:{issueId:$p,subIssueUrl:$u}){subIssue{number}}}' \
+     -f p="$parent" -f u=https://github.com/<owner>/<repo>/issues/<build issue>
+   ```
+
+4. **Hold the feature issue on them.** Add a `Depends on <owner/repo>#N` line per build issue to the feature issue's body, so it reads BLOCKED while the build runs and UNBLOCKED when the last build issue closes
+5. **Record the assignment.** Fill the spec's Issues section with the lines `split` printed, numbers filled in, in one docs PR: `- owner/repo#N: S-NNN-1, S-NNN-2`. `specs.py check` then holds every criterion of an approved or built spec to exactly one build issue there; an approved spec with no Issues lines hasn't been split yet and passes
+6. **Comment implement** on each build issue, naming the spec, and dispatch as below
+
+### Dispatch the build
+
+- **Ready:** a build issue whose dependencies are all closed reads NEEDS_PR (or UNBLOCKED, once its last dependency closes). Dispatch it as usual
+- **Ready to stack:** a build issue whose only open dependencies have an open PR may start before that PR merges. Its implementer branches from the dependency's PR branch and opens its PR with that branch as the base, saying "Stacked on #PR" in the body; github-pr-triage lands the stack in order. Don't stack on a dependency with no PR yet
+- **WIP limit:** when `.github/shipyard.toml` has a `[roadmap]` table with `wip = N`, at most N issues are in progress (an open PR or a running implementer) at once. `triage_state.py --wip N` reports the room left and the ready issues, oldest first; build issues are filed in build order, so the oldest go first. With no `[roadmap] wip`, there is no limit
+- Each implementer brief carries the criteria its build issue delivers, from the issue body or `specs.py criteria NNN` (see [implementer-brief.md](implementer-brief.md)). A departure from a criterion is a "decision for you", never a quiet deviation
+- **The last build issue:** the brief for the one whose PR closes the last open build issue also carries "Verify the whole spec" below, and its PR body says `Fixes #<feature>` too, so the feature issue closes with it
 
 ## Tests name the criteria they prove
 
@@ -53,7 +76,7 @@ A test proves a criterion by its name, `test_s007_2_operate_exits_2_when_...` (G
 
 Tests prove what they assert, which can be narrower than the criterion. When the PR that closes a spec's last build issue is written, its agent checks each criterion against the code on the default branch plus that PR: runs the command, reads the output, opens the file. Then, in the same PR:
 
-- Set `status: built`, and fill in the Issues section with the build issues
+- Set `status: built`. The Issues section already lists the build issues and their criteria (Split it into build issues, step 5); `check` refuses a built spec without them
 - Under Verification, one line per criterion: `- S-NNN-k: <how it was checked>, <the result>`. A criterion that doesn't hold is a "decision for you", not a line in Verification
 - Run `specs.py check` and `specs.py coverage --spec NNN`; both must pass
 
