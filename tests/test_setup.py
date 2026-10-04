@@ -7,7 +7,7 @@ from shipyard.cli import main
 from shipyard.doctor import doctor
 from shipyard.errors import ReleaseError
 from shipyard.init import init
-from shipyard.policy import Policy
+from shipyard.policy import Policy, config_path
 
 from .conftest import Repo
 
@@ -35,10 +35,15 @@ jobs: {}
 
 
 def test_init_writes_a_policy_doctor_accepts(repo: Repo) -> None:
-    (repo.root / ".github" / "release-policy.toml").unlink()
+    (repo.root / ".github" / "shipyard.toml").unlink()
     repo.write(".github/workflows/ci.yml", CI)
-    written = init(repo.root, "ci.yml", force=False)
-    assert [p.name for p in written] == ["release-policy.toml", "release.yml"]
+    initialized = init(repo.root, "ci.yml", force=False)
+    written = initialized.written
+    assert [p.relative_to(repo.root).as_posix() for p in written] == [
+        ".github/shipyard.toml",
+        ".github/workflows/release.yml",
+    ]
+    assert initialized.removed is None
     policy = Policy.load(written[0])
     assert (policy.name, policy.branch, policy.style.value, policy.version_files.value) == (
         "demo",
@@ -51,16 +56,57 @@ def test_init_writes_a_policy_doctor_accepts(repo: Repo) -> None:
     assert "romamo/shipyard/.github/workflows/prepare.yml@v0" in caller
     checks = {c.name: c.status for c in doctor(repo.root)}
     assert checks["policy"] == checks["workflow"] == checks["ci"] == checks["changelog"] == "PASS"
-    with pytest.raises(ReleaseError, match="exists"):
+    assert "config" not in checks  # no alias to rename
+    with pytest.raises(ReleaseError, match="shipyard.toml, .github/workflows/release.yml exist; pass --force"):
         init(repo.root, "ci.yml", force=False)
+
+
+def test_init_refuses_an_alias_policy_and_force_replaces_it(repo: Repo) -> None:
+    repo.use_alias()
+    with pytest.raises(ReleaseError, match=r"^\.github/release-policy\.toml exists; pass --force"):
+        init(repo.root, "ci.yml", force=False)
+    assert not (repo.root / ".github" / "shipyard.toml").exists()  # nothing written on a refusal
+    initialized = init(repo.root, "ci.yml", force=True)
+    assert initialized.removed == repo.root / ".github" / "release-policy.toml"
+    assert not initialized.removed.exists()
+    assert repo.policy_file == ".github/shipyard.toml"
+
+
+def test_the_policy_loads_from_either_name_but_not_both(repo: Repo) -> None:
+    assert repo.policy_file == ".github/shipyard.toml"
+    assert repo.policy.name == "demo"
+    repo.use_alias()
+    assert repo.policy_file == ".github/release-policy.toml"
+    assert repo.policy.name == "demo"
+    repo.write(".github/shipyard.toml", repo.read(".github/release-policy.toml"))
+    with pytest.raises(ReleaseError, match="both .github/shipyard.toml and .github/release-policy.toml exist"):
+        config_path(repo.root)
+    [check] = [c for c in doctor(repo.root) if c.name == "policy"]
+    assert check.status == "FAIL" and "both" in check.detail
+    (repo.root / ".github" / "shipyard.toml").unlink()
+    (repo.root / ".github" / "release-policy.toml").unlink()
+    with pytest.raises(ReleaseError, match="no release policy at .*shipyard.toml \\(or its alias"):
+        config_path(repo.root)
+
+
+def test_doctor_names_the_policy_file_and_warns_on_the_alias(repo: Repo) -> None:
+    checks = {c.name: c for c in doctor(repo.root)}
+    assert checks["policy"].status == "PASS" and checks["policy"].detail.startswith(".github/shipyard.toml, mode")
+    assert "config" not in checks
+    repo.use_alias()
+    checks = {c.name: c for c in doctor(repo.root)}
+    assert checks["policy"].status == "PASS"
+    assert checks["policy"].detail.startswith(".github/release-policy.toml, mode")
+    assert checks["config"].status == "WARN"
+    assert checks["config"].detail.endswith(
+        "rename it to .github/shipyard.toml (git mv) once your Release workflow's `tool` is this release or newer"
+    )
 
 
 def test_doctor_reports_what_is_missing(repo: Repo) -> None:
     repo.write(
-        ".github/release-policy.toml",
-        repo.read(".github/release-policy.toml").replace(
-            "[lanes.hotfix]", '[lanes.hotfix]\ndispatch = ["publish.yml"]'
-        ),
+        repo.policy_file,
+        repo.read(repo.policy_file).replace("[lanes.hotfix]", '[lanes.hotfix]\ndispatch = ["publish.yml"]'),
     )
     failed = {c.name for c in doctor(repo.root) if c.status == "FAIL"}
     assert failed == {"workflow", "dispatch"}
@@ -91,10 +137,8 @@ def test_doctor_fails_a_local_uv_source(repo: Repo) -> None:
 def test_cli_plan_and_prepare(repo: Repo, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     repo.merge(1, "Added", "Feature A")
     # no blocker label: the CLI talks to GitHub through gh, which this repo has no remote for
-    policy = repo.read(".github/release-policy.toml").replace(
-        "[lanes.dev]", '[gates]\nblocker_label = ""\n\n[lanes.dev]'
-    )
-    repo.write(".github/release-policy.toml", policy)
+    policy = repo.read(repo.policy_file).replace("[lanes.dev]", '[gates]\nblocker_label = ""\n\n[lanes.dev]')
+    repo.write(repo.policy_file, policy)
     repo.git.run("commit", "-qam", "No blocker label")
     out = tmp_path / "out"
     code = main(
@@ -143,7 +187,7 @@ def test_cli_notes(repo: Repo, capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_init_ignores_a_placeholder_version(repo: Repo) -> None:
     repo.write("pyproject.toml", '[project]\nname = "demo"\nversion = "0.0.0"\n')
-    written = init(repo.root, "ci.yml", force=True)
+    written = init(repo.root, "ci.yml", force=True).written
     assert Policy.load(written[0]).version_files.value == "none"
 
 

@@ -68,10 +68,12 @@ def test_publish_states(ws: ModuleType) -> None:
     assert ws.publish_row(old, None, None, NOW, GRACE).state == "NO_REGISTRY"
 
 
-def test_bot_detection(ws: ModuleType, tmp_path: Path) -> None:
+@pytest.mark.parametrize("policy", ["shipyard.toml", "release-policy.toml"])
+def test_bot_detection(ws: ModuleType, tmp_path: Path, policy: str) -> None:
     assert ws.bot_workflow(tmp_path) is None
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
-    (tmp_path / ".github" / "release-policy.toml").write_text('mode = "release"\n')
+    (tmp_path / ".github" / policy).write_text('mode = "release"\n')
+    assert ws.policy_file(tmp_path) == Path(".github") / policy
     with pytest.raises(SystemExit):
         ws.bot_workflow(tmp_path)
     (tmp_path / ".github" / "workflows" / "release-bot.yml").write_text("name: Release bot\n")
@@ -79,6 +81,14 @@ def test_bot_detection(ws: ModuleType, tmp_path: Path) -> None:
     caller = "jobs:\n  prepare:\n    uses: romamo/shipyard/.github/workflows/prepare.yml@v0\n"
     (tmp_path / ".github" / "workflows" / "release.yml").write_text(caller)
     assert ws.bot_workflow(tmp_path) == ("release.yml", True)
+
+
+def test_both_policy_names_are_refused(ws: ModuleType, tmp_path: Path) -> None:
+    (tmp_path / ".github").mkdir()
+    for name in ("shipyard.toml", "release-policy.toml"):
+        (tmp_path / ".github" / name).write_text('mode = "release"\n')
+    with pytest.raises(SystemExit, match="both .github/shipyard.toml and .github/release-policy.toml"):
+        ws.bot_workflow(tmp_path)
 
 
 def test_package_name_reads_the_project_table(ws: ModuleType, tmp_path: Path) -> None:

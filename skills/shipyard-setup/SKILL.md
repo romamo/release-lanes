@@ -124,7 +124,9 @@ A project that only wants "release after merges stop" uses a single
 $CR init --ci <ci-file>.yml
 ```
 
-This writes `.github/release-policy.toml` (dry-run) and `.github/workflows/release.yml`.
+This writes `.github/shipyard.toml` (dry-run) and `.github/workflows/release.yml`. A repo
+that already has the older name, `.github/release-policy.toml`, keeps working with it; `init`
+refuses to write next to it, and `--force` replaces it with `.github/shipyard.toml`.
 Edit the policy to the user's choices from step 3, then add `version_lines` and
 `after_stamp` (for uv projects `["uv lock --check"]`; for a project with a docs check that
 reads the version, that command too).

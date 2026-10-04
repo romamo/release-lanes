@@ -59,7 +59,11 @@ def test_nothing_pending_skips_every_lane(repo: Repo) -> None:
     assert "dev: v1.0.0 already holds main's head" in decision.reason
 
 
-def test_rc_lane_cuts_a_detached_release(repo: Repo) -> None:
+@pytest.mark.parametrize("alias", [False, True], ids=["shipyard.toml", "release-policy.toml"])
+def test_rc_lane_cuts_a_detached_release(repo: Repo, alias: bool) -> None:
+    if alias:  # a repository set up before shipyard.toml releases as it did
+        repo.use_alias()
+        assert repo.policy_file == ".github/release-policy.toml"
     repo.merge(1, "Added", "Feature A", "src/a.py", "A = 1\n")
     main_before = repo.git.remote_branch("main")
     decision = plan(repo, at_day(1))
@@ -67,7 +71,7 @@ def test_rc_lane_cuts_a_detached_release(repo: Repo) -> None:
     sha = release(repo, decision)
     assert repo.git.remote_branch("main") == main_before  # a pre-release never moves main
     assert repo.git.remote_tag("v1.1.0rc1")
-    assert repo.git.show(sha, "pyproject.toml") is not None
+    assert repo.git.show(sha, repo.policy_file) is not None
     assert 'version = "1.1.0rc1"' in (repo.git.show(sha, "pyproject.toml") or "")
     assert 'version = "1.1.0rc1"' in (repo.git.show(sha, "uv.lock") or "")
     assert "demo 1.1.0rc1" in (repo.git.show(sha, "README.md") or "")
@@ -105,10 +109,8 @@ def test_blocker_and_freeze_hold_the_rc(repo: Repo) -> None:
     repo.github.blockers = []
     day = at_day(1).date()
     repo.write(
-        ".github/release-policy.toml",
-        repo.read(".github/release-policy.toml").replace(
-            "[lanes.dev]", f'[gates]\nfreeze = ["{day}..{day}"]\n\n[lanes.dev]'
-        ),
+        repo.policy_file,
+        repo.read(repo.policy_file).replace("[lanes.dev]", f'[gates]\nfreeze = ["{day}..{day}"]\n\n[lanes.dev]'),
     )
     decision = plan(repo, at_day(1))
     assert "frozen" in decision.reason and decision.action == "skip"
@@ -205,8 +207,8 @@ def test_dev_lane_waits_for_quiet(repo: Repo) -> None:
     repo.merge(1, "Fixed", "Fix A")
     decision = plan(repo, at_day(1, 10) + dt.timedelta(minutes=5), event=Event.PUSH)
     assert decision.action == "release" and decision.lane is Lane.RC  # today's rc window is still open
-    policy = repo.read(".github/release-policy.toml")
-    repo.write(".github/release-policy.toml", policy.replace('schedule = ["daily 07:00 UTC"]', "schedule = []"))
+    policy = repo.read(repo.policy_file)
+    repo.write(repo.policy_file, policy.replace('schedule = ["daily 07:00 UTC"]', "schedule = []"))
     decision = plan(repo, at_day(1, 10) + dt.timedelta(minutes=5), event=Event.PUSH)
     assert decision.action == "skip" and "no trigger is due" in decision.reason
     decision = plan(repo, at_day(1, 10) + dt.timedelta(minutes=31), event=Event.PUSH)
@@ -220,8 +222,8 @@ def test_dry_run_and_off(repo: Repo) -> None:
     planner = Planner(repo.git, repo.policy, repo.github, at_day(1))
     assert planner.plan(Event.SCHEDULE, dry_run=True).mode is Mode.DRY_RUN
     repo.write(
-        ".github/release-policy.toml",
-        repo.read(".github/release-policy.toml").replace('mode = "release"', 'mode = "off"'),
+        repo.policy_file,
+        repo.read(repo.policy_file).replace('mode = "release"', 'mode = "off"'),
     )
     assert plan(repo, at_day(1)).reason == "the policy's mode is off"
 

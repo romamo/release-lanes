@@ -1,5 +1,6 @@
-"""The release policy, .github/release-policy.toml: which lanes a project releases on, what
-makes each one due, what holds it, and what a release rewrites and publishes"""
+"""The release policy, in .github/shipyard.toml (or its alias .github/release-policy.toml):
+which lanes a project releases on, what makes each one due, what holds it, and what a
+release rewrites and publishes"""
 
 import re
 import shlex
@@ -14,8 +15,20 @@ from shipyard.errors import ReleaseError
 from shipyard.schedule import Freeze, Window
 from shipyard.version import Part
 
-POLICY_PATH = Path(".github") / "release-policy.toml"
+CONFIG_PATH = Path(".github") / "shipyard.toml"
+ALIAS_PATH = Path(".github") / "release-policy.toml"  # the policy's first name; the same keys
 _MAX_QUIET = 300  # a GitHub job runs at most 6 hours; leave room for the rest of the run
+
+
+def config_path(root: Path) -> Path:
+    """The file shipyard reads its settings from: .github/shipyard.toml, else its alias
+    .github/release-policy.toml. A repository may not have both."""
+    found = [root / p for p in (CONFIG_PATH, ALIAS_PATH) if (root / p).is_file()]
+    if len(found) > 1:
+        raise ReleaseError(f"both {CONFIG_PATH} and {ALIAS_PATH} exist; keep one, git rm the other")
+    if not found:
+        raise ReleaseError(f"no release policy at {root / CONFIG_PATH} (or its alias {ALIAS_PATH})")
+    return found[0]
 
 
 class Lane(StrEnum):

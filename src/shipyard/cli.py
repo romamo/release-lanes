@@ -21,14 +21,14 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
-from shipyard.doctor import doctor
+from shipyard.doctor import CALLER, doctor
 from shipyard.errors import ReleaseError
 from shipyard.github import GhCli
 from shipyard.gitrepo import Git
 from shipyard.init import init
 from shipyard.land import cleanup, land, prepare
 from shipyard.planner import Event, Hotfix, Planner
-from shipyard.policy import POLICY_PATH, Lane, Policy
+from shipyard.policy import ALIAS_PATH, CONFIG_PATH, Lane, Policy, config_path
 from shipyard.stamp import notes, sync
 from shipyard.version import Version
 
@@ -105,9 +105,13 @@ def _parser() -> argparse.ArgumentParser:
 
     sub.add_parser("doctor", help="check that the repository is ready for the bot")
 
-    p = sub.add_parser("init", help="write .github/release-policy.toml and .github/workflows/release.yml")
+    p = sub.add_parser("init", help=f"write {CONFIG_PATH} and {CALLER}")
     p.add_argument("--ci", default="ci.yml", help="the CI workflow a release commit must pass (default: ci.yml)")
-    p.add_argument("--force", action="store_true", help="overwrite existing files")
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help=f"overwrite existing files; an existing {ALIAS_PATH} is replaced by {CONFIG_PATH}",
+    )
     return parser
 
 
@@ -120,8 +124,11 @@ def main(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
     root: Path = args.repo.resolve()
     if args.command == "init":
-        for path in init(root, args.ci, args.force):
+        initialized = init(root, args.ci, args.force)
+        for path in initialized.written:
             print(f"wrote {path.relative_to(root)}")
+        if initialized.removed is not None:
+            print(f"removed {initialized.removed.relative_to(root)}, which {CONFIG_PATH} replaces")
         print("next: review the policy, then run `shipyard doctor`")
         return 0
     if args.command == "doctor":
@@ -130,7 +137,7 @@ def main(argv: list[str]) -> int:
             print(f"{check.status} {check.name}: {check.detail}")
         return 1 if any(c.status == "FAIL" for c in checks) else 0
 
-    policy = Policy.load(root / POLICY_PATH)
+    policy = Policy.load(config_path(root))
     git = Git(root, policy.bot_name, policy.bot_email)
     today = dt.datetime.now(dt.UTC).date()
     if args.command == "settle-minutes":
