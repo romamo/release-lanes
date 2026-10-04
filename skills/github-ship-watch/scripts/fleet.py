@@ -246,11 +246,19 @@ def error_row(step: str, proc: subprocess.CompletedProcess[str]) -> Row:
     return Row(REPO_ERROR, step, lines[0] if lines else f"{step} exited {proc.returncode}")
 
 
+def decoded(text: str, what: str) -> object:
+    """A script's JSON output; Refused when it isn't JSON (exit 2: a traceback's 1 reads as an action)"""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        raise Refused(f"error: {what} printed {text[:200]!r}, not JSON") from None
+
+
 def watch_rows(repo: str, out: str) -> list[Row]:
     """watch_state.py --json's lines, one row each"""
     rows = []
     for line in out.splitlines():
-        found = json.loads(line)
+        found = decoded(line, f"watch_state.py for {repo}")
         if not isinstance(found, dict) or set(found) != ROW_KEYS:
             raise Refused(f"error: watch_state.py for {repo} printed {line!r}, not a row")
         rows.append(Row(str(found["state"]), str(found["subject"]), str(found["detail"])))
@@ -273,7 +281,7 @@ def check(e: Entry, runner: Runner, workdir: Path, until: str | None) -> RepoRep
     measured = runner(metrics_command(e, until))
     if measured.returncode != 0:
         return RepoReport(e.repo, (*rows, error_row("metrics.py", measured)), None)
-    found = json.loads(measured.stdout)
+    found = decoded(measured.stdout, f"metrics.py for {e.repo}")
     if not isinstance(found, dict) or not isinstance(found.get("measures"), list):
         raise Refused(f"error: metrics.py for {e.repo} printed no measures")
     return RepoReport(e.repo, tuple(rows), found)

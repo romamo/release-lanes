@@ -5,6 +5,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -371,6 +372,79 @@ def test_a_watch_line_that_isnt_a_row_stops_the_report(fl: ModuleType) -> None:
     with pytest.raises(SystemExit) as refused:
         fl.watch_rows("o/r", '{"state": "BOT_OK"}\n')
     assert "not a row" in str(refused.value)
+
+
+def workdirs(fake: Fake) -> list[Path]:
+    """The folder each clone went into: <temp>/fleet-*/<owner>/<name>"""
+    return [Path(c[4]).parent.parent for c in fake.calls if c[:3] == ["gh", "repo", "clone"]]
+
+
+@pytest.mark.parametrize(
+    ("text", "failing"),
+    [
+        (FLEET, {}),
+        (THREE, {"owner/gone": ("clone", NOT_FOUND)}),
+        (FLEET, {"owner/other": ("watch_state.py", "error: HTTP 403")}),
+    ],
+)
+def test_the_clones_go_in_a_temporary_folder_removed_after_the_run(
+    fl: ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    text: str,
+    failing: dict[str, tuple[str, str]],
+) -> None:
+    fake = quiet_fake()
+    fake.failing = failing
+    fleet_run(fl, tmp_path, capsys, fake, text)
+    found = workdirs(fake)
+    assert len(found) == text.count("[[repos]]")
+    assert len(set(found)) == 1  # one folder for the run
+    assert found[0].name.startswith("fleet-")
+    assert found[0].parent.resolve() == Path(tempfile.gettempdir()).resolve()
+    assert not found[0].exists()
+
+
+@dataclass
+class Breaking(Fake):
+    """A fake whose watch_state.py prints a traceback, or whose run is interrupted"""
+
+    interrupt: bool = False
+
+    def __call__(self, cmd: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        done = super().__call__(cmd)
+        if Path(list(cmd)[1]).name != "watch_state.py":
+            return done
+        if self.interrupt:
+            raise KeyboardInterrupt
+        return proc(1, "Traceback (most recent call last):\n")
+
+
+def test_a_watch_that_prints_no_json_stops_the_report_with_exit_2(
+    fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = Breaking(watch=quiet_fake().watch)
+    with pytest.raises(SystemExit) as refused:
+        fleet_run(fl, tmp_path, capsys, fake, FLEET)
+    assert refused.value.code == 2  # not a traceback's exit 1, which reads as an action row
+    assert "watch_state.py for romamo/shipyard printed 'Traceback" in str(refused.value)
+    assert not workdirs(fake)[0].exists()
+
+
+def test_metrics_that_print_no_json_stop_the_report_with_exit_2(fl: ModuleType) -> None:
+    with pytest.raises(SystemExit) as refused:
+        fl.decoded("", "metrics.py for o/r")
+    assert refused.value.code == 2
+    assert str(refused.value) == "error: metrics.py for o/r printed '', not JSON"
+
+
+def test_an_interrupted_run_removes_its_clones(
+    fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = Breaking(watch=quiet_fake().watch, interrupt=True)
+    with pytest.raises(KeyboardInterrupt):
+        fleet_run(fl, tmp_path, capsys, fake, FLEET)
+    assert not workdirs(fake)[0].exists()
 
 
 def test_s001_3_the_report_refuses_a_malformed_fleet_file_with_exit_2(tmp_path: Path) -> None:
