@@ -221,7 +221,10 @@ def test_a_baked_source_nothing_promotes_is_due_while_operate_is_idle(ws: Module
     old = on(ws, "v1.1.0")
     row = due(ws, prod, source, old, (old.deployment,))
     assert (row.state, row.subject) == ("PROMOTION_DUE", "production")
-    assert row.detail == f"v1.2.0 healthy on staging for 90 min, unpromoted: {IDLE}; run it"
+    assert (
+        row.detail
+        == f"operate would promote v1.2.0 to production (v1.2.0 healthy on staging for 90 min), but {IDLE}; run it"
+    )
     assert due(ws, prod, source) is not None  # nothing deployed there yet
     # operate is running: its proposal or its deploy is the signal
     assert due(ws, prod, source, idle=None) is None
@@ -235,12 +238,28 @@ def test_a_baked_source_nothing_promotes_is_due_while_operate_is_idle(ws: Module
     assert due(ws, prod, ws.Current(deployment(ws, 5, "main"), source.statuses)) is None
 
 
-@pytest.mark.parametrize(("level", "held"), [("observe", False), ("propose", False), ("act", True)])
-def test_only_a_deploy_that_acts_is_due_without_operate(ws: ModuleType, level: str, held: bool) -> None:
-    # observe never promotes; propose and the hold wait on a proposal issue, the first case
-    prod = ws.Environment("production", "staging", 60, level)
-    assert due(ws, prod, baked_source(ws, 90), held=held) is None
-    assert due(ws, ws.Environment("production", "staging", 60), baked_source(ws, 90)) is not None
+@pytest.mark.parametrize("held", [False, True])
+def test_observe_is_never_due_without_operate(ws: ModuleType, held: bool) -> None:
+    assert due(ws, ws.Environment("production", "staging", 60, "observe"), baked_source(ws, 90), held=held) is None
+
+
+HEALTHY = "v1.2.0 healthy on staging for 90 min"
+APPROVE = "approve with `shipyard operate --approve production` once it runs"
+
+
+def test_propose_with_operate_idle_says_operate_would_propose(ws: ModuleType) -> None:
+    # with operate idle no proposal issue ever opens, so this row is the only signal
+    row = due(ws, ws.Environment("production", "staging", 60, "propose"), baked_source(ws, 90))
+    want = f"operate would propose promoting v1.2.0 to production ({APPROVE}; {HEALTHY}), but {IDLE}; run it"
+    assert (row.state, row.subject, row.detail) == ("PROMOTION_DUE", "production", want)
+
+
+@pytest.mark.parametrize("level", ["act", "propose"])
+def test_a_hold_with_operate_idle_says_operate_would_propose(ws: ModuleType, level: str) -> None:
+    row = due(ws, ws.Environment("production", "staging", 60, level), baked_source(ws, 90), held=True)
+    after = f"{APPROVE} after the shipyard-hold issues close"
+    want = f"operate would propose promoting v1.2.0 to production ({after}; {HEALTHY}), but {IDLE}; run it"
+    assert (row.state, row.subject, row.detail) == ("PROMOTION_DUE", "production", want)
 
 
 @pytest.mark.parametrize("tag", ["v1.2.0", "v1.2.1", "v1.3.0rc1", "v2.0.0.dev3"])
@@ -263,7 +282,7 @@ def test_a_failed_health_check_restarts_the_bake(ws: ModuleType) -> None:
     assert ws.bake_start(recent) == NOW - dt.timedelta(minutes=40)
     assert due(ws, prod, recent) is None
     long_ago = baked_source(ws, 300, failed, status(ws, 52, "success", "shipyard health: baked", 65))
-    assert due(ws, prod, long_ago).detail.startswith("v1.2.0 healthy on staging for 65 min")
+    assert "(v1.2.0 healthy on staging for 65 min)" in due(ws, prod, long_ago).detail
     assert ws.bake_start(baked_source(ws, 300, failed)) is None
 
 

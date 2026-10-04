@@ -30,12 +30,15 @@ deployments and issues shipyard operate writes):
                   failed (cancelled runs are ignored)
   UNHEALTHY       an environment's newest "shipyard health" deployment status is a failure
   PROMOTION_DUE   an open "Ready to promote" proposal issue, with its approve command; or a
-                  `from` environment operate would promote now if it ran: its source baked
-                  a release (bake_minutes since its success, or since the first health
-                  status after a failed check), it is behind that release and never tried
-                  it, and deploy.<name> autonomy is act with no hold; yet no operate
-                  workflow runs on a schedule (no caller, no schedule in it, or no run in
-                  the last hour)
+                  `from` environment operate would promote (act) or propose promoting
+                  (propose, or the hold) now if it ran: its source baked a release
+                  (bake_minutes since its success, or since the first health status after
+                  a failed check), it is behind that release and never tried it, and
+                  deploy.<name> autonomy isn't observe; yet no operate workflow runs on a
+                  schedule (no caller, no schedule in it, or no run in the last hour).
+                  Unlike operate, it doesn't look for a deploy run started on the tag that
+                  hasn't made its deployment yet, so a hand-started deploy can read as due
+                  for those few minutes
   INCIDENT_OPEN   an open issue labelled [operate] incident_label (default "incident"),
                   with its age and the pull requests linked to close it
 
@@ -602,13 +605,12 @@ def unpromoted_row(
     command: str,
     now: dt.datetime,
 ) -> Row | None:
-    """A `from` environment that operate would promote now, if it ran: its source baked a
-    release, the environment is behind it and never tried it, and its deploy autonomy acts.
-    With operate running, its proposal issue or its deploy is the signal instead"""
-    if env.source is None or idle is None or source is None:
-        return None
-    if env.deploy != "act" or held:
-        return None  # observe never promotes; propose and the hold wait on a proposal issue
+    """A `from` environment that operate would promote, or propose promoting, now if it ran:
+    its source baked a release, the environment is behind it and never tried it, and its
+    deploy autonomy isn't observe. With operate running, its proposal issue or its deploy is
+    the signal instead; with it idle, no proposal issue ever opens, so this row stands in"""
+    if env.source is None or idle is None or source is None or env.deploy == "observe":
+        return None  # observe never promotes, nor proposes
     wanted = version_key(source.tag)
     if wanted is None:
         return None  # operate promotes only a deployment whose ref names a release tag
@@ -620,8 +622,14 @@ def unpromoted_row(
     since = bake_start(source)
     if since is None or now - since < dt.timedelta(minutes=env.bake_minutes):
         return None
-    detail = f"{source.tag} healthy on {env.source} for {ago(now - since)}, unpromoted: {idle}; {command}"
-    return Row("PROMOTION_DUE", env.name, detail)
+    healthy = f"{source.tag} healthy on {env.source} for {ago(now - since)}"
+    if env.deploy == "act" and not held:
+        would = f"operate would promote {source.tag} to {env.name} ({healthy})"
+    else:  # propose, or act under the hold: operate opens a proposal issue
+        after = f" after the {HOLD_LABEL} issues close" if held else ""
+        approve = f"approve with `shipyard operate --approve {env.name}` once it runs{after}"
+        would = f"operate would propose promoting {source.tag} to {env.name} ({approve}; {healthy})"
+    return Row("PROMOTION_DUE", env.name, f"{would}, but {idle}; {command}")
 
 
 def incident_rows(issues: list[Issue], label: str, now: dt.datetime) -> list[Row]:
