@@ -1,9 +1,9 @@
 ---
-name: release-lanes-setup
+name: shipyard-setup
 description: Set up shipyard in a repository so releases are cut by policy on lanes (dev, rc, stable, hotfix) from its hand-written CHANGELOG. Use when the user asks to add a release bot, automate releases, set up release lanes, scheduled or nightly releases, release candidates, or hotfix releases, or to move a repo onto release lanes. Covers prerequisites, choosing lanes with the user, writing the policy, wiring CI and publishing, a dry run, and migration from hand-made or scripted releases.
 ---
 
-# Set up release lanes
+# Set up shipyard
 
 shipyard cuts releases from a hand-written CHANGELOG on lanes the project's policy
 defines. Read the project's README section "How a release works" once before starting:

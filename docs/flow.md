@@ -9,7 +9,7 @@ Three skills cover the path from a new issue to a published release, and a fourt
 | `github-pr-triage` | Landing: review, CI gate, rebase, merge, and the release |
 | `github-ship-watch` | The routine: a stuck release run, a missing upload, unannounced fixes, waiting issues |
 
-Before the first release, a new package goes through `release-lanes-setup`: package checks, CI and publish wiring, and shipyard's release policy. In a repo that runs shipyard (`.github/release-policy.toml`), shipyard tags; the skills here only start its Release workflow and never tag by hand. The `oss-package-engineer` skill is retired: its release path is github-pr-triage's "tag X" or shipyard, and its package checks live in release-lanes-setup.
+Before the first release, a new package goes through `shipyard-setup`: package checks, CI and publish wiring, and shipyard's release policy. In a repo that runs shipyard (`.github/release-policy.toml`), shipyard tags; the skills here only start its Release workflow and never tag by hand. The `oss-package-engineer` skill is retired: its release path is github-pr-triage's "tag X" or shipyard, and its package checks live in shipyard-setup.
 
 Start each one with its slash command or with plain wording. The words you use set how far it goes. Below, `<owner/repo>` is the GitHub repo, `<X>` the version to release, and `<prev>` the previous tag.
 
