@@ -7,9 +7,10 @@ from pathlib import Path
 import pytest
 
 from shipyard.autonomy import HOLD_LABEL
+from shipyard.config import ALIAS_PATH, CONFIG_PATH, config_path
 from shipyard.github import Deployment, DeploymentState, DeploymentStatus, Issue, Milestone, WorkflowRun
 from shipyard.gitrepo import Git
-from shipyard.policy import ALIAS_PATH, CONFIG_PATH, Policy, config_path
+from shipyard.policy import Policy
 
 POLICY = """\
 name = "demo"

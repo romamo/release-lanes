@@ -5,10 +5,11 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from shipyard.config import ALIAS_PATH, CONFIG_PATH
 from shipyard.doctor import CALLER, OPERATE_CALLER
 from shipyard.errors import ReleaseError
 from shipyard.gitrepo import Git
-from shipyard.policy import ALIAS_PATH, CONFIG_PATH, Style, VersionFiles
+from shipyard.policy import Style, VersionFiles
 
 BOT_REPO = "romamo/shipyard"
 BOT_REF = "v0"

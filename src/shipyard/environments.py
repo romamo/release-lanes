@@ -7,8 +7,9 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
+from shipyard.config import Table
 from shipyard.errors import ReleaseError
-from shipyard.policy import Lane, _Table
+from shipyard.lanes import Lane
 
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _MAX_BAKE = 7 * 24 * 60  # a week
@@ -41,7 +42,7 @@ class OperateConfig:
     incident_label: str
 
     @classmethod
-    def parse(cls, t: _Table) -> OperateConfig:
+    def parse(cls, t: Table) -> OperateConfig:
         t.allow("rollback_after", "incident_label")
         after = t.integer("rollback_after", default=_ROLLBACK_AFTER, low=1, high=_MAX_ROLLBACK_AFTER)
         assert after is not None  # a default was given
@@ -51,7 +52,7 @@ class OperateConfig:
         return cls(after, label)
 
 
-def parse(t: _Table, lanes: Mapping[Lane, object]) -> Mapping[str, Environment]:
+def parse(t: Table, lanes: Mapping[Lane, object]) -> Mapping[str, Environment]:
     """Each [environments.<name>] table, in the order the config declares them"""
     found = {name: _environment(name, t.table(name), lanes) for name in t.raw}
     for env in found.values():
@@ -64,7 +65,7 @@ def deployed_from(environments: Mapping[str, Environment], lane: Lane) -> tuple[
     return tuple(e for e in environments.values() if e.lane is lane)
 
 
-def _environment(name: str, t: _Table, lanes: Mapping[Lane, object]) -> Environment:
+def _environment(name: str, t: Table, lanes: Mapping[Lane, object]) -> Environment:
     if not _NAME.fullmatch(name):
         raise ReleaseError(f"{t.where}: an environment name is letters, digits, '.', '_', and '-'")
     t.allow("lane", "from", "workflow", "health", "bake_minutes")
