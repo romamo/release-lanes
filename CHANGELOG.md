@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-04
+
 ### Added
 
 - Environments: an `[environments.<name>]` table in `.github/shipyard.toml` names a deploy
@@ -16,7 +18,6 @@ bot.
   inputs, and lists it as `deploy.yml@staging`; `from` environments wait for promotion.
   `doctor` checks each workflow takes both inputs and that a job sets `environment:`, so
   GitHub records a deployment; `init` writes a commented example (#29)
-
 - `[autonomy]` in `.github/shipyard.toml` sets each stage to `observe`, `propose`, or `act`
   (`release`, `deploy.<environment>`, and `rollback`, all `act` by default), and an open
   issue labelled `shipyard-hold` turns every `act` into `propose`. Under `release =
@@ -196,7 +197,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/romamo/shipyard/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/romamo/shipyard/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/romamo/shipyard/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/romamo/shipyard/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/romamo/shipyard/compare/v0.5.2...v0.6.0
 [0.5.2]: https://github.com/romamo/shipyard/compare/v0.5.1...v0.5.2
