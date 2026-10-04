@@ -251,6 +251,16 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ inputs.tag }}
+  operate: # with from or health: the first health check, right after the deploy
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run operate.yml -f dry-run=false
 ```
 
 A GitHub environment with deployment protection must allow the release tags, since `land`
@@ -263,7 +273,14 @@ Environments → `<environment>` → Deployment branches and tags, or run
 
 With `from` or `health` in use, run `shipyard init --operate`. It writes
 `.github/workflows/operate.yml`, which runs `shipyard operate` every 10 minutes, one run at
-a time. Each run, for every environment:
+a time. The deploy workflow's `operate` job above also starts it once a deploy succeeds, so
+the first health check runs right after the deploy rather than at the next scheduled run;
+the schedule stays the backstop and runs the checks after it. It is a job of its own, so a
+failure to start operate leaves the deployment's success alone, and it needs
+`actions: write`; `doctor` warns when an environment with `from` or `health` has a deploy
+workflow that doesn't start it. It can't deploy twice: operate deploys a tag to an
+environment at most once (below), and a run it starts finds the environment on the tag just
+deployed. Each run, for every environment:
 
 - **Current deployment**: the newest GitHub deployment there that reached `success`, and
   its tag (the deployment's ref)
@@ -298,7 +315,8 @@ each environment's tag, health, and what the run did; `shipyard operate --dry-ru
 same and changes nothing.
 
 **Rollback and incidents.** An environment that fails `rollback_after` health checks in a
-row (3 by default; at the 10-minute schedule, 20 to 30 minutes) is rolled back to the
+row (3 by default: 10 to 20 minutes after the deploy when the deploy workflow starts
+operate, 20 to 30 on the schedule alone) is rolled back to the
 previous tag that reached `success` there, skipping one whose last check failed:
 
 ```toml

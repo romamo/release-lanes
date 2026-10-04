@@ -139,6 +139,16 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps: []
+  operate:
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run operate.yml -f dry-run=false
 """
 GUARD_JOB = DEPLOY[DEPLOY.index("  ref:") : DEPLOY.index("  deploy:")]
 
@@ -175,7 +185,10 @@ def test_doctor_checks_each_environments_workflow(repo: Repo) -> None:
         ("FAIL", "deploy.yml (production): no .github/workflows/deploy.yml"),
     ]
     repo.write(".github/workflows/deploy.yml", DEPLOY)
-    passed = "runs on workflow_dispatch with 'tag' and 'environment' inputs; fails a run that isn't on the tag"
+    passed = (
+        "runs on workflow_dispatch with 'tag' and 'environment' inputs; fails a run that isn't on the tag;"
+        " starts operate.yml after the deploy"
+    )
     assert checks() == [("PASS", f"deploy.yml (staging) {passed}"), ("PASS", f"deploy.yml (production) {passed}")]
 
     no_input = DEPLOY.replace("      environment:\n        type: string\n        required: true\n", "")
@@ -251,6 +264,52 @@ def test_doctor_warns_when_a_deploy_workflow_runs_off_its_tag(repo: Repo) -> Non
     assert check(DEPLOY.replace(guard, either_order))[0] == "PASS"
     # a workflow that fails the other checks reports those, not the guard
     assert check(DEPLOY.replace("    environment: ${{ inputs.environment }}\n", "").replace(guard, "x"))[0] == "FAIL"
+
+
+def test_doctor_notes_whether_a_deploy_workflow_starts_operate(repo: Repo) -> None:
+    """The deploy workflow starts the operate caller for a first health check right after
+    the deploy (#84); a WARN only for an environment operate watches, with health or from (D-9)"""
+    config = repo.read(repo.policy_file)
+    starts = "        run: gh workflow run operate.yml -f dry-run=false\n"
+
+    def check(text: str, environment: str = 'lane = "rc"\n') -> tuple[str, str]:
+        policy = config + f'\n[environments.staging]\n{environment}workflow = "deploy.yml"\n'
+        repo.write(repo.policy_file, policy)
+        repo.write(".github/workflows/deploy.yml", text)
+        return next((c.status, c.detail) for c in doctor(repo.root) if c.name == "environment")
+
+    watched = 'lane = "rc"\nhealth = "https://staging.example.com/health"\n'
+    status, detail = check(DEPLOY, watched)
+    assert status == "PASS" and detail.endswith("; starts operate.yml after the deploy")
+    # a continued line is one command
+    assert (
+        check(
+            DEPLOY.replace(starts, "        run: gh workflow run operate.yml \\\n          -f dry-run=false\n"), watched
+        )[0]
+        == "PASS"
+    )
+
+    no_start = DEPLOY.replace(starts, "        run: echo deployed\n")
+    status, detail = check(no_start, watched)
+    assert status == "WARN"
+    assert "but it doesn't start operate.yml after the deploy, so the first health check waits" in detail
+    assert "`gh workflow run operate.yml -f dry-run=false` with actions: write" in detail
+    # an environment operate doesn't watch sees no warning, nor a note
+    status, detail = check(no_start)
+    assert status == "PASS" and "operate.yml" not in detail
+
+    dry = DEPLOY.replace(starts, "        run: gh workflow run operate.yml\n")
+    assert check(dry, watched) == (
+        "WARN",
+        "deploy.yml (staging) runs on workflow_dispatch with 'tag' and 'environment' inputs; fails a run that"
+        " isn't on the tag, but it starts operate.yml as a dry run: add -f dry-run=false",
+    )
+    # another workflow whose name ends the same isn't the caller
+    assert check(DEPLOY.replace("run operate.yml", "run my-operate.yml"), watched)[0] == "WARN"
+    # both warnings at once
+    guard = '\'[ "$GITHUB_REF" = "refs/tags/$TAG" ]\''
+    status, detail = check(no_start.replace(guard, "true"), watched)
+    assert status == "WARN" and "isn't refs/tags/<tag>" in detail and "; and it doesn't start operate.yml" in detail
 
 
 def test_doctor_catches_a_version_line_that_no_longer_matches(repo: Repo) -> None:

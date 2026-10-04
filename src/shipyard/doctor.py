@@ -141,15 +141,18 @@ def doctor(root: Path, github: GitHub | None = None) -> list[Check]:
             target = root / ".github" / "workflows" / workflow
             ok = target.is_file() and _takes_input(target.read_text(encoding="utf-8"), "workflow_dispatch", "tag")
             add(ok, "dispatch", f"{workflow} ({rule.lane}) runs on workflow_dispatch with a 'tag' input")
+    operate_caller = _operate_caller(root)
     for env in policy.environments.values():
-        checks.append(_deploy(root / ".github" / "workflows" / env.workflow, env.name))
+        watched = env.source is not None or bool(env.health)  # D-9: only these need operate
+        checks.append(_deploy(root / ".github" / "workflows" / env.workflow, env.name, operate_caller, watched))
     return checks
 
 
-def _deploy(path: Path, environment: str) -> Check:
+def _deploy(path: Path, environment: str, caller: Path, operated: bool) -> Check:
     """An environment's workflow takes the tag and the environment, and a job names the
-    environment, without which GitHub records no deployment; a WARN when no step fails a run
-    off the tag it deploys (#80)"""
+    environment, without which GitHub records no deployment. A WARN when no step fails a run
+    off the tag it deploys (#80), and when an environment operate watches (D-9) has a workflow
+    that doesn't start the operate caller after the deploy, for a first check right away (#84)"""
     name = f"{path.name} ({environment})"
     if not path.is_file():
         return Check("FAIL", "environment", f"{name}: no .github/workflows/{path.name}")
@@ -159,20 +162,47 @@ def _deploy(path: Path, environment: str) -> Check:
         missing.append("a job with environment: (GitHub records a deployment only then)")
     if missing:
         return Check("FAIL", "environment", f"{name} lacks {', '.join(missing)}")
-    passed = f"{name} runs on workflow_dispatch with 'tag' and 'environment' inputs"
-    if not _REF_GUARD.search(text):
-        detail = (
-            f"{passed}, but no step fails a run whose github.ref isn't refs/tags/<tag>: a run started"
-            " without --ref <tag> deploys the tag under the branch's ref, which names no release tag"
-            " (the README's deploy workflow shows the guard)"
+    passed = [f"{name} runs on workflow_dispatch with 'tag' and 'environment' inputs"]
+    warned = []
+    if _REF_GUARD.search(text):
+        passed.append("fails a run that isn't on the tag")
+    else:
+        warned.append(
+            "no step fails a run whose github.ref isn't refs/tags/<tag>: a run started without --ref <tag>"
+            " deploys the tag under the branch's ref, which names no release tag (the README's deploy workflow"
+            " shows the guard)"
         )
-        return Check("WARN", "environment", detail)
-    return Check("PASS", "environment", f"{passed}; fails a run that isn't on the tag")
+    starts = _starts(text, caller.name)
+    if starts is True:
+        passed.append(f"starts {caller.name} after the deploy")
+    elif operated and starts is False:
+        warned.append(f"it starts {caller.name} as a dry run: add -f dry-run=false")
+    elif operated:
+        warned.append(
+            f"it doesn't start {caller.name} after the deploy, so the first health check waits for the"
+            f" schedule: add a job that needs the deploy job and runs `gh workflow run {caller.name}"
+            " -f dry-run=false` with actions: write"
+        )
+    detail = "; ".join(passed)
+    if warned:
+        return Check("WARN", "environment", f"{detail}, but {'; and '.join(warned)}")
+    return Check("PASS", "environment", detail)
 
 
 # the guard a deploy workflow runs: a line that compares the run's ref (github.ref or
 # GITHUB_REF; ref_name doesn't tell a branch from a tag) with refs/tags/<tag>, in either order
 _REF_GUARD = re.compile(r"^(?=.*(?:\bgithub\.ref|\bGITHUB_REF)\b)(?=.*refs/tags/).*$", re.MULTILINE)
+
+
+def _starts(text: str, workflow: str) -> bool | None:
+    """Whether a deploy workflow starts the workflow with -f dry-run=false: False when it
+    starts it only as a dry run, None when it doesn't start it. A text check that reads a
+    command's backslash-continued lines as one"""
+    command = re.compile(rf"\bgh\s+workflow\s+run\s+(?:\S*/)?{re.escape(workflow)}(?![\w.-])")
+    lines = [line for line in text.replace("\\\n", " ").splitlines() if command.search(line)]
+    if not lines:
+        return None
+    return any(re.search(r"\bdry-run=false\b", line) for line in lines)
 
 
 def _sets_environment(path: Path, seen: set[Path]) -> bool:

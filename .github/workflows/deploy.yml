@@ -89,3 +89,19 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v5
+
+  # The first health check right after the deploy, not at the next scheduled operate run
+  # (#84); the schedule stays the backstop. A job of its own: a failure here leaves the
+  # deployment's success alone. operate deploys a tag to an environment at most once, so a
+  # run it starts never deploys this tag again, nor races land's dispatch
+  operate:
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write # starts operate-self.yml
+    steps:
+      - name: Start shipyard operate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run operate-self.yml -f dry-run=false
