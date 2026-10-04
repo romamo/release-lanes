@@ -7,6 +7,16 @@ bot.
 
 ## [Unreleased]
 
+### Fixed
+
+- `changelog_guard.py move` carries each entry a rebase dropped into a released section
+  under its own `###` heading in Unreleased, creating the heading in Keep a Changelog
+  order, and leaves the released section as the base has it; it no longer leaves a bullet
+  with no heading. `check` also fails on such a headless bullet and on a duplicate heading
+  under Unreleased, and `union` keeps a blank line between a release heading and the
+  heading it meets. The landing loop runs `move`, `check`, and the planner's dry run after
+  every rebase, and prints the Unreleased section for the lander to read (#25)
+
 ## [0.6.0] - 2026-10-04
 
 ### Added

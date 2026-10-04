@@ -37,7 +37,7 @@ Judgment stays with you: which PRs to delegate, each PR's risks, whether a revie
 |---|---|---|
 | `pr_gate.py <PR>... [--wait]` | Is each PR open, mergeable, and green on every finished check? | Right before every merge |
 | `failed_tests.py <run-id>` | Which tests failed, per job, with assertion lines | On any red job, once its run has finished |
-| `changelog_guard.py check\|move\|union` | Do new CHANGELOG lines sit under Unreleased? Moves them there; unions conflict blocks | After every rebase or conflict |
+| `changelog_guard.py check\|move\|union` | Do new CHANGELOG lines sit under Unreleased, each bullet under one `###` heading, none twice? Moves misplaced entries there under their own heading; unions conflict blocks | After every rebase or conflict |
 | `landed.py --onto <ref> <sha>...` | Did these commits land, even rebased or with a hand-merged CHANGELOG? | Before deleting a worktree or branch |
 | `release_ready.py <repo> <sha> <version>` | Is the release commit ready to tag: CI green on it, on the default branch, tag free, version in manifest and CHANGELOG, "not additive" if Breaking, compare link? Lists open PRs to judge | Right before tagging |
 | `shipped.py <repo> <prev-tag> <tag> [--post]` | Which closed issues did this release fix, and which haven't been told yet? Dry run by default | After the publish is verified |
@@ -81,7 +81,7 @@ Follow [references/landing.md](references/landing.md). In short:
   - The PR needs a rebase: force-push with lease, with permission
   - The PR has already merged: follow-up PR
 - Stacked PRs merge with merge commits, and each next PR is retargeted to the default branch before it merges
-- After every rebase, run `scripts/changelog_guard.py check --base origin/<default>`: a clean rebase can silently move new entries into a released section
+- After every rebase, run `scripts/changelog_guard.py check --base origin/<default>`: a clean rebase can silently move new entries into a released section. On exit 1 run `move` with the same base, then `check` again, then the release planner's dry run where the repo has one, and read the Unreleased section: wording a later merge made stale (a rename) is yours to fix
 - Resolve bullet-list conflicts (CHANGELOG) with `scripts/changelog_guard.py union <file>`. Never union counts or versions: recompute those from each side's baseline and run the test
 - After each merge, re-run step 1's state check: the next PR may now conflict
 
