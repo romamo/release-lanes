@@ -49,6 +49,15 @@ bot.
   DECLINED, NO_REASON, DONE, MERGED, and OVERLAP; an issue labelled `bug`, `roadmap`, or
   one of shipyard's own labels isn't feedback, and `--skip-label` adds more. `[autonomy] intake` sets how far it
   goes: `propose` (the default) or `observe`; `act` is refused, and `doctor` prints it (#69)
+- The `product-intake` skill plans the roadmap: milestones are the roadmap, and it
+  proposes the next one from accepted opportunities, ranked by evidence (requests and
+  thumbs-up) per load (the opportunity plus its spec's build issues), within a new
+  `[roadmap]` config section: `wip`, the issues open at once across the open milestones
+  (default 5), and `cadence`, the weeks between milestone due dates (default 2). The
+  proposal is a `milestone-proposal` issue the maintainer approves by closing it with an
+  "approve" comment. Its `scripts/roadmap_state.py` reports MILESTONE, OVERDUE, WIP_OVER,
+  UNPLANNED, PROPOSAL_OPEN, APPROVED, UNREADABLE, and NEXT. `doctor` validates
+  `[roadmap]` and prints it when present (#70)
 
 ## [0.10.1] - 2026-10-04
 

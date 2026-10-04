@@ -17,6 +17,7 @@ from shipyard.config import Table, read
 from shipyard.environments import Environment, OperateConfig
 from shipyard.errors import ReleaseError
 from shipyard.lanes import Lane as Lane  # re-exported: most modules name a lane through the policy
+from shipyard.roadmap import RoadmapConfig
 from shipyard.schedule import Freeze, Window
 from shipyard.version import Part
 
@@ -93,6 +94,7 @@ class Policy:
     operate: OperateConfig  # the [operate] section, or its defaults
     autonomy: AutonomyPolicy = AutonomyPolicy()
     agents: AgentsConfig | None = None  # the gate's [agents] section; validated here, read by the gate
+    roadmap: RoadmapConfig | None = None  # the [roadmap] section; validated here, read by product-intake
 
     @property
     def incident_label(self) -> str | None:
@@ -128,6 +130,7 @@ class Policy:
             "autonomy",
             "agents",
             "operate",
+            "roadmap",
         )
         changelog = top.table("changelog")
         changelog.allow("path", "style")
@@ -168,6 +171,7 @@ class Policy:
         autonomy = AutonomyPolicy.parse(autonomy_table)
         autonomy.require_environments(declared.keys(), autonomy_table.where)
         agents = AgentsConfig.parse(top.table("agents")) if "agents" in raw else None
+        roadmap = RoadmapConfig.parse(top.table("roadmap")) if "roadmap" in raw else None
         return cls(
             name=top.string("name"),
             mode=top.enum("mode", Mode),
@@ -193,6 +197,7 @@ class Policy:
             autonomy=autonomy,
             agents=agents,
             operate=operate,
+            roadmap=roadmap,
         )
 
     def rule(self, lane: Lane) -> LaneRule:

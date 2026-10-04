@@ -98,7 +98,7 @@ ORDER = (
 LIVE = {"OPPORTUNITY_OPEN", "ACCEPTED", "HANDED_OFF", "DECLINED", "NO_REASON"}  # an OVERLAP counts these
 
 ISSUE_FIELDS = """
-        number title url state stateReason closedAt body
+        number title url state stateReason closedAt body milestone { title }
         labels(first: 100) { pageInfo { hasNextPage } nodes { name } }
         reactions(content: THUMBS_UP) { totalCount }
         comments(last: 50) { pageInfo { hasPreviousPage startCursor } nodes { body createdAt } }
@@ -263,14 +263,15 @@ def complete_comments(run: Runner, owner: str, name: str, issue: dict[str, Any],
         comments["pageInfo"] = page["pageInfo"]
 
 
-def evidence(body: str, owner: str, name: str) -> set[int]:
-    """The issue and discussion numbers the body's "Evidence" section links in this repo"""
+def evidence(body: str, owner: str, name: str, section: str = "evidence") -> set[int]:
+    """The issue and discussion numbers the body's "Evidence" section (or another, by its
+    lowercased heading) links in this repo"""
     found: set[int] = set()
     inside = False
     for line in (body or "").splitlines():
         heading = HEADING.match(line)
         if heading:
-            inside = heading.group(1).lower() == "evidence"
+            inside = heading.group(1).lower() == section
             continue
         if not inside:
             continue
