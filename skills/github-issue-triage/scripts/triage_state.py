@@ -15,7 +15,10 @@ For each open issue:
   BLOCKED          labelled blocked, or a comment says it is on hold / blocked /
                    waiting on an upstream issue that is still open, or on a pull
                    request (such as a spec PR) that is still open. The hold line
-                   names it as owner/repo#N, its URL, or a plain #N (this repo)
+                   names it as owner/repo#N or its URL anywhere on the line, or
+                   as a plain #N (this repo) right after "waits on", "waiting on",
+                   "depends on", "blocked by", "blocked on", "decided in", or
+                   "on hold until" (a #N elsewhere on the line is context)
   SPEC_REFUSED     a pull request it waits on (such as its spec PR) closed without
                    merging, and no triage comment came after the hold: decide again
                    (revise the spec in a new PR, postpone, or won't fix). A newer
@@ -230,9 +233,12 @@ def resource_limited(response: dict[str, Any]) -> bool:
 ACTION = {"NEW", "NEEDS_PR", "UNBLOCKED", "SPEC_REFUSED", "REVISIT", "DONE_NOT_CLOSED", "SUSPECT_CLOSE"}
 HOLD = re.compile(r"\b(?:on hold|blocked|waits? on|waiting on|pending|depends on)\b", re.IGNORECASE)
 UPSTREAM = re.compile(r"(?:https://github\.com/)?(?P<owner>[\w.-]+)/(?P<name>[\w.-]+)(?:#|/issues/|/pull/)(?P<num>\d+)")
-# A plain #N on a hold line names an issue or pull request of the repo itself; the
-# lookbehind leaves the #N of an owner/repo#N to UPSTREAM
-SAME_REPO = re.compile(r"(?<![\w/#.-])#(?P<num>\d+)\b")
+# A plain #N right after a hold phrase names the issue or pull request of the repo itself
+# that the hold waits on; a #N elsewhere on the line ("#59 stays open") is only context
+SAME_REPO = re.compile(
+    r"\b(?:waits? on|waiting on|depends on|blocked (?:by|on)|decided in|on hold until)[ \t]+#(?P<num>\d+)\b",
+    re.IGNORECASE,
+)
 STABLE = re.compile(r"^v?\d+\.\d+\.\d+$")
 KEYWORDS = r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)"
 
@@ -432,7 +438,7 @@ def upstream_refs(issue: dict[str, Any], repo: tuple[str, str]) -> list[tuple[st
 
 def hold_refs(issue: dict[str, Any], repo: tuple[str, str]) -> dict[tuple[str, str, int], int]:
     """Each issue or pull request a hold comment names, with the index of the newest
-    comment naming it; a plain #N is one of repo's own (owner, name)"""
+    comment naming it; a plain #N after a hold phrase is one of repo's own (owner, name)"""
     refs: dict[tuple[str, str, int], int] = {}
     for i, c in enumerate(issue["comments"]["nodes"]):
         for line in c["body"].splitlines():

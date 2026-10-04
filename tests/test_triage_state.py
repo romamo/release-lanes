@@ -237,6 +237,25 @@ def test_a_plain_hash_number_on_a_hold_line_is_the_same_repo(ts: ModuleType) -> 
     assert ts.upstream_refs(quiet, REPO) == [("o", "r", 62)]
 
 
+def test_a_plain_hash_number_waited_on_holds_until_it_closes(ts: ModuleType) -> None:
+    item = issue(("2026-09-01T10:00:00Z", "Triage: clarify\n\nOn hold: waits on #12"))
+    assert ts.upstream_refs(item, REPO) == [("o", "r", 12)]
+    for state, expected in (("OPEN", "BLOCKED"), ("CLOSED", "UNBLOCKED")):
+        assert ts.classify_open(item, "Triage:", "postponed", {("o", "r", 12): state}, None, REPO)[0] == expected
+
+
+def test_a_plain_hash_number_as_context_on_the_hold_line_holds_nothing(ts: ModuleType) -> None:
+    # comments.md's hold template: #PR and #59 are context, o/r#40 is what it waits on
+    line = (
+        "On hold: #58 goes below the spec's default of 5 rotated files, decided in o/r#40. "
+        "#59 stays open, rebased onto main."
+    )
+    item = issue(("2026-09-01T10:00:00Z", f"Triage: postpone\n\n{line}"))
+    assert ts.upstream_refs(item, REPO) == [("o", "r", 40)]
+    states = {("o", "r", 40): "CLOSED", ("o", "r", 59): "OPEN", ("o", "r", 58): "OPEN"}
+    assert ts.classify_open(item, "Triage:", "postponed", states, None, REPO)[0] == "UNBLOCKED"
+
+
 REFUSED_SPEC = {("o", "r", 60): "CLOSED_UNMERGED"}
 FEATURE = ("2026-09-01T10:00:00Z", "Triage: **feature**, the spec is o/r#60\n\nOn hold: the build waits on o/r#60")
 
