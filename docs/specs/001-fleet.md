@@ -1,6 +1,6 @@
 # S-001: Fleet watch report
 
-status: approved
+status: built
 
 ## Problem
 
@@ -57,5 +57,12 @@ incident_label = "sev"   # optional; the label that repo's incidents carry (defa
 
 ## Verification
 
-Filled in when the spec reaches `built`: one line per criterion id, saying how it was
-checked against the default branch (beyond its tests) and the result.
+- S-001-1: `fleet.py report --fleet F` on main plus the build PRs, F listing romamo/shipyard and the nonexistent romamo/no-such-repo-s001: every row named its repo, and the action rows (shipyard's ISSUES, the REPO_ERROR) came before BOT_OK, NO_REGISTRY, and PRS_OPEN; holds
+- S-001-2: a fleet of romamo/shipyard alone exited 1 on its ISSUES action row (NEEDS_PR #93; NEW #49); exit 0 with no action row is checked in the tests only, as shipyard had action rows throughout; holds
+- S-001-3: `fleet.py report` on a missing file, a broken `[[repos]` header, a file with no repos, an entry without `repo`, an entry with a `path` key, and `repo = "shipyard"`, on Python 3.14 and 3.10: each exited 2 with `error: <file>: <problem>` on stderr and nothing on stdout; holds
+- S-001-4: a file listing romamo/shipyard and Romamo/Shipyard exited 2 with `lists Romamo/Shipyard twice` (owner and name compared ignoring case, as GitHub does); holds
+- S-001-5: the nonexistent repo gave one row, `REPO_ERROR gh repo clone GraphQL: Could not resolve to a Repository with the name 'romamo/no-such-repo-s001'. (repository)`, while romamo/shipyard's six rows were still printed, and the run exited 2; holds
+- S-001-6: `--metrics` on the same file printed shipyard's seven measures in its own column under a "Metrics: the 30 days to ..." line, and the failed repo had no column; "no data" cells checked in the tests only, as shipyard has data for every measure; holds
+- S-001-7: `--json` printed one object with both repos and their rows (shipyard's six, the failed repo's REPO_ERROR) and no metrics; `--json --metrics` added shipyard's `metrics.py --json` object and `null` for the failed repo, the same on Python 3.10.0 (`uv run --python 3.10 --isolated --no-project python`); holds
+- S-001-8: a fleet entry `repo = "romamo/shipyard"`, `incident_label = "bug"` made the watch read closed `bug` issues as incidents (POSTMORTEM_DUE rows for #83, #82, #80, ...), where the default label finds only #81, which has its postmortem; holds
+- S-001-9: `skills/github-ship-watch/SKILL.md` has a Fleet section with the fleet file (its example parses as a fleet file), the report and its flags, and a `/schedule` routine prompt that runs `fleet.py report --fleet <file> --metrics`; holds
