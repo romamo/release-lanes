@@ -147,6 +147,15 @@ def test_criteria_prints_one_spec(tmp_path: Path) -> None:
     assert specs(root, "criteria", "x7").returncode == 2
 
 
+def test_a_criterion_wrapped_onto_indented_lines_is_read_whole(tmp_path: Path) -> None:
+    wrapped = ("1: tool run exits 2 on a missing config, and prints the path\n  it looked for", "2: one line")
+    root = repo(tmp_path, **{"007-dry-run.md": spec("007", criteria=wrapped)})
+    out = specs(root, "criteria", "7")
+    want = "S-007-1: tool run exits 2 on a missing config, and prints the path it looked for\nS-007-2: one line\n"
+    assert (out.returncode, out.stdout) == (0, want)
+    assert specs(root, "check").returncode == 0
+
+
 def test_no_specs_folder_is_an_input_error(tmp_path: Path) -> None:
     assert specs(tmp_path, "check").returncode == 2
     assert specs(tmp_path, "find", "x").returncode == 2

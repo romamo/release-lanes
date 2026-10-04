@@ -98,6 +98,10 @@ class Criterion:
     number: int
     text: str
     line: int
+    end: int = 0  # its last line, past the first when it wraps
+
+    def __post_init__(self) -> None:
+        self.end = self.end or self.line
 
 
 @dataclass
@@ -161,10 +165,15 @@ def parse(path: Path) -> tuple[Spec | None, list[str]]:
                 problem(n, f"expected '# {spec.id}: <title>' and then the sections")
             continue
         spec.sections[current].append((n, line))
+        wrapped = current == "Acceptance criteria" and spec.criteria and spec.criteria[-1].end == n - 1
         if line.startswith("# "):
             problem(n, "a second title line")
         elif line.startswith("- "):
             item(spec, current, n, line, problem)
+        elif wrapped and line[:1] in (" ", "\t") and line.strip():
+            # A criterion wrapped onto an indented line goes on
+            spec.criteria[-1].text += " " + line.strip()
+            spec.criteria[-1].end = n
     if not spec.title:
         problem(1, f"no title line '# {spec.id}: <title>'")
     for section in SECTIONS:
