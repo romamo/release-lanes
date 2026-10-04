@@ -59,6 +59,18 @@ bot.
   UNPLANNED, PROPOSAL_OPEN, APPROVED, UNREADABLE, and NEXT. `doctor` validates
   `[roadmap]` and prints it when present (#70)
 
+### Changed
+
+- github-issue-triage sends a user's request for a new capability to product intake
+  instead of the spec gate: the new **opportunity** verdict (`Triage: **opportunity**`,
+  the marker intake uses) hands it over, `triage_state.py` reads it TRIAGED and
+  `intake_state.py` reads it NEW_FEEDBACK until an opportunity groups it. A spec is
+  written only for an accepted opportunity (label `planned`), a request one already
+  covers (held on that opportunity), or an issue the maintainer filed; bugs, contract
+  tweaks, and small additive features keep their verdicts. The rubric, the comment
+  templates, the spec gate, github-issue-resolve, product-intake, and `docs/flow.md`
+  say so, and tests hold both scripts to the new templates (#78)
+
 ## [0.10.1] - 2026-10-04
 
 ### Fixed

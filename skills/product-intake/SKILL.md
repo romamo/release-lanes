@@ -1,6 +1,6 @@
 ---
 name: product-intake
-description: Turn a GitHub repo's product feedback into opportunity issues the maintainer accepts or declines, and plan milestones from the accepted ones. Groups feature requests, ideas, and discussions that ask for the same outcome (with thumbs-up reactions as demand) into one opportunity issue each, keeps it updated instead of opening a second, records a decline so the same request is never proposed again, and hands an accepted opportunity to github-issue-triage's spec gate. Proposes the next milestone from accepted opportunities by evidence and effort within the config's work-in-progress limit and cadence, for the maintainer to approve. Use when the user asks to "group the feature requests", "run product intake", "what are users asking for", "turn feedback into opportunities", "what should we build next", "plan the next milestone", or "where is the roadmap". Not for bugs or contract changes (github-issue-triage) or for releases (github-ship-watch).
+description: Turn a GitHub repo's product feedback into opportunity issues the maintainer accepts or declines, and plan milestones from the accepted ones. Groups feature requests, ideas, and discussions that ask for the same outcome (with thumbs-up reactions as demand) into one opportunity issue each, keeps it updated instead of opening a second, records a decline so the same request is never proposed again, takes the requests triage hands over, and hands an accepted opportunity back to github-issue-triage's spec gate. Proposes the next milestone from accepted opportunities by evidence and effort within the config's work-in-progress limit and cadence, for the maintainer to approve. Use when the user asks to "group the feature requests", "run product intake", "what are users asking for", "turn feedback into opportunities", "what should we build next", "plan the next milestone", or "where is the roadmap". Not for bugs or contract changes (github-issue-triage) or for releases (github-ship-watch).
 ---
 
 # Product Intake
@@ -32,7 +32,7 @@ There is no `act`: shipyard refuses it, since an opportunity is a proposal by na
 2. **One opportunity per outcome, updated in place.** Before opening one, read every opportunity the script lists, open and closed. A request that fits an existing one is added to its Evidence section; never open a second issue for the same outcome
 3. **A declined outcome is never proposed again.** A new request for a declined outcome goes into the declined opportunity's Evidence section, and the request gets a comment with the recorded reason. Don't reopen it and don't open a new one: reconsidering is the maintainer's call, made by reopening the issue themselves
 4. **Never accept, decline, or close for the maintainer.** Intake writes opportunities and comments; the `planned` label and the close are the maintainer's. Don't close requests either, a pure duplicate included: it gets the `duplicate` label and a link
-5. **Bugs and contract changes aren't feedback.** The script already leaves out issues triage gave an implement, feature, duplicate, or won't fix verdict. If an untriaged issue is a bug, leave it to github-issue-triage rather than grouping it
+5. **Bugs and contract changes aren't feedback.** The script already leaves out issues triage gave an implement, feature, duplicate, or won't fix verdict. If an untriaged issue is a bug, leave it to github-issue-triage rather than grouping it. A request triage handed over with its **opportunity** verdict is feedback: group it like any other
 6. **GitHub data only** (D-6's spirit): issues, discussions, and reactions. No external tracker, survey, or analytics source
 
 ## The script
@@ -61,6 +61,10 @@ What the script decides for you, so the pass doesn't re-derive it:
 `--label`, `--accepted-label`, and `--marker` rename `opportunity`, `planned`, and `Triage:` for a repo that uses other names. `--json` prints JSON lines, the first one `{"autonomy": ...}`.
 
 ## Workflow
+
+### From triage
+
+github-issue-triage sends a user's request for a new capability here instead of writing a spec for it: it comments `Triage: **opportunity**` on the request and leaves the grouping to intake. That comment is a hand-off, not a grouping: the script reads the request NEW_FEEDBACK until an opportunity's Evidence section lists it, and `triage_state.py` reads it TRIAGED, so neither skill asks for it twice. Group it in step 2 as usual; intake's own comment on it, linking the opportunity, follows triage's. Triage keeps the rest: a request an accepted opportunity already covers gets triage's **feature** verdict, held on that opportunity, and a bug or contract tweak stays an **implement**. The way back is step 5: an accepted opportunity is what triage writes a spec for.
 
 ### 1. Take stock
 

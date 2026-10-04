@@ -4,8 +4,8 @@ Three skills cover the path from a new issue to a published release, and a fourt
 
 | Skill | Job |
 |---|---|
-| `product-intake` | Feedback: groups requests and discussions into opportunity issues the maintainer accepts or declines |
-| `github-issue-triage` | The backlog: a verdict on every issue (implement, postpone, clarify), comments and labels, one PR per fix |
+| `product-intake` | Feedback: groups requests and discussions, including the ones triage hands over, into opportunity issues the maintainer accepts or declines |
+| `github-issue-triage` | The backlog: a verdict on every issue (implement, feature, postpone, clarify), comments and labels, one PR per fix; a user's request for a new capability goes to product intake |
 | `github-issue-resolve` | One issue in depth: verify, fix with a regression test, open a PR |
 | `github-pr-triage` | Landing: review, CI gate, rebase, merge, and the release |
 | `github-ship-watch` | The routine: a stuck release run, a missing upload, unannounced fixes, waiting issues |
@@ -74,7 +74,7 @@ The bump, registry, and install commands per ecosystem (Python, Node, Rust, Go, 
 | UNBLOCKED | The upstream issue it waited on has closed, its spec PR merged, or its last dependency closed | Resume; a dependency noted `:not_planned` never landed, so decide again first |
 | POSTPONED | Labelled `postponed` | Skip it |
 | REVISIT | Postponed before the newest stable release | Decide again |
-| TRIAGED | Triaged, with nothing pending | Nothing |
+| TRIAGED | Triaged, with nothing pending: a request handed to product intake (`opportunity`) reads this too | Nothing; intake groups the handed-over requests |
 
 ## Keeping it running
 
@@ -106,7 +106,8 @@ tmp/shipyard/skills/github-ship-watch/SKILL.md for <owner/repo> — watch and tr
 ## Safeguards
 
 - A change to a flag, format, default, public API, or stored state is designed in its issue first and checked against the repo's decisions log (`DECISIONS.md` or `docs/decisions.md`); what you settle is recorded there, so it isn't asked again
-- A feature (new behaviour beyond a bug fix or a contract tweak) gets a spec first: a file `docs/specs/NNN-<slug>.md` with numbered acceptance criteria, merged through its own PR before any implementer starts. Merging the spec is your approval, and the issue reads BLOCKED until then. Each criterion is proven by a test that names it (`test_sNNN_k_...` or a `proves: S-NNN-k` comment), and `specs.py coverage` fails CI when a built spec has a criterion without one
+- A user's request for a new capability goes to product intake first: triage comments `Triage: **opportunity**` and intake groups it with the requests for the same outcome into one opportunity issue. Nothing is specified until you accept the opportunity (the `planned` label); declining it closes it with your reason, and later requests for the same outcome are recorded against that decline. Bugs, contract tweaks, and small additive features skip intake
+- A feature (new behaviour beyond a bug fix or a contract tweak: an accepted opportunity, a request one covers, or an issue you filed) gets a spec first: a file `docs/specs/NNN-<slug>.md` with numbered acceptance criteria, merged through its own PR before any implementer starts. Merging the spec is your approval, and the issue reads BLOCKED until then. Each criterion is proven by a test that names it (`test_sNNN_k_...` or a `proves: S-NNN-k` comment), and `specs.py coverage` fails CI when a built spec has a criterion without one
 - A merged spec splits into build issues, one PR each (`specs.py split`), linked as sub-issues of the feature issue, with `Depends on #N` lines that hold each one until its dependency closes. Every criterion belongs to exactly one build issue, which `specs.py check` verifies in CI, and a `[roadmap] wip` limit, once the config has it (#70), caps how many are in progress at once
 - Scope is read narrowly: "triage" never merges, and "merge" never tags, unless you say so
 - A change that departs from a spec, breaks existing users, or belongs to a held PR stops and asks you, whatever the scope

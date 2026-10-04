@@ -22,6 +22,14 @@ Once the PR is up:
 The fix is in #{PR}: {what it does, in one or two sentences}. {Any trade-off or behaviour change, e.g. "a real permission error takes up to 2 s to surface on Windows".} {The answer to the issue's open question, if it had one.} This issue closes when #{PR} merges.
 ```
 
+## Opportunity
+
+A request for a new capability that no accepted opportunity covers goes to product intake (triage-rubric.md, A new capability). The verdict is the marker intake uses itself, so `triage_state.py` reads the issue TRIAGED and `intake_state.py` reads it NEW_FEEDBACK until an opportunity's Evidence section lists it. Don't use the word "implement" in this comment, and don't put an issue number right after a hold phrase ("waits on #40"): `triage_state.py` would read NEEDS_PR or BLOCKED.
+
+```markdown
+Triage: **opportunity**. {What the request asks for, in one sentence}: a new capability, not a bug fix or a contract tweak. It goes to product intake, which groups it with the requests for the same outcome into one opportunity issue{, likely #{open opportunity}}; the maintainer accepts or declines that opportunity, and an accepted one gets a spec before anything is built. Follow this issue for the link to the opportunity.
+```
+
 ## Feature
 
 A feature waits for its spec ([spec-gate.md](spec-gate.md)). Keep "On hold" and the spec PR's `owner/repo#N` on one line, so `triage_state.py` reports BLOCKED until the spec merges and UNBLOCKED after. Don't use the word "implement" in this comment: the script reads the latest triage comment's verdict from it.
@@ -32,6 +40,14 @@ Triage: **feature**. {What the new behaviour is, in one or two sentences, and wh
 The spec is in #{spec PR} (`docs/specs/{NNN}-{slug}.md`), with its acceptance criteria. Merging it is the approval; the build starts after that.
 
 On hold: the build waits on {owner/repo}#{spec PR}, the spec
+```
+
+A request an accepted opportunity covers is built under that opportunity: its spec is the opportunity's, so the request holds on the opportunity issue, which closes when the build does. Add the request to the opportunity's Evidence section too.
+
+```markdown
+Triage: **feature**. This asks for the outcome of #{opportunity}, which the maintainer accepted; it's built under that issue{, whose spec is in #{spec PR}}, and this one closes with it.
+
+On hold: built under {owner/repo}#{opportunity}, the accepted opportunity
 ```
 
 Once the spec merges, edit the issue body to link it and split the spec into build issues ([spec-gate.md](spec-gate.md), Split it into build issues). Comment the Implement template on each build issue, naming the spec and the criteria it delivers.

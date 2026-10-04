@@ -327,3 +327,24 @@ def test_the_310_reader_reads_plain_lines_and_refuses_the_rest(ist: ModuleType, 
     for unreadable in ('autonomy.intake = "observe"\n', '[autonomy]\nintake = ["observe"]\n'):
         with pytest.raises(SystemExit):
             ist.config_values_310(unreadable, path, "autonomy", ("intake",))
+
+
+COMMENTS = SCRIPT.parents[2] / "github-issue-triage" / "references" / "comments.md"
+
+
+def triage_template(section: str, index: int = 0) -> str:
+    """The ``index``-th markdown template under a ``## section`` heading of triage's comments.md"""
+    text = COMMENTS.read_text(encoding="utf-8").split(f"\n## {section}\n", 1)[1].split("\n## ", 1)[0]
+    return text.split("```markdown\n")[index + 1].split("\n```", 1)[0]
+
+
+def test_a_request_triage_hands_over_is_feedback_until_an_opportunity_lists_it(ist: ModuleType) -> None:
+    handed = triage_template("Opportunity")
+    assert ist.verdict(handed, "Triage:") == "opportunity"
+    covered = triage_template("Feature", 1)  # an accepted opportunity covers it: triage's
+    fake = Fake([issue(1, handed), issue(2, handed), issue(3, covered)], [opportunity(10, "- #2")])
+    found = states(ist, fake)
+    assert found[1][0] == "NEW_FEEDBACK"  # handed over, not yet grouped
+    assert found[10][0] == "OPPORTUNITY_OPEN"
+    assert 2 not in found  # grouped: a member of #10, no row of its own
+    assert 3 not in found  # not feedback: triage builds it under the accepted opportunity
