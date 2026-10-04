@@ -1,9 +1,16 @@
 """github-ship-watch's fleet report (spec S-001): the fleet file, from fixtures"""
 
+import datetime as dt
 import importlib.util
+import json
+import subprocess
 import sys
+import tempfile
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -142,3 +149,312 @@ def test_s001_8_the_watch_uses_the_given_incident_label_over_the_configs(ws: Mod
     args = ws.arguments().parse_args(["owner/other", "--incident-label", "sev"])
     assert args.incident_label == "sev"
     assert ws.arguments().parse_args(["owner/other"]).incident_label is None
+
+
+# -- the report: watch_state.py, metrics.py, and the clone answered by a fake runner --------
+
+NOW = dt.datetime(2026, 10, 5, 7, 0, tzinfo=dt.timezone.utc)  # noqa: UP017 (runs under 3.10 too)
+NOT_FOUND = "GraphQL: Could not resolve to a Repository with the name 'owner/gone'. (repository)\nmore"
+
+
+def row(state: str, subject: str, detail: str = "") -> dict[str, str]:
+    return {"state": state, "subject": subject, "detail": detail}
+
+
+def proc(code: int, out: str = "", err: str = "") -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess([], code, out, err)
+
+
+def measures(*texts: str) -> dict[str, Any]:
+    names = ("Deploy frequency", "Lead time")
+    return {
+        "repo": "o/r",
+        "days": 30,
+        "start": "2026-09-05T07:00:00+00:00",
+        "end": NOW.isoformat(),
+        "measures": [
+            {"measure": n, "value": None if t == "no data" else 1.0, "unit": "hours", "text": t}
+            for n, t in zip(names, texts, strict=True)
+        ],
+    }
+
+
+@dataclass
+class Fake:
+    """Answers each repo's clone, watch_state.py, and metrics.py as a real run would"""
+
+    watch: dict[str, list[dict[str, str]]] = field(default_factory=dict)  # rows by repo; exit 1 on an action
+    metrics: dict[str, dict[str, Any]] = field(default_factory=dict)
+    failing: dict[str, tuple[str, str]] = field(default_factory=dict)  # repo: (the step that fails, its stderr)
+    calls: list[list[str]] = field(default_factory=list)
+
+    def __call__(self, cmd: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        cmd = list(cmd)
+        self.calls.append(cmd)
+        if cmd[:3] == ["gh", "repo", "clone"]:
+            step, repo = "clone", cmd[3]
+        else:
+            step, repo = Path(cmd[1]).name, cmd[2]
+        failing = self.failing.get(repo)
+        if failing is not None and failing[0] == step:
+            return proc(2, err=failing[1])
+        if step == "clone":
+            assert Path(cmd[4]).parent.is_dir()
+            return proc(0)
+        if step == "watch_state.py":
+            rows = self.watch[repo]
+            action = any(r["state"] in WATCH_ACTION for r in rows)
+            return proc(1 if action else 0, "".join(json.dumps(r, sort_keys=True) + "\n" for r in rows))
+        assert step == "metrics.py", cmd
+        return proc(0, json.dumps(self.metrics[repo]))
+
+
+WATCH_ACTION = {"BOT_FAILED", "UNANNOUNCED", "ISSUES", "INCIDENT_OPEN"}  # the action states these fixtures use
+
+THREE = """\
+[[repos]]
+repo = "romamo/shipyard"
+
+[[repos]]
+repo = "owner/gone"
+
+[[repos]]
+repo = "owner/other"
+incident_label = "sev"
+"""
+
+
+def fleet_run(
+    fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str], fake: Fake, text: str, *flags: str
+) -> tuple[int, str]:
+    path = write(tmp_path, text)
+    code = fl.main(["report", "--fleet", str(path), *flags], runner=fake, clock=lambda: NOW)
+    return code, capsys.readouterr().out
+
+
+def quiet_fake() -> Fake:
+    return Fake(
+        watch={
+            "romamo/shipyard": [row("HOLD", "#7", "by @amy, 2 h"), row("BOT_OK", "release.yml")],
+            "owner/other": [row("PUBLISHED", "v1.2.0", "other 1.2.0 on PyPI"), row("PRS_OPEN", "owner/other", "#4")],
+        }
+    )
+
+
+def test_the_watch_action_states_are_watch_states(fl: ModuleType, ws: ModuleType) -> None:
+    assert fl.ACTION == ws.ACTION
+
+
+def test_s001_1_every_repos_rows_are_named_with_actions_first(
+    fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = quiet_fake()
+    fake.watch["romamo/shipyard"].append(row("UNANNOUNCED", "v0.11.0", "#70 (since v0.10.0)"))
+    fake.watch["owner/other"].insert(0, row("INCIDENT_OPEN", "#9", "prod down, 1 h"))
+    _, out = fleet_run(fl, tmp_path, capsys, fake, FLEET)
+    lines = out.splitlines()
+    assert lines[:2] == [
+        "romamo/shipyard UNANNOUNCED    v0.11.0          #70 (since v0.10.0)",
+        "owner/other     INCIDENT_OPEN  #9               prod down, 1 h",
+    ]
+    assert lines[2:] == [
+        "romamo/shipyard HOLD           #7               by @amy, 2 h",
+        "romamo/shipyard BOT_OK         release.yml",
+        "owner/other     PUBLISHED      v1.2.0           other 1.2.0 on PyPI",
+        "owner/other     PRS_OPEN       owner/other      #4",
+    ]
+
+
+def test_s001_1_each_repo_is_watched_on_its_own_clone(
+    fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = quiet_fake()
+    fleet_run(fl, tmp_path, capsys, fake, FLEET)
+    clones = [c for c in fake.calls if c[:3] == ["gh", "repo", "clone"]]
+    watches = [c for c in fake.calls if c[1] == str(fl.WATCH_STATE)]
+    assert [c[3] for c in clones] == ["romamo/shipyard", "owner/other"]
+    assert [c[2] for c in watches] == ["romamo/shipyard", "owner/other"]
+    assert [c[c.index("--repo-dir") + 1] for c in watches] == [c[4] for c in clones]
+    assert not any(c[1] == str(fl.METRICS) for c in fake.calls)  # metrics only with --metrics
+
+
+def test_s001_2_the_report_exits_1_on_any_action_row_and_0_on_none(
+    fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = quiet_fake()
+    assert fleet_run(fl, tmp_path, capsys, fake, FLEET)[0] == 0  # a HOLD and PRS_OPEN are report-only
+    fake.watch["owner/other"].append(row("ISSUES", "owner/other", "NEW #12"))
+    assert fleet_run(fl, tmp_path, capsys, fake, FLEET)[0] == 1
+
+
+def test_s001_5_a_failed_check_is_one_repo_error_row_and_the_rest_is_reported(
+    fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = quiet_fake()
+    fake.failing["owner/gone"] = ("clone", NOT_FOUND)
+    code, out = fleet_run(fl, tmp_path, capsys, fake, THREE)
+    assert code == 2
+    lines = out.splitlines()
+    assert lines[0] == (
+        "owner/gone      REPO_ERROR     gh repo clone    "
+        "GraphQL: Could not resolve to a Repository with the name 'owner/gone'. (repository)"
+    )
+    assert [line.split()[0] for line in lines[1:]] == ["romamo/shipyard"] * 2 + ["owner/other"] * 2
+    assert not any(c[2:3] == ["owner/gone"] and c[1] == str(fl.WATCH_STATE) for c in fake.calls)
+
+
+def test_s001_5_a_failed_watch_or_metrics_is_a_repo_error_too(
+    fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = quiet_fake()
+    fake.failing["owner/other"] = ("watch_state.py", "error: gh repo view...: HTTP 403\nsecond line")
+    code, out = fleet_run(fl, tmp_path, capsys, fake, FLEET)
+    assert code == 2
+    assert out.splitlines()[0] == "owner/other     REPO_ERROR     watch_state.py   error: gh repo view...: HTTP 403"
+    assert sum("owner/other" in line for line in out.splitlines()) == 1
+
+    fake = quiet_fake()
+    fake.metrics["romamo/shipyard"] = measures("2.0 per week", "no data")
+    fake.failing["owner/other"] = ("metrics.py", "error: gh api graphql: rate limited")
+    code, out = fleet_run(fl, tmp_path, capsys, fake, FLEET, "--json", "--metrics")
+    assert code == 2
+    other = json.loads(out)["repos"][1]
+    assert other["metrics"] is None
+    assert other["rows"][-1] == row("REPO_ERROR", "metrics.py", "error: gh api graphql: rate limited")
+
+
+def test_s001_5_a_failure_with_nothing_on_stderr_names_its_exit(fl: ModuleType) -> None:
+    assert fl.error_row("watch_state.py", proc(-9)) == fl.Row(
+        "REPO_ERROR", "watch_state.py", "watch_state.py exited -9"
+    )
+
+
+def test_s001_7_json_is_one_object_with_each_repos_rows(
+    fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = quiet_fake()
+    fake.failing["owner/gone"] = ("clone", NOT_FOUND)
+    code, out = fleet_run(fl, tmp_path, capsys, fake, THREE, "--json")
+    assert code == 2
+    assert json.loads(out) == {
+        "repos": [
+            {"repo": "romamo/shipyard", "rows": fake.watch["romamo/shipyard"]},
+            {"repo": "owner/gone", "rows": [row("REPO_ERROR", "gh repo clone", NOT_FOUND.splitlines()[0])]},
+            {"repo": "owner/other", "rows": fake.watch["owner/other"]},
+        ]
+    }
+
+
+def test_s001_7_json_holds_each_repos_metrics_with_metrics(
+    fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = quiet_fake()
+    fake.metrics = {"romamo/shipyard": measures("2.0 per week", "no data"), "owner/other": measures("no data", "1.0 h")}
+    code, out = fleet_run(fl, tmp_path, capsys, fake, FLEET, "--json", "--metrics")
+    assert code == 0
+    found = json.loads(out)
+    assert [r["metrics"] for r in found["repos"]] == [fake.metrics["romamo/shipyard"], fake.metrics["owner/other"]]
+    runs = [c for c in fake.calls if c[1] == str(fl.METRICS)]
+    assert [c[c.index("--until") + 1] for c in runs] == [NOW.isoformat()] * 2  # one window for the fleet
+    assert "--incident-label" not in runs[0]
+    assert runs[1][-2:] == ["--incident-label", "sev"]
+
+
+def test_metrics_without_json_is_refused_until_the_table_shows_them(
+    fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as refused:
+        fleet_run(fl, tmp_path, capsys, quiet_fake(), FLEET, "--metrics")
+    assert refused.value.code == 2
+
+
+def test_a_watch_line_that_isnt_a_row_stops_the_report(fl: ModuleType) -> None:
+    with pytest.raises(SystemExit) as refused:
+        fl.watch_rows("o/r", '{"state": "BOT_OK"}\n')
+    assert "not a row" in str(refused.value)
+
+
+def workdirs(fake: Fake) -> list[Path]:
+    """The folder each clone went into: <temp>/fleet-*/<owner>/<name>"""
+    return [Path(c[4]).parent.parent for c in fake.calls if c[:3] == ["gh", "repo", "clone"]]
+
+
+@pytest.mark.parametrize(
+    ("text", "failing"),
+    [
+        (FLEET, {}),
+        (THREE, {"owner/gone": ("clone", NOT_FOUND)}),
+        (FLEET, {"owner/other": ("watch_state.py", "error: HTTP 403")}),
+    ],
+)
+def test_the_clones_go_in_a_temporary_folder_removed_after_the_run(
+    fl: ModuleType,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    text: str,
+    failing: dict[str, tuple[str, str]],
+) -> None:
+    fake = quiet_fake()
+    fake.failing = failing
+    fleet_run(fl, tmp_path, capsys, fake, text)
+    found = workdirs(fake)
+    assert len(found) == text.count("[[repos]]")
+    assert len(set(found)) == 1  # one folder for the run
+    assert found[0].name.startswith("fleet-")
+    assert found[0].parent.resolve() == Path(tempfile.gettempdir()).resolve()
+    assert not found[0].exists()
+
+
+@dataclass
+class Breaking(Fake):
+    """A fake whose watch_state.py prints a traceback, or whose run is interrupted"""
+
+    interrupt: bool = False
+
+    def __call__(self, cmd: Sequence[str]) -> subprocess.CompletedProcess[str]:
+        done = super().__call__(cmd)
+        if Path(list(cmd)[1]).name != "watch_state.py":
+            return done
+        if self.interrupt:
+            raise KeyboardInterrupt
+        return proc(1, "Traceback (most recent call last):\n")
+
+
+def test_a_watch_that_prints_no_json_stops_the_report_with_exit_2(
+    fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = Breaking(watch=quiet_fake().watch)
+    with pytest.raises(SystemExit) as refused:
+        fleet_run(fl, tmp_path, capsys, fake, FLEET)
+    assert refused.value.code == 2  # not a traceback's exit 1, which reads as an action row
+    assert "watch_state.py for romamo/shipyard printed 'Traceback" in str(refused.value)
+    assert not workdirs(fake)[0].exists()
+
+
+def test_metrics_that_print_no_json_stop_the_report_with_exit_2(fl: ModuleType) -> None:
+    with pytest.raises(SystemExit) as refused:
+        fl.decoded("", "metrics.py for o/r")
+    assert refused.value.code == 2
+    assert str(refused.value) == "error: metrics.py for o/r printed '', not JSON"
+
+
+def test_an_interrupted_run_removes_its_clones(
+    fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = Breaking(watch=quiet_fake().watch, interrupt=True)
+    with pytest.raises(KeyboardInterrupt):
+        fleet_run(fl, tmp_path, capsys, fake, FLEET)
+    assert not workdirs(fake)[0].exists()
+
+
+def test_s001_3_the_report_refuses_a_malformed_fleet_file_with_exit_2(tmp_path: Path) -> None:
+    path = write(tmp_path, '[[repos]]\nrepo = "shipyard"\n')
+    done = subprocess.run(
+        [sys.executable, str(SCRIPTS / "fleet.py"), "report", "--fleet", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 2
+    assert done.stdout == ""
+    assert done.stderr == f"error: {path}: repos[0]: repo 'shipyard' is not in owner/name form\n"
