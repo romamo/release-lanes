@@ -4,6 +4,7 @@ From a GitHub issue to a published release, run by agents and shipyard's release
 
 | Stage | Part | Does |
 |---|---|---|
+| Intake | `product-intake` skill | Group feature requests and discussions into opportunity issues the maintainer accepts (`planned`) or declines; an accepted one goes to the spec gate |
 | Triage | `github-issue-triage` skill | A verdict on every issue (implement, feature, postpone, clarify), a comment and labels, one PR per fix; a feature gets a spec in `docs/specs/` merged first |
 | Fix | `github-issue-resolve` skill | One issue: verify against main, fix with a regression test, open a PR |
 | Land | `github-pr-triage` skill | Review each PR in its own worktree, fix small problems, merge only on green CI |
@@ -305,6 +306,7 @@ stage defaults to `act`, which is how shipyard has always released:
 release = "propose"               # observe | propose | act
 deploy.production = "act"         # per deploy environment; an unlisted one acts
 rollback = "act"
+intake = "propose"                # observe | propose: the product-intake skill
 ```
 
 - **`release = "observe"`**: a due lane is reported in the run summary ("is due, but release
@@ -316,6 +318,9 @@ rollback = "act"
   `observe` and `propose`; `lane=policy` follows the policy like a scheduled run. Once the
   release is tagged, the land workflow closes the lane's issue with a comment naming the tag
   and the run, and says so when the issue proposed another version
+- **`intake`** (the product-intake skill) defaults to `propose`: it opens and updates
+  opportunity issues, and only the maintainer accepts or declines one, so `act` is refused.
+  `observe` reports the groups it would make
 - **The stop switch**: any open issue labelled `shipyard-hold` turns every `act` into
   `propose` for the repository. One label, no commit, so it works from a phone. While it is
   open no release happens by itself, the run summary names the hold, and a lane started by

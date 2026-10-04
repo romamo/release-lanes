@@ -4,6 +4,7 @@ Three skills cover the path from a new issue to a published release, and a fourt
 
 | Skill | Job |
 |---|---|
+| `product-intake` | Feedback: groups requests and discussions into opportunity issues the maintainer accepts or declines |
 | `github-issue-triage` | The backlog: a verdict on every issue (implement, postpone, clarify), comments and labels, one PR per fix |
 | `github-issue-resolve` | One issue in depth: verify, fix with a regression test, open a PR |
 | `github-pr-triage` | Landing: review, CI gate, rebase, merge, and the release |
@@ -32,6 +33,8 @@ Plain wording works the same, and the repo can be left out inside its checkout: 
 | Stage | Say | Stops at |
 |---|---|---|
 | Status only | `python3 $S/github-issue-triage/scripts/triage_state.py <owner/repo>` | A list of each issue's state; nothing changes |
+| Feedback status | `python3 $S/product-intake/scripts/intake_state.py <owner/repo>` | Each opportunity's state and the requests no opportunity groups yet; nothing changes |
+| Group feedback | `/product-intake <owner/repo>` or "group the feature requests" | Opportunity issues opened or updated; the accept or decline is yours |
 | Triage the backlog | `/github-issue-triage <owner/repo>` or "triage the new issues" | Comments, labels, and open PRs; nothing merged |
 | One issue | `/github-issue-resolve 57` or "fix #57" | One PR and the issue comment |
 | Triage one issue only | "triage #57, don't fix" | The verdict comment |

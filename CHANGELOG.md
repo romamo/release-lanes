@@ -41,6 +41,17 @@ bot.
 
 ## [0.10.1] - 2026-10-04
 
+- A `product-intake` skill groups product feedback (open issues triage left to it, open
+  discussions when Discussions are on, and their thumbs-up reactions) into one
+  `opportunity` issue per outcome, with the problem, who is affected, the evidence, and
+  what success looks like. The maintainer accepts one with the `planned` label or declines
+  it by closing it as not planned with the reason in a comment; a later request for a
+  declined outcome is linked into that opportunity's Evidence, never proposed again, and an
+  accepted one goes to github-issue-triage's spec gate as a feature. Its
+  `scripts/intake_state.py` reports NEW_FEEDBACK, OPPORTUNITY_OPEN, ACCEPTED, HANDED_OFF,
+  DECLINED, NO_REASON, DONE, MERGED, and OVERLAP. `[autonomy] intake` sets how far it
+  goes: `propose` (the default) or `observe`; `act` is refused, and `doctor` prints it (#69)
+
 ### Fixed
 
 - Spec and metrics follow-ups: `specs.py check` and `coverage` report "no specs" and

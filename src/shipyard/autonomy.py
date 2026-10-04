@@ -6,7 +6,8 @@ the stop switch: an open issue labelled shipyard-hold.
 - act: do it
 
 The hold turns every act into propose for the whole repository. Release autonomy is read by
-the planner; deploy and rollback autonomy by shipyard operate."""
+the planner; deploy and rollback autonomy by shipyard operate. Intake autonomy is read by the
+product-intake skill, and is observe or propose only: the maintainer's accept is its valve."""
 
 import re
 from collections.abc import Collection, Mapping
@@ -18,6 +19,7 @@ from shipyard.config import Table
 from shipyard.errors import ReleaseError
 
 HOLD_LABEL = "shipyard-hold"
+INTAKE = "intake"  # the [autonomy] key of the product-intake skill: not a StageKind, it never acts
 _ENVIRONMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
 
@@ -98,15 +100,17 @@ class Hold:
 
 @dataclass(frozen=True, slots=True)
 class AutonomyPolicy:
-    """The configured autonomy per stage; an environment not listed deploys at act (D-7)"""
+    """The configured autonomy per stage; an environment not listed deploys at act (D-7).
+    Intake defaults to propose: an opportunity is a proposal by nature"""
 
     release: Autonomy = Autonomy.ACT
     rollback: Autonomy = Autonomy.ACT
     deploy: Mapping[EnvironmentName, Autonomy] = field(default_factory=dict)
+    intake: Autonomy = Autonomy.PROPOSE
 
     @classmethod
     def parse(cls, t: Table) -> AutonomyPolicy:
-        t.allow(*StageKind)
+        t.allow(*StageKind, INTAKE)
         # its own words, not Table.table's: the message shows the shape a deploy level takes
         if not isinstance(t.raw.get("deploy", {}), dict):
             raise ReleaseError(f"{t.where}: deploy is a table of environments, such as deploy.production = 'propose'")
@@ -115,6 +119,7 @@ class AutonomyPolicy:
             release=_level(t, "release"),
             rollback=_level(t, "rollback"),
             deploy={EnvironmentName(name): _level(deploy, name) for name in deploy.raw},
+            intake=_intake(t),
         )
 
     def require_environments(self, known: Collection[str], where: str) -> None:
@@ -156,4 +161,16 @@ def _level(t: Table, key: str) -> Autonomy:
     value = t.raw.get(key, Autonomy.ACT.value)
     if not isinstance(value, str) or value not in set(Autonomy):
         raise ReleaseError(f"{t.where}: {key} must be one of {[a.value for a in Autonomy]}, got {value!r}")
+    return Autonomy(value)
+
+
+def _intake(t: Table) -> Autonomy:
+    """The intake level, absent meaning propose; act is refused, as only the maintainer accepts
+    or declines an opportunity"""
+    value = t.raw.get(INTAKE, Autonomy.PROPOSE.value)
+    allowed = [Autonomy.OBSERVE.value, Autonomy.PROPOSE.value]
+    if value == Autonomy.ACT.value:
+        raise ReleaseError(f"{t.where}: {INTAKE} is observe or propose: only the maintainer accepts an opportunity")
+    if not isinstance(value, str) or value not in allowed:
+        raise ReleaseError(f"{t.where}: {INTAKE} must be one of {allowed}, got {value!r}")
     return Autonomy(value)

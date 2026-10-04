@@ -1,0 +1,4 @@
+interface:
+  display_name: "Product Intake"
+  short_description: "Group feedback into opportunity issues the maintainer accepts or declines."
+  default_prompt: "Use $product-intake to group this repo's feature requests and discussions into opportunity issues, and report which ones wait for the maintainer's call."
