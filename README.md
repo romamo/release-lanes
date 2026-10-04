@@ -90,6 +90,8 @@ uvx --from git+https://github.com/romamo/shipyard@v0 shipyard doctor
 - A stable `vX.Y.Z` tag to count from
 - A CI workflow that runs on `workflow_call` with a `ref` input and checks that ref out
 - A workflow for each `dispatch` entry that runs on `workflow_dispatch` with a `tag` input
+- For each environment, a workflow that runs on `workflow_dispatch` with `tag` and
+  `environment` inputs, and a job that sets `environment:`
 - No `[tool.uv.sources]` entry taken from a local path, which CI and users don't have
 - No branch named `shipyard` on origin, which would block the `shipyard/<tag>` work branches
 
@@ -180,6 +182,32 @@ opened after its last release, a finished milestone) and no **gate** holds it. A
 also be started by hand from the Release workflow, which skips the triggers but not the
 gates. One run releases one lane, in the order hotfix, stable, rc, dev; GitHub's cron only
 starts a run, and the policy decides whether a window is open.
+
+#### Environments
+
+An optional `[environments]` section names where releases deploy, each through a deploy
+workflow of your own:
+
+```toml
+[environments.staging]
+lane = "rc"                       # deploy every release of this lane when it lands
+workflow = "deploy.yml"
+health = "https://staging.example.com/health"
+
+[environments.production]
+from = "staging"                  # promoted from staging instead of from a lane
+workflow = "deploy.yml"
+health = "https://example.com/health"
+bake_minutes = 60                 # how long staging stays healthy before promotion
+```
+
+An environment sets exactly one of `lane` (a lane the policy enables) or `from` (another
+environment, in a chain that ends at a `lane` one, with no cycle). After `land` publishes a
+release, it starts the workflow of every environment whose `lane` is the release's, with
+`-f tag=v<version> -f environment=<name>`, and lists it as `deploy.yml@staging`. The
+workflow's job sets `environment: ${{ inputs.environment }}`, so GitHub records a deployment
+for each run: those deployments, not shipyard, say what runs where. shipyard does not
+promote `from` environments yet; `health` and `bake_minutes` are read for that.
 
 ### Versions
 

@@ -9,11 +9,14 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from shipyard.errors import ReleaseError
 from shipyard.schedule import Freeze, Window
 from shipyard.version import Part
+
+if TYPE_CHECKING:
+    from shipyard.environments import Environment
 
 CONFIG_PATH = Path(".github") / "shipyard.toml"
 ALIAS_PATH = Path(".github") / "release-policy.toml"  # the policy's first name; the same keys
@@ -109,6 +112,7 @@ class Policy:
     release_title: str
     bot_name: str
     bot_email: str
+    environments: Mapping[str, Environment]
 
     @classmethod
     def load(cls, path: Path) -> Policy:
@@ -136,6 +140,7 @@ class Policy:
             "bot",
             "lanes",
             "version_lines",
+            "environments",
         )
         changelog = top.table("changelog")
         changelog.allow("path", "style")
@@ -170,6 +175,8 @@ class Policy:
             raise ReleaseError(f"{where}: [lanes] enables no lane")
         if Lane.STABLE in lanes and lanes[Lane.STABLE].promote and Lane.RC not in lanes:
             raise ReleaseError(f"{where}: lanes.stable promotes from rc, but lanes.rc is not enabled")
+        from shipyard import environments  # it reads tables as this module does, so it imports from here
+
         return cls(
             name=top.string("name"),
             mode=top.enum("mode", Mode),
@@ -191,6 +198,7 @@ class Policy:
             release_title=publish.string("release_title", default="{name} {version}"),
             bot_name=bot.string("name", default="github-actions[bot]"),
             bot_email=bot.string("email", default="41898282+github-actions[bot]@users.noreply.github.com"),
+            environments=environments.parse(top.table("environments", optional=True), lanes),
         )
 
     def rule(self, lane: Lane) -> LaneRule:

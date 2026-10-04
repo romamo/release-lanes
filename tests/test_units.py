@@ -223,3 +223,59 @@ class TestChangelog:
         entry = changelog.unreleased()[0]
         with pytest.raises(ReleaseError, match="Unreleased"):
             changelog.release(v("1.1.0"), dt.date(2026, 10, 5), [entry], from_unreleased=True)
+
+
+class TestEnvironments:
+    BASE = '\n[environments.staging]\nlane = "rc"\nworkflow = "deploy.yml"\n'
+
+    def load(self, text: str) -> Policy:
+        import tomllib
+
+        return Policy.parse(tomllib.loads(text), "policy")
+
+    def test_loads_in_order(self) -> None:
+        policy = self.load(
+            POLICY + self.BASE + '\n[environments.production]\nfrom = "staging"\nworkflow = "deploy.yml"\n'
+            'health = "https://example.com/health"\nbake_minutes = 60\n'
+        )
+        staging, production = policy.environments.values()
+        assert (staging.name, staging.lane, staging.source, staging.bake_minutes) == ("staging", Lane.RC, None, 0)
+        assert (production.lane, production.source, production.bake_minutes) == (None, "staging", 60)
+        assert production.health == "https://example.com/health"
+        assert dict(production.inputs) == {"environment": "production"}
+
+    def test_none_by_default(self) -> None:
+        assert self.load(POLICY).environments == {}
+
+    @pytest.mark.parametrize(
+        ("extra", "message"),
+        [
+            ('\n[environments.a]\nworkflow = "deploy.yml"\n', "exactly one of lane"),
+            ('\n[environments.a]\nlane = "rc"\nfrom = "staging"\nworkflow = "deploy.yml"\n', "exactly one of lane"),
+            ('\n[environments.a]\nfrom = "nowhere"\nworkflow = "deploy.yml"\n', "unknown environment 'nowhere'"),
+            (
+                '\n[environments.a]\nfrom = "b"\nworkflow = "deploy.yml"\n'
+                '\n[environments.b]\nfrom = "a"\nworkflow = "deploy.yml"\n',
+                "cycle: a -> b -> a",
+            ),
+            ('\n[environments.a]\nfrom = "a"\nworkflow = "deploy.yml"\n', "cycle: a -> a"),
+            ('\n[environments.a]\nlane = "beta"\nworkflow = "deploy.yml"\n', "lane must be one of"),
+            ('\n[environments.a]\nlane = "rc"\nworkflow = "deploy.yml"\nregion = "eu"\n', "unknown keys"),
+            ('\n[environments.a]\nlane = "rc"\n', "workflow is required"),
+            ('\n[environments.a]\nlane = "rc"\nworkflow = "../deploy.yml"\n', "workflow names a file"),
+            ('\n[environments.a]\nlane = "rc"\nworkflow = "deploy.yml"\nhealth = "example.com"\n', "http"),
+            ('\n[environments.a]\nlane = "rc"\nworkflow = "deploy.yml"\nbake_minutes = 5\n', "bake_minutes"),
+            ('\n[environments.a]\nfrom = "staging"\nworkflow = "deploy.yml"\nbake_minutes = -1\n', "0..10080"),
+            ('\n[environments.a]\nfrom = "staging"\nworkflow = "deploy.yml"\nbake_minutes = 1e3\n', "an integer"),
+            ('\n[environments."a b"]\nlane = "rc"\nworkflow = "deploy.yml"\n', "environment name"),
+            ("\n[environments]\nstaging2 = 1\n", "must be a table"),
+        ],
+    )
+    def test_rejects(self, extra: str, message: str) -> None:
+        with pytest.raises(ReleaseError, match=message):
+            self.load(POLICY + self.BASE + extra)
+
+    def test_the_lane_must_be_enabled(self) -> None:
+        text = POLICY.replace("[lanes.dev]\nquiet_minutes = 30\n", "") + self.BASE.replace('"rc"', '"dev"')
+        with pytest.raises(ReleaseError, match="lane dev is not enabled"):
+            self.load(text)

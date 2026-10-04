@@ -7,7 +7,7 @@ from shipyard.cli import main
 from shipyard.doctor import doctor
 from shipyard.errors import ReleaseError
 from shipyard.init import init
-from shipyard.policy import Policy, config_path
+from shipyard.policy import Lane, Policy, config_path
 
 from .conftest import Repo
 
@@ -112,6 +112,71 @@ def test_doctor_reports_what_is_missing(repo: Repo) -> None:
     assert failed == {"workflow", "dispatch"}
     repo.write(".github/workflows/publish.yml", PUBLISH)
     assert "dispatch" not in {c.name for c in doctor(repo.root) if c.status == "FAIL"}
+
+
+DEPLOY = """\
+name: Deploy
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        type: string
+        required: true
+      environment:
+        type: string
+        required: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps: []
+"""
+
+
+def test_init_writes_an_environments_example_that_parses(repo: Repo) -> None:
+    written = init(repo.root, "ci.yml", force=True).written
+    text = written[0].read_text(encoding="utf-8")
+    assert Policy.load(written[0]).environments == {}  # commented out
+    start = text.index("# [environments.staging]")
+    end = text.index("\n\n", start)
+    example = "\n".join(line.removeprefix("#").removeprefix(" ") for line in text[start:end].splitlines())
+    assert "${{ inputs.environment }}" in text
+    repo.write(".github/shipyard.toml", text[:start] + example + text[end:])
+    environments = Policy.load(written[0]).environments
+    assert [(e.name, e.lane, e.source, e.bake_minutes) for e in environments.values()] == [
+        ("staging", Lane.RC, None, 0),
+        ("production", None, "staging", 60),
+    ]
+
+
+def test_doctor_checks_each_environments_workflow(repo: Repo) -> None:
+    repo.write(
+        repo.policy_file,
+        repo.read(repo.policy_file)
+        + '\n[environments.staging]\nlane = "rc"\nworkflow = "deploy.yml"\n'
+        + '\n[environments.production]\nfrom = "staging"\nworkflow = "deploy.yml"\n',
+    )
+
+    def checks() -> list[tuple[str, str]]:
+        return [(c.status, c.detail) for c in doctor(repo.root) if c.name == "environment"]
+
+    assert checks() == [
+        ("FAIL", "deploy.yml (staging): no .github/workflows/deploy.yml"),
+        ("FAIL", "deploy.yml (production): no .github/workflows/deploy.yml"),
+    ]
+    repo.write(".github/workflows/deploy.yml", DEPLOY)
+    passed = "runs on workflow_dispatch with 'tag' and 'environment' inputs"
+    assert checks() == [("PASS", f"deploy.yml (staging) {passed}"), ("PASS", f"deploy.yml (production) {passed}")]
+
+    no_input = DEPLOY.replace("      environment:\n        type: string\n        required: true\n", "")
+    repo.write(".github/workflows/deploy.yml", no_input)
+    assert checks()[0] == ("FAIL", "deploy.yml (staging) lacks the 'environment' input")
+    # the input alone is not the job's environment
+    repo.write(".github/workflows/deploy.yml", DEPLOY.replace("    environment: ${{ inputs.environment }}\n", ""))
+    assert checks()[0] == (
+        "FAIL",
+        "deploy.yml (staging) lacks a job with environment: (GitHub records a deployment only then)",
+    )
 
 
 def test_doctor_catches_a_version_line_that_no_longer_matches(repo: Repo) -> None:

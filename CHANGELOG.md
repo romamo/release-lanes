@@ -7,6 +7,16 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- Environments: an `[environments.<name>]` table in `.github/shipyard.toml` names a deploy
+  `workflow` and exactly one of `lane` or `from`, plus an optional `health` URL and, with
+  `from`, `bake_minutes`; a `from` chain must end at a `lane` environment. `land` starts the
+  workflow of each environment whose `lane` is the release's, with `tag` and `environment`
+  inputs, and lists it as `deploy.yml@staging`; `from` environments wait for promotion.
+  `doctor` checks each workflow takes both inputs and that a job sets `environment:`, so
+  GitHub records a deployment; `init` writes a commented example (#29)
+
 ## [0.7.0] - 2026-10-04
 
 ### Fixed

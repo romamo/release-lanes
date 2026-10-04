@@ -130,7 +130,25 @@ def doctor(root: Path) -> list[Check]:
             target = root / ".github" / "workflows" / workflow
             ok = target.is_file() and _takes_input(target.read_text(encoding="utf-8"), "workflow_dispatch", "tag")
             add(ok, "dispatch", f"{workflow} ({rule.lane}) runs on workflow_dispatch with a 'tag' input")
+    for env in policy.environments.values():
+        checks.append(_deploy(root / ".github" / "workflows" / env.workflow, env.name))
     return checks
+
+
+def _deploy(path: Path, environment: str) -> Check:
+    """An environment's workflow takes the tag and the environment, and a job names the
+    environment, without which GitHub records no deployment"""
+    name = f"{path.name} ({environment})"
+    if not path.is_file():
+        return Check("FAIL", "environment", f"{name}: no .github/workflows/{path.name}")
+    text = path.read_text(encoding="utf-8")
+    missing = [f"the '{i}' input" for i in ("tag", "environment") if not _takes_input(text, "workflow_dispatch", i)]
+    jobs = re.search(r"^jobs:\s*(?:#.*)?$(?P<body>(?:\n[ \t#].*|\n\s*)*)", text, re.MULTILINE)
+    if jobs is None or not re.search(r"^\s+environment:", jobs["body"], re.MULTILINE):
+        missing.append("a job with environment: (GitHub records a deployment only then)")
+    if missing:
+        return Check("FAIL", "environment", f"{name} lacks {', '.join(missing)}")
+    return Check("PASS", "environment", f"{name} runs on workflow_dispatch with 'tag' and 'environment' inputs")
 
 
 def _work_branch(git: Git) -> Check:

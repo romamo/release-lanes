@@ -118,6 +118,48 @@ recommendation:
 A project that only wants "release after merges stop" uses a single
 `[lanes.stable]` with `quiet_minutes = 30` and no `promote_from`.
 
+### Environments
+
+Ask whether releases deploy somewhere (a staging or production service), and skip this
+for a library that only publishes. For each environment the user names, add a table to the
+policy with exactly one of `lane` (deploy every release of that lane when it lands) or
+`from` (promoted from another environment; shipyard does not promote yet), plus the
+`workflow` that deploys and an optional `health` URL:
+
+```toml
+[environments.staging]
+lane = "rc"
+workflow = "deploy.yml"
+health = "https://staging.example.com/health"
+```
+
+The deploy workflow is the repo's own. `land` starts it with `tag` and `environment`
+inputs; it deploys that tag, and its job sets `environment:` so GitHub records a
+deployment, the record of what runs where:
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        type: string
+        required: true
+      environment:
+        type: string
+        required: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+```
+
+Turn an existing deploy workflow into this shape rather than writing a second one, and
+remove its own trigger on tags or pushes, so one release deploys once.
+
 ## 4. Write the files
 
 ```bash

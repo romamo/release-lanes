@@ -115,6 +115,20 @@ github_release = true
 [lanes.hotfix]                      # X.Y.(Z+1) from release/X.Y with chosen PRs, by hand only
 github_release = true
 
+# Environments a release deploys to. The workflow runs on workflow_dispatch with `tag` and
+# `environment` inputs, and its job sets `environment: ${{{{ inputs.environment }}}}`, so
+# GitHub records a deployment for each run.
+# [environments.staging]
+# lane = "rc"                       # deploy every release of this lane when it lands
+# workflow = "deploy.yml"
+# health = "https://staging.example.com/health"
+#
+# [environments.production]
+# from = "staging"                  # promoted from staging; shipyard does not promote yet
+# workflow = "deploy.yml"
+# health = "https://example.com/health"
+# bake_minutes = 60                 # how long staging stays healthy before promotion
+
 # Lines a release rewrites besides the version files; each pattern matches exactly once.
 # The replacement can use {{name}}, {{version}}, {{semver}}, {{minor}} (X.Y), and {{date}}.
 # [[version_lines]]
