@@ -135,6 +135,12 @@ github_release = true
 # file = "README.md"
 # pattern = '{d.name} v\\d+\\.\\d+\\.\\d+'
 # replace = "{d.name} v{{version}}"
+
+# How far shipyard goes by itself: observe (report only), propose (open an issue saying what
+# it would release; a person starts the lane), or act (the default). An open issue labelled
+# shipyard-hold turns every act into propose until it is closed.
+# [autonomy]
+# release = "act"
 '''
 
 
@@ -184,7 +190,7 @@ jobs:
       hotfix-from: ${{{{ inputs.hotfix-from || '' }}}}
     permissions:
       contents: write # pushes the release commit's work branch
-      issues: read # release-blocker issues and milestones
+      issues: write # blockers and milestones; opens the issue a hold or release = "propose" leads to
       pull-requests: read # a hotfix's merge commits
 
   ci:

@@ -6,8 +6,10 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from shipyard.autonomy import HOLD_LABEL, Autonomy, Hold
 from shipyard.changelog import Changelog
 from shipyard.errors import ReleaseError
+from shipyard.github import GitHub
 from shipyard.gitrepo import REMOTE, Git
 from shipyard.land import BLOCKING_BRANCH, WORK_PREFIX, blocked
 from shipyard.policy import ALIAS_PATH, CONFIG_PATH, BumpFrom, Policy, VersionFiles, config_path
@@ -25,7 +27,8 @@ class Check:
     detail: str
 
 
-def doctor(root: Path) -> list[Check]:
+def doctor(root: Path, github: GitHub | None = None) -> list[Check]:
+    """github reads the open hold; None (no gh) reports that it can't"""
     checks: list[Check] = []
 
     def add(ok: bool, name: str, detail: str, warn: bool = False) -> None:
@@ -45,6 +48,7 @@ def doctor(root: Path) -> list[Check]:
             " `tool` is this release or newer"
         )
         add(False, "config", detail, warn=True)
+    checks.extend(_autonomy(policy, github, root / CALLER))
 
     git = Git(root)
     add(git.ok("remote", "get-url", "origin"), "remote", "an 'origin' remote to push releases to")
@@ -176,6 +180,41 @@ def _sets_environment(path: Path, seen: set[Path]) -> bool:
         if (local := _LOCAL_USES.match(key)) and _sets_environment(path.parent / local["file"], seen):
             return True
     return False
+
+
+def _autonomy(policy: Policy, github: GitHub | None, caller: Path) -> list[Check]:
+    """The effective autonomy per stage, and the stop switch: an open hold is a WARN, and so
+    is a caller that can't open the issue a hold or propose leads to"""
+    checks = []
+    if github is None:
+        hold = Hold()
+        checks.append(Check("WARN", "hold", f"can't read issues for {HOLD_LABEL}: gh isn't installed"))
+    else:
+        try:
+            hold = Hold.read(github)
+        except ReleaseError as exc:
+            hold = Hold()
+            checks.append(Check("WARN", "hold", f"can't read issues for {HOLD_LABEL}: {exc}"))
+        else:
+            if hold.on:
+                detail = f"{hold.reason}: no release, deploy, or rollback acts by itself; close it to resume"
+                checks.append(Check("WARN", "hold", detail))
+            else:
+                checks.append(Check("PASS", "hold", f"no open {HOLD_LABEL} issue"))
+    levels = [f"{stage} {policy.autonomy.effective(stage, hold)}" for stage in policy.autonomy.stages()]
+    default = Autonomy.PROPOSE if hold.on else Autonomy.ACT
+    other = "any other" if policy.autonomy.deploy else "every"
+    detail = ", ".join(levels) + f"; {other} deploy environment {default}"
+    if hold.on:
+        detail += f" ({hold.reason})"
+    checks.append(Check("PASS", "autonomy", detail + "; deploy and rollback take effect once shipyard deploys"))
+    if caller.is_file() and not re.search(r"^\s*issues:\s*write\b", caller.read_text(encoding="utf-8"), re.MULTILINE):
+        detail = (
+            f"{CALLER} grants no `issues: write`: under a {HOLD_LABEL} or release = 'propose' the run fails"
+            " opening its proposal issue; grant it to the prepare job"
+        )
+        checks.append(Check("WARN", "permissions", detail))
+    return checks
 
 
 def _work_branch(git: Git) -> Check:

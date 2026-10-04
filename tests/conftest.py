@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from shipyard.github import Milestone
+from shipyard.autonomy import HOLD_LABEL
+from shipyard.github import Issue, Milestone
 from shipyard.gitrepo import Git
 from shipyard.policy import ALIAS_PATH, CONFIG_PATH, Policy, config_path
 
@@ -90,13 +91,18 @@ def at_day(days: float, hour: int = 8) -> dt.datetime:
 @dataclass
 class FakeGitHub:
     blockers: list[str] = field(default_factory=list)
+    holds: list[str] = field(default_factory=list)  # open shipyard-hold issues, '#N title'
+    issues: dict[int, Issue] = field(default_factory=dict)  # issues shipyard opened, by number
+    edits: int = 0  # update_issue calls
+    labels_read: list[str] = field(default_factory=list)
     milestones: dict[str, Milestone] = field(default_factory=dict)
     merges: dict[int, str] = field(default_factory=dict)
     releases: list[tuple[str, str, str, bool]] = field(default_factory=list)
     dispatched: list[tuple[str, str, str, dict[str, str]]] = field(default_factory=list)
 
     def open_issues(self, label: str) -> list[str]:
-        return list(self.blockers)
+        self.labels_read.append(label)
+        return list(self.holds if label == HOLD_LABEL else self.blockers)
 
     def milestone(self, title: str) -> Milestone | None:
         return self.milestones.get(title)
@@ -109,6 +115,19 @@ class FakeGitHub:
 
     def dispatch(self, workflow: str, ref: str, tag: str, inputs: Mapping[str, str] | None = None) -> None:
         self.dispatched.append((workflow, ref, tag, dict(inputs or {})))
+
+    def find_issue(self, marker: str) -> Issue | None:
+        hits = [i for i in self.issues.values() if marker in i.body]
+        return min(hits, key=lambda i: i.number) if hits else None
+
+    def create_issue(self, title: str, body: str) -> int:
+        number = 100 + len(self.issues)
+        self.issues[number] = Issue(number, title, body)
+        return number
+
+    def update_issue(self, number: int, title: str, body: str) -> None:
+        self.issues[number] = Issue(number, title, body)
+        self.edits += 1
 
 
 @dataclass

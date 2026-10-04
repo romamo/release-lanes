@@ -2,6 +2,7 @@
 
   settle-minutes  how long to wait after a push for more merges
   plan            decide whether a lane releases now; JSON on stdout
+  propose         open or update the issue for each release a plan proposed
   prepare         stamp a planned release into the checkout, optionally commit and push it
   land            push, tag, sync main, and publish a release commit that passed CI
   cleanup         delete a release commit's work branch
@@ -17,18 +18,20 @@ import argparse
 import datetime as dt
 import json
 import os
+import shutil
 import sys
 from collections.abc import Mapping
 from pathlib import Path
 
 from shipyard.doctor import CALLER, doctor
 from shipyard.errors import ReleaseError
-from shipyard.github import GhCli
+from shipyard.github import GhCli, GitHub
 from shipyard.gitrepo import Git
 from shipyard.init import init
 from shipyard.land import cleanup, land, prepare
-from shipyard.planner import Event, Hotfix, Planner
+from shipyard.planner import Event, Hotfix, Planner, Proposal
 from shipyard.policy import ALIAS_PATH, CONFIG_PATH, Lane, Policy, config_path
+from shipyard.propose import propose
 from shipyard.stamp import notes, sync
 from shipyard.version import Version
 
@@ -48,6 +51,16 @@ def _ints(text: str) -> tuple[int, ...]:
         return tuple(int(p.lstrip("#")) for p in parts)
     except ValueError:
         raise ReleaseError(f"pull request numbers are integers, such as 12,15; got {text!r}") from None
+
+
+def _proposals(text: str) -> tuple[Proposal, ...]:
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ReleaseError(f"--proposals is the plan's proposals output, a JSON list: {exc}") from None
+    if not isinstance(raw, list) or not raw:
+        raise ReleaseError(f"--proposals is a non-empty JSON list; got {text!r}")
+    return tuple(Proposal.from_dict(item) for item in raw)
 
 
 def _now(text: str | None) -> dt.datetime:
@@ -76,6 +89,9 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--hotfix-from", default="", help="hotfix: the stable tag to fix (default: the latest)")
     p.add_argument("--now", help="ISO time with offset (default: now)")
     p.add_argument("--github-output", type=Path)
+
+    p = sub.add_parser("propose", help="open or update the issue for each release a plan proposed")
+    p.add_argument("--proposals", required=True, help="the plan's proposals output, a JSON list")
 
     p = sub.add_parser("prepare", help="stamp a planned release into the checkout")
     _release_args(p)
@@ -120,9 +136,11 @@ def _release_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--version", required=True, type=Version.parse)
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str], github: GitHub | None = None) -> int:
+    """github stands in for gh, as tests pass a fake"""
     args = _parser().parse_args(argv)
     root: Path = args.repo.resolve()
+    hub = github or GhCli(root)
     if args.command == "init":
         initialized = init(root, args.ci, args.force)
         for path in initialized.written:
@@ -132,7 +150,7 @@ def main(argv: list[str]) -> int:
         print("next: review the policy, then run `shipyard doctor`")
         return 0
     if args.command == "doctor":
-        checks = doctor(root)
+        checks = doctor(root, github or (GhCli(root) if shutil.which("gh") else None))
         for check in checks:
             print(f"{check.status} {check.name}: {check.detail}")
         return 1 if any(c.status == "FAIL" for c in checks) else 0
@@ -148,10 +166,13 @@ def main(argv: list[str]) -> int:
         hotfix = Hotfix(_ints(args.hotfix_prs), args.hotfix_from or None) if lane is Lane.HOTFIX else None
         if hotfix is None and (args.hotfix_prs or args.hotfix_from):
             raise ReleaseError("--hotfix-prs and --hotfix-from go with --lane hotfix")
-        decision = Planner(git, policy, GhCli(root), _now(args.now)).plan(event, lane, args.dry_run, hotfix)
+        decision = Planner(git, policy, hub, _now(args.now)).plan(event, lane, args.dry_run, hotfix)
         outputs = decision.outputs()
         print(json.dumps(outputs, indent=2))
         _outputs(args.github_output, outputs)
+    elif args.command == "propose":
+        for done in propose(git, policy, hub, _proposals(args.proposals)):
+            print(f"{done.outcome} #{done.issue}: {done.proposal.lane} {done.proposal.version}, {done.proposal.cause}")
     elif args.command == "prepare":
         prepared = prepare(
             git,
@@ -172,7 +193,7 @@ def main(argv: list[str]) -> int:
         sha = prepared.sha if (prepared.pushed or not args.push) else ""
         _outputs(args.github_output, {"sha": sha})
     elif args.command == "land":
-        landed = land(git, policy, GhCli(root), Lane(args.lane), args.version, args.sha, args.base, args.date or today)
+        landed = land(git, policy, hub, Lane(args.lane), args.version, args.sha, args.base, args.date or today)
         print(
             json.dumps(
                 {

@@ -209,6 +209,37 @@ workflow's job sets `environment: ${{ inputs.environment }}`, so GitHub records 
 for each run: those deployments, not shipyard, say what runs where. shipyard does not
 promote `from` environments yet; `health` and `bake_minutes` are read for that.
 
+### Autonomy and the stop switch
+
+`[autonomy]` in the same file sets how far shipyard goes by itself at each stage: `observe`
+reports only, `propose` opens an issue saying what it would do, and `act` does it. Every
+stage defaults to `act`, which is how shipyard has always released:
+
+```toml
+[autonomy]
+release = "propose"               # observe | propose | act
+deploy.production = "act"         # per deploy environment; an unlisted one acts
+rollback = "act"
+```
+
+- **`release = "observe"`**: a due lane is reported in the run summary ("is due, but release
+  autonomy is observe") and nothing is pushed
+- **`release = "propose"`**: shipyard opens one issue per due lane, "Ready to release vX on
+  `<lane>`", with the version and its entries, and updates that same issue on later runs. A
+  person releases by starting the lane by hand: `gh workflow run release.yml -f lane=<lane>
+  -f dry-run=false`. A lane started by hand is a person acting, so it releases under
+  `observe` and `propose`; `lane=policy` follows the policy like a scheduled run
+- **The stop switch**: any open issue labelled `shipyard-hold` turns every `act` into
+  `propose` for the repository. One label, no commit, so it works from a phone. While it is
+  open no release happens by itself, the run summary names the hold, and a lane started by
+  hand is refused too: close the hold to release
+
+Opening the proposal issue needs `issues: write` on the prepare job in your
+`.github/workflows/release.yml` (`shipyard init` writes it; a repository set up earlier
+grants `issues: read` and gets a doctor warning). `doctor` prints the effective autonomy per
+stage and warns while a hold is open. `deploy` and `rollback` are read and checked now, and
+take effect once shipyard deploys and rolls back.
+
 ### Versions
 
 - The next stable version is the last stable tag bumped by the pending entries, or the open
@@ -228,6 +259,7 @@ The workflows call these; you can run them locally too.
 | `init` | Write the policy and the calling workflow |
 | `doctor` | Check the repository is ready; exit 1 on a failure |
 | `plan` | Decide whether a lane releases now; JSON on stdout |
+| `propose` | Open or update the issue for each release a plan proposed |
 | `prepare` | Stamp a planned release; `--commit`, `--push` |
 | `land` | Push, tag, sync main, and publish a release commit that passed CI |
 | `cleanup` | Delete a release commit's work branch |

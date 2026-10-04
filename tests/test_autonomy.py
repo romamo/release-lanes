@@ -1,0 +1,273 @@
+"""[autonomy] and the stop switch (#32): parsing, the hold, release autonomy in the planner,
+the proposal issue, and doctor's report"""
+
+import datetime as dt
+import json
+import re
+import tomllib
+from pathlib import Path
+
+import pytest
+
+from shipyard.autonomy import HOLD_LABEL, Autonomy, AutonomyPolicy, Environment, Hold, Stage
+from shipyard.cli import main
+from shipyard.doctor import doctor
+from shipyard.errors import ReleaseError
+from shipyard.planner import Decision, Event, Proposal
+from shipyard.policy import Lane, Policy
+from shipyard.propose import Outcome, marker, propose
+
+from .conftest import POLICY, Repo, at_day
+from .test_lanes import plan
+
+HELD = Hold(("#7 Investigating the 1.1 regression",))
+PRODUCTION = Stage.deploy(Environment("production"))
+
+
+def autonomy(text: str) -> AutonomyPolicy:
+    return Policy.parse(tomllib.loads(POLICY + "\n[autonomy]\n" + text), "shipyard.toml").autonomy
+
+
+def set_autonomy(repo: Repo, text: str) -> None:
+    repo.write(repo.policy_file, POLICY + "\n[autonomy]\n" + text)
+
+
+# -- the config ------------------------------------------------------------------------------
+
+
+def test_no_autonomy_section_acts_everywhere(repo: Repo) -> None:
+    policy = repo.policy
+    for stage in (Stage.release(), Stage.rollback(), PRODUCTION):
+        assert policy.autonomy.configured(stage) is Autonomy.ACT
+        assert policy.autonomy.effective(stage, Hold()) is Autonomy.ACT
+
+
+def test_autonomy_parses_each_stage() -> None:
+    parsed = autonomy(
+        'release = "propose"\nrollback = "observe"\ndeploy.production = "propose"\ndeploy.staging = "act"\n'
+    )
+    assert parsed.configured(Stage.release()) is Autonomy.PROPOSE
+    assert parsed.configured(Stage.rollback()) is Autonomy.OBSERVE
+    assert parsed.configured(PRODUCTION) is Autonomy.PROPOSE
+    assert parsed.configured(Stage.deploy(Environment("staging"))) is Autonomy.ACT
+    assert parsed.configured(Stage.deploy(Environment("qa"))) is Autonomy.ACT  # unlisted: act (D-7)
+    assert [str(s) for s in parsed.stages()] == ["release", "deploy.production", "deploy.staging", "rollback"]
+
+
+@pytest.mark.parametrize(
+    ("text", "error"),
+    [
+        ('releases = "act"', r"\[autonomy\]: unknown keys \['releases'\]"),
+        ('release = "auto"', r"release must be one of \['observe', 'propose', 'act'\], got 'auto'"),
+        ("release = true", "release must be one of"),
+        ('deploy = "propose"', "deploy is a table of environments"),
+        ('deploy.production = "yes"', r"\[autonomy\] \[deploy\]: production must be one of"),
+        ('deploy."pro duction" = "act"', "an environment name is"),
+    ],
+)
+def test_autonomy_refuses_what_it_does_not_know(text: str, error: str) -> None:
+    with pytest.raises(ReleaseError, match=error):
+        autonomy(text)
+
+
+def test_a_deploy_stage_names_its_environment() -> None:
+    with pytest.raises(ReleaseError, match="a deploy stage names its environment"):
+        Stage(Stage.release().kind, Environment("production"))
+
+
+# -- the hold --------------------------------------------------------------------------------
+
+
+def test_the_hold_turns_every_act_into_propose() -> None:
+    parsed = autonomy('rollback = "observe"\ndeploy.staging = "propose"\n')
+    assert parsed.effective(Stage.release(), HELD) is Autonomy.PROPOSE
+    assert parsed.effective(PRODUCTION, HELD) is Autonomy.PROPOSE
+    assert parsed.effective(Stage.deploy(Environment("staging")), HELD) is Autonomy.PROPOSE
+    assert parsed.effective(Stage.rollback(), HELD) is Autonomy.OBSERVE  # the hold never raises a level
+    assert parsed.cause(Stage.release(), HELD) == f"held by {HOLD_LABEL} #7"
+    assert parsed.cause(Stage.rollback(), HELD) == "rollback autonomy is observe"
+
+
+def test_the_hold_is_read_from_the_label(repo: Repo) -> None:
+    repo.github.blockers = ["#9 Data loss"]  # another label: no hold
+    assert not Hold.read(repo.github).on
+    repo.github.holds = ["#7 Investigating", "#8 Also"]
+    assert Hold.read(repo.github).reason == f"held by {HOLD_LABEL} #7, #8"
+
+
+# -- release autonomy in the planner ---------------------------------------------------------
+
+
+def test_act_releases_as_before(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A")
+    set_autonomy(repo, 'release = "act"\n')
+    decision = plan(repo, at_day(1))
+    assert (decision.action, decision.lane, str(decision.version)) == ("release", Lane.RC, "1.1.0rc1")
+    assert decision.outputs()["proposals"] == ""
+
+
+def test_observe_reports_and_releases_nothing(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A")
+    set_autonomy(repo, 'release = "observe"\n')
+    decision = plan(repo, at_day(1))
+    assert decision.action == "skip" and not decision.proposals
+    assert "rc: 1.1.0rc1 is due (window 'daily 07:00 UTC' opened" in decision.reason
+    assert "but release autonomy is observe" in decision.reason
+
+
+def test_propose_proposes_every_due_lane(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A")
+    set_autonomy(repo, 'release = "propose"\n')
+    decision = plan(repo, at_day(1))
+    assert decision.action == "propose" and decision.lane is None and decision.version is None
+    assert [(p.lane, str(p.version), p.cause) for p in decision.proposals] == [
+        (Lane.RC, "1.1.0rc1", "release autonomy is propose"),
+        (Lane.DEV, "1.1.0.dev2", "release autonomy is propose"),
+    ]
+    assert "rc: 1.1.0rc1 is due, proposed instead of released: release autonomy is propose" in decision.reason
+    proposals = json.loads(decision.outputs()["proposals"])
+    assert tuple(Proposal.from_dict(p) for p in proposals) == decision.proposals
+
+
+def test_a_person_starting_a_lane_releases_under_propose(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A")
+    set_autonomy(repo, 'release = "propose"\n')
+    decision = plan(repo, at_day(1), event=Event.MANUAL, lane=Lane.RC)
+    assert (decision.action, str(decision.version)) == ("release", "1.1.0rc1")
+    # lane=policy by hand follows the policy, as a scheduled run does (D-1)
+    assert plan(repo, at_day(1), event=Event.MANUAL).action == "propose"
+
+
+def test_the_hold_proposes_scheduled_and_push_runs(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A")
+    repo.github.holds = ["#7 Investigating"]
+    for event in (Event.SCHEDULE, Event.PUSH, Event.MANUAL):
+        decision = plan(repo, at_day(1), event=event)
+        assert decision.action == "propose", event
+        assert {p.cause for p in decision.proposals} == {f"held by {HOLD_LABEL} #7"}
+
+
+def test_the_hold_stops_a_hand_started_lane_until_closed(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A")
+    repo.github.holds = ["#7 Investigating"]
+    decision = plan(repo, at_day(1), event=Event.MANUAL, lane=Lane.RC)
+    assert decision.action == "skip"
+    assert decision.reason == f"rc: 1.1.0rc1 held by {HOLD_LABEL} #7; close it to release by hand"
+    repo.github.holds = []
+    assert plan(repo, at_day(1), event=Event.MANUAL, lane=Lane.RC).action == "release"
+
+
+def test_observe_stays_observe_under_the_hold(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A")
+    set_autonomy(repo, 'release = "observe"\n')
+    repo.github.holds = ["#7 Investigating"]
+    decision = plan(repo, at_day(1))
+    assert decision.action == "skip" and "release autonomy is observe" in decision.reason
+
+
+def test_the_hold_is_not_read_when_nothing_is_due(repo: Repo) -> None:
+    repo.github.holds = ["#7 Investigating"]
+    assert plan(repo, at_day(1)).action == "skip"
+    assert HOLD_LABEL not in repo.github.labels_read
+
+
+# -- the proposal issue ----------------------------------------------------------------------
+
+
+def proposed(repo: Repo, now: dt.datetime) -> Decision:
+    decision = plan(repo, now)
+    assert decision.action == "propose", decision.reason
+    return decision
+
+
+def test_the_proposal_issue_is_opened_once_and_updated(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A")
+    set_autonomy(repo, 'release = "propose"\n')
+    decision = proposed(repo, at_day(1))
+    first = propose(repo.git, repo.policy, repo.github, decision.proposals)
+    assert [(d.proposal.lane, d.outcome) for d in first] == [(Lane.RC, Outcome.OPENED), (Lane.DEV, Outcome.OPENED)]
+    rc = repo.github.issues[first[0].issue]
+    assert rc.title == "Ready to release v1.1.0rc1 on rc"
+    assert rc.body.startswith(marker(Lane.RC) + "\n")
+    assert "but release autonomy is propose." in rc.body
+    assert "#### Added\n\n- Feature A (#1)" in rc.body
+    assert "gh workflow run release.yml -f lane=rc -f dry-run=false" in rc.body
+    again = propose(repo.git, repo.policy, repo.github, proposed(repo, at_day(1)).proposals)
+    assert {d.outcome for d in again} == {Outcome.UNCHANGED}
+    assert len(repo.github.issues) == 2 and repo.github.edits == 0
+    repo.merge(2, "Fixed", "Fix B")
+    set_autonomy(repo, 'release = "propose"\n')  # merge resets the checkout to main
+    later = propose(repo.git, repo.policy, repo.github, proposed(repo, at_day(1)).proposals)
+    assert [(d.issue, d.outcome) for d in later][0] == (first[0].issue, Outcome.UPDATED)
+    assert len(repo.github.issues) == 2
+    assert "- Fix B (#2)" in repo.github.issues[first[0].issue].body
+
+
+def test_a_held_proposal_says_to_close_the_hold(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A")
+    repo.github.holds = ["#7 Investigating"]
+    [rc, _] = propose(repo.git, repo.policy, repo.github, proposed(repo, at_day(1)).proposals)
+    body = repo.github.issues[rc.issue].body
+    assert f"but held by {HOLD_LABEL} #7." in body
+    assert f"Close the open `{HOLD_LABEL}` issues first" in body
+
+
+def test_cli_propose(repo: Repo, capsys: pytest.CaptureFixture[str]) -> None:
+    repo.merge(1, "Added", "Feature A")
+    set_autonomy(repo, 'release = "propose"\n')
+    outputs = proposed(repo, at_day(1)).outputs()
+    args = ["--repo", str(repo.root), "propose", "--proposals", outputs["proposals"]]
+    assert main(args, repo.github) == 0
+    assert capsys.readouterr().out.startswith("opened #100: rc 1.1.0rc1, release autonomy is propose\n")
+    with pytest.raises(ReleaseError, match="non-empty JSON list"):
+        main(["--repo", str(repo.root), "propose", "--proposals", "[]"], repo.github)
+    with pytest.raises(ReleaseError, match="a proposal's lane is one of"):
+        bad = json.dumps([{"lane": "beta", "version": "1.0.0", "base": "abc", "cause": "x"}])
+        main(["--repo", str(repo.root), "propose", "--proposals", bad], repo.github)
+
+
+# -- doctor ----------------------------------------------------------------------------------
+
+
+def checks(repo: Repo, github: object) -> dict[str, tuple[str, str]]:
+    return {c.name: (c.status, c.detail) for c in doctor(repo.root, github)}  # type: ignore[arg-type]
+
+
+def test_doctor_reports_autonomy_and_the_hold(repo: Repo) -> None:
+    set_autonomy(repo, 'deploy.production = "propose"\n')
+    found = checks(repo, repo.github)
+    assert found["hold"] == ("PASS", f"no open {HOLD_LABEL} issue")
+    assert found["autonomy"][1].startswith(
+        "release act, deploy.production propose, rollback act; any other deploy environment act"
+    )
+    repo.github.holds = ["#7 Investigating"]
+    found = checks(repo, repo.github)
+    assert found["hold"][0] == "WARN" and found["hold"][1].startswith(f"held by {HOLD_LABEL} #7")
+    assert found["autonomy"][1].startswith("release propose, deploy.production propose, rollback propose")
+
+
+def test_doctor_warns_when_it_cannot_read_issues(repo: Repo) -> None:
+    assert checks(repo, None)["hold"] == ("WARN", f"can't read issues for {HOLD_LABEL}: gh isn't installed")
+
+
+def test_doctor_warns_on_a_caller_that_cannot_open_the_proposal(repo: Repo) -> None:
+    caller = Path(".github/workflows/release.yml")
+    repo.write(str(caller), "jobs:\n  prepare:\n    permissions:\n      issues: read\n")
+    assert checks(repo, repo.github)["permissions"][0] == "WARN"
+    repo.write(str(caller), "jobs:\n  prepare:\n    permissions:\n      issues: write\n")
+    assert "permissions" not in checks(repo, repo.github)
+
+
+# -- the workflow ----------------------------------------------------------------------------
+
+
+def test_prepare_yml_never_asks_a_caller_for_issues_write() -> None:
+    # A reusable workflow whose job asks for more than the caller grants fails to start, so a
+    # caller still granting `issues: read` must keep working; the propose job takes the caller's
+    # grant instead, and only it, so there is no workflow-level permissions block to inherit
+    text = (Path(__file__).parent.parent / ".github" / "workflows" / "prepare.yml").read_text()
+    assert not re.search(r"^\s+issues:\s*write", text, re.MULTILINE)
+    assert "\npermissions:" not in text
+    propose_job = text.split("\n  propose:\n", 1)[1]
+    assert "\n    permissions:" not in propose_job
+    assert "needs.prepare.outputs.action == 'propose' && needs.prepare.outputs.mode == 'release'" in propose_job

@@ -16,6 +16,13 @@ class Milestone:
     closed_issues: int
 
 
+@dataclass(frozen=True, slots=True)
+class Issue:
+    number: int
+    title: str
+    body: str
+
+
 class GitHub(Protocol):
     def open_issues(self, label: str) -> list[str]:
         """'#N title' for each open issue with the label"""
@@ -32,6 +39,14 @@ class GitHub(Protocol):
     def dispatch(self, workflow: str, ref: str, tag: str, inputs: Mapping[str, str] | None = None) -> None:
         """Start the workflow on ref with -f tag=<tag>, and -f name=value for each of inputs"""
         ...
+
+    def find_issue(self, marker: str) -> Issue | None:
+        """The open issue whose body holds the marker"""
+        ...
+
+    def create_issue(self, title: str, body: str) -> int: ...
+
+    def update_issue(self, number: int, title: str, body: str) -> None: ...
 
 
 class GhCli:
@@ -85,3 +100,20 @@ class GhCli:
     def dispatch(self, workflow: str, ref: str, tag: str, inputs: Mapping[str, str] | None = None) -> None:
         fields = [f"tag={tag}", *(f"{k}={v}" for k, v in (inputs or {}).items())]
         self._gh("workflow", "run", workflow, "--ref", ref, *(a for f in fields for a in ("-f", f)))
+
+    def find_issue(self, marker: str) -> Issue | None:
+        found = json.loads(
+            self._gh("issue", "list", "--state", "open", "--json", "number,title,body", "--limit", "500")
+        )
+        hits = [Issue(int(i["number"]), i["title"], i["body"]) for i in found if marker in i["body"]]
+        return min(hits, key=lambda i: i.number) if hits else None
+
+    def create_issue(self, title: str, body: str) -> int:
+        url = self._gh("issue", "create", "--title", title, "--body", body).strip()
+        number = url.rsplit("/", 1)[-1]
+        if not number.isdigit():
+            raise ReleaseError(f"gh issue create printed {url!r}, not an issue URL")
+        return int(number)
+
+    def update_issue(self, number: int, title: str, body: str) -> None:
+        self._gh("issue", "edit", str(number), "--title", title, "--body", body)

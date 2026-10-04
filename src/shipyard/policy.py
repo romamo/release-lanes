@@ -11,6 +11,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from shipyard.autonomy import AutonomyPolicy
 from shipyard.errors import ReleaseError
 from shipyard.schedule import Freeze, Window
 from shipyard.version import Part
@@ -113,6 +114,7 @@ class Policy:
     bot_name: str
     bot_email: str
     environments: Mapping[str, Environment]
+    autonomy: AutonomyPolicy = AutonomyPolicy()
 
     @classmethod
     def load(cls, path: Path) -> Policy:
@@ -141,6 +143,7 @@ class Policy:
             "lanes",
             "version_lines",
             "environments",
+            "autonomy",
         )
         changelog = top.table("changelog")
         changelog.allow("path", "style")
@@ -199,6 +202,7 @@ class Policy:
             bot_name=bot.string("name", default="github-actions[bot]"),
             bot_email=bot.string("email", default="41898282+github-actions[bot]@users.noreply.github.com"),
             environments=environments.parse(top.table("environments", optional=True), lanes),
+            autonomy=AutonomyPolicy.parse(top.table("autonomy", optional=True).raw, f"{where} [autonomy]"),
         )
 
     def rule(self, lane: Lane) -> LaneRule:
