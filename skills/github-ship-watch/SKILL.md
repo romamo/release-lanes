@@ -29,7 +29,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | State | Repair under "watch" |
 |---|---|
 | BOT_FAILED | Read the run. If the failure is a known flaky test or a transient push or network error ([github-pr-triage's ci-failures.md](../github-pr-triage/references/ci-failures.md)), `gh run rerun <id> --failed` once. Otherwise report the failing step and its error, with the run link |
-| BOT_STALLED | A shipyard bot has a release due and nothing running. Start the lane the plan names: `gh workflow run release.yml -f lane=<lane> -f dry-run=false`. Never `lane=policy` by hand: it cancels a waiting push run and then skips (romamo/shipyard#6) |
+| BOT_STALLED | A shipyard bot has a release due and nothing running. Start the lane the plan names: `gh workflow run release.yml -f lane=<lane> -f dry-run=false`. Never `lane=policy` by hand: it skips while main isn't quiet yet |
 | NOT_PUBLISHED | Find the publish run for the tag (`gh run list -w <publish workflow> --branch <tag>` or by the release's dispatch). Rerun its failed jobs once if the cause is flaky; a failed release check or build is reported, not retried |
 | PUBLISHING | Nothing; the next pass checks again |
 | PUBLISHED | Once per release, check that a clean install runs (github-pr-triage's [landing.md](../github-pr-triage/references/landing.md#ecosystems)); retry once on index lag |
