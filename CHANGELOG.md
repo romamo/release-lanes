@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-04
+
 ### Fixed
 
 - A scheduled or hand-started run of the prepare workflow no longer cancels a push run
@@ -111,7 +113,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/romamo/shipyard/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/romamo/shipyard/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/romamo/shipyard/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/romamo/shipyard/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/romamo/shipyard/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/romamo/shipyard/compare/v0.3.0...v0.3.1
