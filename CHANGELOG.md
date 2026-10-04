@@ -20,6 +20,16 @@ bot.
   A failed check now writes a `failure` status each time, up to `rollback_after` in a
   row, to count them. `doctor` validates `[operate]` and wants `issues: write` on the
   operate job once an environment has `health` (#31)
+- github-ship-watch reports what `shipyard operate` found, for a repo whose config has
+  `[environments.<name>]` tables: OPERATE_FAILED (the operate caller's latest run failed;
+  the watch reruns a flaky one once), UNHEALTHY (an environment's newest `shipyard health`
+  status is a failure), PROMOTION_DUE (an open "Ready to promote" proposal, with its
+  approve command, or a promotion operate would make or propose if it ran on a schedule),
+  and INCIDENT_OPEN (an open issue labelled `[operate] incident_label`, default
+  `incident`, with its age and the PRs linked to close it). Every repo with a shipyard
+  config also gets a HOLD row for an open `shipyard-hold` issue, with who opened it and
+  when; a hold alone doesn't make the watch exit 1. Incidents and holds lead the report,
+  and the watch never deploys or rolls back itself (#33)
 
 ## [0.9.0] - 2026-10-04
 
