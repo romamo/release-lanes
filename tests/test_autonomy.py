@@ -81,6 +81,18 @@ def test_autonomy_refuses_what_it_does_not_know(text: str, error: str) -> None:
         autonomy(text)
 
 
+def test_intake_proposes_by_default_and_never_acts() -> None:
+    assert autonomy("").intake is Autonomy.PROPOSE
+    assert autonomy('intake = "observe"\n').intake is Autonomy.OBSERVE
+    assert autonomy('intake = "propose"\n').intake is Autonomy.PROPOSE
+    with pytest.raises(ReleaseError, match=r"intake is observe or propose: only the maintainer accepts"):
+        autonomy('intake = "act"\n')
+    with pytest.raises(ReleaseError, match=r"intake must be one of \['observe', 'propose'\], got 1"):
+        autonomy("intake = 1\n")
+    # not a stage: the hold has nothing to turn, and doctor's stage list is unchanged
+    assert [str(s) for s in autonomy('intake = "observe"\n').stages()] == ["release", "rollback"]
+
+
 def test_autonomy_deploy_names_a_declared_environment() -> None:
     known = r"known: staging, production$"
     with pytest.raises(
@@ -331,6 +343,7 @@ def test_doctor_reports_autonomy_and_the_hold(repo: Repo) -> None:
     assert found["autonomy"][1].startswith(
         "release act, deploy.production propose, rollback act; any other deploy environment act"
     )
+    assert found["autonomy"][1].endswith("; intake propose in the product-intake skill")
     repo.github.holds = ["#7 Investigating"]
     found = checks(repo, repo.github)
     assert found["hold"][0] == "WARN" and found["hold"][1].startswith(f"held by {HOLD_LABEL} #7")

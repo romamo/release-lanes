@@ -216,7 +216,9 @@ def _autonomy(policy: Policy, github: GitHub | None, caller: Path) -> tuple[list
     detail = ", ".join(levels) + f"; {other} deploy environment {default}"
     if hold.on:
         detail += f" ({hold.reason})"
-    checks.append(Check("PASS", "autonomy", detail + "; deploy and rollback act in shipyard operate"))
+    detail += "; deploy and rollback act in shipyard operate"
+    detail += f"; intake {policy.autonomy.intake} in the product-intake skill"
+    checks.append(Check("PASS", "autonomy", detail))
     proposes = any(policy.autonomy.configured(stage) is Autonomy.PROPOSE for stage in policy.autonomy.stages())
     if (
         (proposes or hold.on)
