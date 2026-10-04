@@ -161,6 +161,12 @@ Turn an existing deploy workflow into this shape rather than writing a second on
 remove its own trigger on tags or pushes, so one release deploys once. shipyard starts it on
 the tag, so the deployment GitHub records names the tag as its ref.
 
+If the environment already exists on GitHub with deployment protection, it must also allow
+the release tags, since `land` starts the workflow on the tag (enabling GitHub Pages creates
+`github-pages` allowing only `main`). Add a tag rule `v*` under Settings → Environments →
+`<environment>` → Deployment branches and tags, or run
+`gh api -X POST repos/<owner>/<repo>/environments/<environment>/deployment-branch-policies -f name='v*' -f type=tag`.
+
 When an environment has `health` or `from`, also run `$CR init --operate` in step 4. It
 writes `.github/workflows/operate.yml`, which runs `shipyard operate` every 10 minutes:
 it checks each `health` URL (2xx within 10 s; a JSON body's `version` must name the

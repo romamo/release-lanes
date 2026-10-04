@@ -214,6 +214,12 @@ The workflow's job sets `environment: ${{ inputs.environment }}`, so GitHub reco
 deployment for each run, whose ref is the tag: those deployments, not shipyard, say what
 runs where.
 
+A GitHub environment with deployment protection must allow the release tags, since `land`
+starts the workflow on the tag: enabling GitHub Pages, for one, creates `github-pages`
+allowing only `main`, and rejects a run on `v1.2.0`. Add a tag rule `v*` under Settings →
+Environments → `<environment>` → Deployment branches and tags, or run
+`gh api -X POST repos/<owner>/<repo>/environments/<environment>/deployment-branch-policies -f name='v*' -f type=tag`.
+
 #### Operate: health, bake, promotion, and rollback
 
 With `from` or `health` in use, run `shipyard init --operate`. It writes

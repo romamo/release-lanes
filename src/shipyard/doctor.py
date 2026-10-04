@@ -52,7 +52,7 @@ def doctor(root: Path, github: GitHub | None = None) -> list[Check]:
         add(False, "config", detail, warn=True)
     autonomy, hold = _autonomy(policy, github, root / CALLER)
     checks.extend(autonomy)
-    if (operated := _operate(policy, hold, root / OPERATE_CALLER)) is not None:
+    if (operated := _operate(policy, hold, root, _operate_caller(root))) is not None:
         checks.append(operated)
 
     git = Git(root)
@@ -165,7 +165,8 @@ def _sets_environment(path: Path, seen: set[Path]) -> bool:
     if path in seen or not path.is_file():
         return False
     seen.add(path)
-    jobs = re.search(r"^jobs:\s*(?:#.*)?$(?P<body>(?:\n[ \t#].*|\n\s*)*)", path.read_text(encoding="utf-8"), re.M)
+    # the body runs to the first line that starts at column 0; a blank line doesn't end it
+    jobs = re.search(r"^jobs:[ \t]*(?:#.*)?$(?P<body>(?:\n(?:[ \t#].*)?)*)", path.read_text(encoding="utf-8"), re.M)
     job_indent: int | None = None
     key_indent: int | None = None
     for line in jobs["body"].splitlines() if jobs else ():
@@ -231,19 +232,37 @@ def _autonomy(policy: Policy, github: GitHub | None, caller: Path) -> tuple[list
     return checks, hold
 
 
-def _operate(policy: Policy, hold: Hold, caller: Path) -> Check | None:
-    """The operate caller, only when an environment is promoted or has a health URL (D-9):
-    it runs on a schedule, writes deployment statuses, and starts deploy workflows"""
+def _operate_caller(root: Path) -> Path:
+    """The workflow that runs shipyard operate, relative to root: OPERATE_CALLER, except in the
+    repository hosting shipyard, whose .github/workflows/operate.yml is the reusable workflow
+    itself; there, the first workflow calling it locally (uses: ./.github/workflows/operate.yml),
+    as its Release workflow calls prepare.yml and land.yml"""
+    hosted = root / OPERATE_CALLER
+    if not (hosted.is_file() and _takes_input(hosted.read_text(encoding="utf-8"), "workflow_call", "tool")):
+        return OPERATE_CALLER
+    for path in sorted(hosted.parent.iterdir()):
+        if path != hosted and path.suffix in (".yml", ".yaml") and _LOCAL_OPERATE.search(path.read_text("utf-8")):
+            return path.relative_to(root)
+    return OPERATE_CALLER
+
+
+_LOCAL_OPERATE = re.compile(rf"^\s+uses:\s*\./\.github/workflows/{re.escape(OPERATE_CALLER.name)}\b", re.MULTILINE)
+
+
+def _operate(policy: Policy, hold: Hold, root: Path, caller: Path) -> Check | None:
+    """The operate caller (relative to root), only when an environment is promoted or has a
+    health URL (D-9): it runs on a schedule, writes deployment statuses, and starts deploy
+    workflows"""
     used = [e.name for e in policy.environments.values() if e.source is not None or e.health]
     if not used:
         return None
     why = f"{', '.join(used)} {'uses' if len(used) == 1 else 'use'} from or health"
-    if not caller.is_file():
-        detail = f"{why}, but no {OPERATE_CALLER} runs shipyard operate: `shipyard init --operate` writes it"
+    if not (root / caller).is_file():
+        detail = f"{why}, but no {caller} runs shipyard operate: `shipyard init --operate` writes it"
         return Check("WARN", "operate", detail)
-    text = caller.read_text(encoding="utf-8")
+    text = (root / caller).read_text(encoding="utf-8")
     if _job_grants(text, "operate.yml", "deployments") is None:
-        return Check("WARN", "operate", f"{why}, but no job in {OPERATE_CALLER} calls shipyard's operate.yml")
+        return Check("WARN", "operate", f"{why}, but no job in {caller} calls shipyard's operate.yml")
     needed = ["deployments", "actions"]
     proposes = any(policy.autonomy.configured(s) is Autonomy.PROPOSE for s in policy.autonomy.stages())
     if proposes or hold.on or policy.incident_label:
@@ -252,10 +271,8 @@ def _operate(policy: Policy, hold: Hold, caller: Path) -> Check | None:
         needed.append("issues")
     missing = [f"{name}: write" for name in needed if not _job_grants(text, "operate.yml", name)]
     if missing:
-        return Check(
-            "WARN", "operate", f"the job in {OPERATE_CALLER} that calls operate.yml lacks {', '.join(missing)}"
-        )
-    detail = f"{OPERATE_CALLER} runs shipyard operate with {', '.join(needed)}: write"
+        return Check("WARN", "operate", f"the job in {caller} that calls operate.yml lacks {', '.join(missing)}")
+    detail = f"{caller} runs shipyard operate with {', '.join(needed)}: write"
     if policy.incident_label:
         held = ", ".join(lane for lane in Lane if lane in policy.blocker_lanes)
         detail += (
@@ -313,5 +330,8 @@ def _local_sources(pyproject: Path) -> list[str]:
 
 def _takes_input(text: str, event: str, name: str) -> bool:
     """Whether a workflow's event block declares the input; a text check, not a YAML parse"""
-    m = re.search(rf"^(?P<indent>\s*){event}:\s*(?:#.*)?$(?P<body>(?:\n(?P=indent)\s+.*|\n\s*)*)", text, re.MULTILINE)
+    # the block runs to the first line indented no deeper than the event; a blank line doesn't end it
+    m = re.search(
+        rf"^(?P<indent>[ \t]*){event}:[ \t]*(?:#.*)?$(?P<body>(?:\n(?:(?P=indent)[ \t]+.*|[ \t]*$))*)", text, re.M
+    )
     return m is not None and re.search(rf"^\s+{name}:", m["body"], re.MULTILINE) is not None

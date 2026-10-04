@@ -172,6 +172,10 @@ def test_doctor_checks_each_environments_workflow(repo: Repo) -> None:
     no_input = DEPLOY.replace("      environment:\n        type: string\n        required: true\n", "")
     repo.write(".github/workflows/deploy.yml", no_input)
     assert checks()[0] == ("FAIL", "deploy.yml (staging) lacks the 'environment' input")
+    # a blank line between inputs doesn't end the inputs (#53)
+    spaced = DEPLOY.replace("      environment:\n", "\n      environment:\n")
+    repo.write(".github/workflows/deploy.yml", spaced)
+    assert checks()[0] == ("PASS", f"deploy.yml (staging) {passed}")
     # the input alone is not the job's environment
     repo.write(".github/workflows/deploy.yml", DEPLOY.replace("    environment: ${{ inputs.environment }}\n", ""))
     assert checks()[0] == (
@@ -207,6 +211,9 @@ def test_doctor_wants_environment_as_a_jobs_own_key(repo: Repo) -> None:
         "on: workflow_call\n" + steps.replace("    steps:", "    environment: x\n    steps:"),
     )
     assert status(caller) == "PASS"
+    # a blank line between steps doesn't end the jobs, so a later job's environment counts (#53)
+    two_jobs = steps + "\n      - run: echo\n\n  deploy-site:\n    needs: deploy\n" + mapping + "    steps: []\n"
+    assert status(two_jobs) == "PASS"
 
 
 def test_doctor_catches_a_version_line_that_no_longer_matches(repo: Repo) -> None:

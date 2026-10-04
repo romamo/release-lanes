@@ -1,0 +1,44 @@
+name: Operate
+
+# shipyard dogfoods itself: the caller `shipyard init --operate` writes, but calling the
+# reusable operate.yml in this repository (whose name it takes) and running the tool from the
+# checkout. Every 10 minutes shipyard operate checks the health of each environment in
+# .github/shipyard.toml, records it as GitHub deployment statuses, and rolls back an
+# environment that fails its checks, opening an incident issue. Approve a deploy that waits
+# on a proposal issue with: gh workflow run operate-self.yml -f approve=<environment> -f
+# dry-run=false; a proposed rollback with -f approve-rollback=<environment> instead
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      approve:
+        description: "Deploy the tag proposed for this environment, once"
+        type: string
+        default: ""
+      approve-rollback:
+        description: "Start the rollback an incident proposes for this environment, once"
+        type: string
+        default: ""
+      dry-run:
+        description: "Show what it would do, change nothing"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  operate:
+    uses: ./.github/workflows/operate.yml
+    with:
+      approve: ${{ inputs.approve || '' }}
+      approve-rollback: ${{ inputs.approve-rollback || '' }}
+      dry-run: ${{ inputs.dry-run || false }}
+      tool: "."
+    permissions:
+      contents: read # the config and the release tags
+      deployments: write # reads deployments and records health as their statuses
+      actions: write # starts the deploy workflows
+      issues: write # the hold, the issue a deploy under propose or the hold opens, and incidents

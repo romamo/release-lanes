@@ -15,7 +15,7 @@ from shipyard.cli import main
 from shipyard.doctor import OPERATE_CALLER, doctor
 from shipyard.errors import ReleaseError
 from shipyard.github import Deployment, DeploymentState, Issue
-from shipyard.init import init_operate, operate_caller_text
+from shipyard.init import BOT_REF, BOT_REPO, init_operate, operate_caller_text
 from shipyard.operate import (
     STATUS_PREFIX,
     HttpResponse,
@@ -27,6 +27,7 @@ from shipyard.operate import (
     excerpt,
     named_version,
     operate,
+    probe,
     shown_url,
     tag_of,
 )
@@ -398,6 +399,76 @@ def test_init_operate_writes_the_caller_and_doctor_wants_it_only_when_used(repo:
     assert operate_check() == ("PASS", f"{OPERATE_CALLER} runs shipyard operate with deployments, actions: write")
     repo.write(repo.policy_file, unchecked + '\n[autonomy]\ndeploy.production = "propose"\n')  # a deploy opens one
     assert operate_check() == lacks_issues
+
+
+SHIPYARD = Path(__file__).parent.parent  # this repository, which hosts shipyard's workflows
+LOCAL_CALLER = ".github/workflows/operate-self.yml"
+
+
+def test_doctor_accepts_the_bot_repo_calling_its_own_operate_yml_locally(repo: Repo) -> None:
+    """In the repository hosting shipyard, operate.yml is the reusable workflow, so its caller
+    has another name and calls it as ./.github/workflows/operate.yml (#53)"""
+
+    def operate_check() -> tuple[str, str] | None:
+        found = {c.name: (c.status, c.detail) for c in doctor(repo.root, repo.github)}
+        return found.get("operate")
+
+    configure(repo)
+    repo.write(str(OPERATE_CALLER), (SHIPYARD / OPERATE_CALLER).read_text(encoding="utf-8"))
+    uncalled = f"staging, production use from or health, but no job in {OPERATE_CALLER} calls shipyard's operate.yml"
+    assert operate_check() == ("WARN", uncalled)
+    local = operate_caller_text().replace(f"{BOT_REPO}/.github/workflows/operate.yml@{BOT_REF}", f"./{OPERATE_CALLER}")
+    assert f"uses: ./{OPERATE_CALLER}\n" in local
+    repo.write(LOCAL_CALLER, local)
+    rolls_back = (
+        "runs shipyard operate with deployments, actions, issues: write; rolls back after 3 failed checks in a row"
+        " and opens an incident labelled 'incident', which holds rc, stable"
+    )
+    assert operate_check() == ("PASS", f"{LOCAL_CALLER} {rolls_back}")
+    repo.write(LOCAL_CALLER, local.replace("      issues: write", "      issues: read"))
+    assert operate_check() == ("WARN", f"the job in {LOCAL_CALLER} that calls operate.yml lacks issues: write")
+    # a repository not hosting shipyard: its own operate.yml is the caller, whatever else calls it
+    repo.write(str(OPERATE_CALLER), operate_caller_text())
+    assert operate_check() == ("PASS", f"{OPERATE_CALLER} {rolls_back}")
+
+
+def test_shipyards_own_pages_environment_and_operate_caller_pass_doctor(repo: Repo) -> None:
+    """This repository's config and workflows, checked in a scratch repository so doctor asks
+    no real remote"""
+    for path in (SHIPYARD / ".github").rglob("*"):
+        if path.is_file():
+            repo.write(str(path.relative_to(SHIPYARD)), path.read_text(encoding="utf-8"))
+    checks = {c.name: (c.status, c.detail) for c in doctor(repo.root, repo.github)}
+    assert checks["operate"] == (
+        "PASS",
+        f"{LOCAL_CALLER} runs shipyard operate with deployments, actions, issues: write; rolls back after 3 failed"
+        " checks in a row and opens an incident labelled 'incident', which holds stable",
+    )
+    assert checks["environment"] == (
+        "PASS",
+        "deploy.yml (github-pages) runs on workflow_dispatch with 'tag' and 'environment' inputs",
+    )
+    pages = repo.policy.environments["github-pages"]
+    assert (pages.lane, pages.workflow, pages.health) == (
+        Lane.STABLE,
+        "deploy.yml",
+        "https://romamo.github.io/shipyard/health.json",
+    )
+    assert repo.policy.operate.rollback_after == 3
+
+
+def test_the_deploy_workflow_reports_the_tag_as_the_version_operate_checks() -> None:
+    """health.json names the tag without its v, which operate's version rule accepts; the
+    drill's fault names another version"""
+    text = (SHIPYARD / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
+    assert 'version="${TAG#v}"' in text and 'version="0.0.0-simulated-failure"' in text
+    assert '"$ENVIRONMENT" != "github-pages"' in text
+    deployed = Version.parse("1.2.0")
+    http = FakeHttp()
+    http.answer("u", '{"version": "1.2.0"}')
+    assert probe(http, "u", deployed).healthy
+    http.answer("u", '{"version": "0.0.0-simulated-failure"}')
+    assert not probe(http, "u", deployed).healthy
 
 
 def test_operate_yml_runs_one_at_a_time_and_takes_the_callers_grant() -> None:
