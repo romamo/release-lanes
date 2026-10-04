@@ -15,7 +15,7 @@ CI = """\
 name: CI
 on:
   push:
-  workflow_call: # the release bot runs it on its release commit
+  workflow_call: # shipyard runs it on its release commit
     inputs:
       ref:
         type: string

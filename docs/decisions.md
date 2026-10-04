@@ -19,3 +19,11 @@ entry that supersedes it, never by editing an old one.
 - Why: Branch protection rules or CI filters may match shipyard/, and a run straddling a tool upgrade could miss its work branch; a new prefix only makes a collision less likely
 - Applies to: src/shipyard/land.py, src/shipyard/doctor.py, work branch names
 - Enforced by: tests/test_lanes.py and tests/test_setup.py (with #15); review for the prefix
+
+## D-3: User-facing prose calls the release automation shipyard
+
+- Decided: 2026-10-04, in romamo/shipyard#18
+- Rule: README, docs, workflow comments, init's generated files, and skill prose call the release workflows and CLI shipyard; 'release bot' appears only as a skill trigger phrase or when it means any release bot (such as a legacy release-bot.yml)
+- Why: 'Run by agents and one release bot' read as a service separate from shipyard, when it is shipyard's own prepare.yml and land.yml running the shipyard CLI; people still ask for 'a release bot', so skill descriptions keep the phrase to match
+- Applies to: README.md, docs/*.md, .github/workflows/*.yml, src/shipyard/init.py, skills/*/SKILL.md
+- Enforced by: review

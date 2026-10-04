@@ -36,7 +36,7 @@ def detect(root: Path) -> Detected:
             version_files = VersionFiles.PYPROJECT
     changelog = root / "CHANGELOG.md"
     if not changelog.is_file():
-        raise ReleaseError("no CHANGELOG.md: the bot releases what its Unreleased section lists; add one first")
+        raise ReleaseError("no CHANGELOG.md, whose Unreleased section shipyard releases; add one first")
     text = changelog.read_text(encoding="utf-8")
     if "## [Unreleased]" in text:
         style = Style.KEEP_A_CHANGELOG
@@ -129,8 +129,8 @@ def caller_text(d: Detected, ci: str) -> str:
     return f"""name: Release
 
 # shipyard: https://github.com/{BOT_REPO}. The policy in
-# .github/release-policy.toml decides what releases and when; this file only wires the
-# bot to this repository's CI.
+# .github/release-policy.toml decides what releases and when; this file only wires
+# shipyard's workflows to this repository's CI.
 
 on:
   push:
