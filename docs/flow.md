@@ -64,8 +64,9 @@ The bump, registry, and install commands per ecosystem (Python, Node, Rust, Go, 
 | IN_PROGRESS | An open PR fixes it | Wait, or review the PR |
 | DONE_NOT_CLOSED | Its PR merged, the issue is still open | Close it, citing the PR |
 | SUSPECT_CLOSE | Closed by a commit that only quoted "Fixes #N" | Check the fix landed; reopen if not |
-| BLOCKED | Waiting on an open upstream issue | Nothing, until it closes |
-| UNBLOCKED | The upstream issue it waited on has closed | Resume |
+| BLOCKED | Waiting on an open upstream issue, or on a spec PR not yet merged | Nothing, until it closes or merges |
+| SPEC_REFUSED | The PR it waits on (its spec PR) closed without merging | Decide again: revise the spec in a new PR, postpone, or won't fix |
+| UNBLOCKED | The upstream issue it waited on has closed, or its spec PR merged | Resume |
 | POSTPONED | Labelled `postponed` | Skip it |
 | REVISIT | Postponed before the newest stable release | Decide again |
 | TRIAGED | Triaged, with nothing pending | Nothing |
@@ -100,6 +101,7 @@ tmp/shipyard/skills/github-ship-watch/SKILL.md for <owner/repo> — watch and tr
 ## Safeguards
 
 - A change to a flag, format, default, public API, or stored state is designed in its issue first and checked against the repo's decisions log (`DECISIONS.md` or `docs/decisions.md`); what you settle is recorded there, so it isn't asked again
+- A feature (new behaviour beyond a bug fix or a contract tweak) gets a spec first: a file `docs/specs/NNN-<slug>.md` with numbered acceptance criteria, merged through its own PR before any implementer starts. Merging the spec is your approval, and the issue reads BLOCKED until then
 - Scope is read narrowly: "triage" never merges, and "merge" never tags, unless you say so
 - A change that departs from a spec, breaks existing users, or belongs to a held PR stops and asks you, whatever the scope
 - When another session works the same repo, the skills message it first, and your word in the current session wins

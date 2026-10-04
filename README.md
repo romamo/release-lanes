@@ -4,7 +4,7 @@ From a GitHub issue to a published release, run by agents and shipyard's release
 
 | Stage | Part | Does |
 |---|---|---|
-| Triage | `github-issue-triage` skill | A verdict on every issue (implement, postpone, clarify), a comment and labels, one PR per fix |
+| Triage | `github-issue-triage` skill | A verdict on every issue (implement, feature, postpone, clarify), a comment and labels, one PR per fix; a feature gets a spec in `docs/specs/` merged first |
 | Fix | `github-issue-resolve` skill | One issue: verify against main, fix with a regression test, open a PR |
 | Land | `github-pr-triage` skill | Review each PR in its own worktree, fix small problems, merge only on green CI |
 | Release | shipyard (`prepare.yml`, `land.yml`) | Cut the release on its lane when the policy says one is due, run CI on it, tag, publish |

@@ -22,6 +22,20 @@ Once the PR is up:
 The fix is in #{PR}: {what it does, in one or two sentences}. {Any trade-off or behaviour change, e.g. "a real permission error takes up to 2 s to surface on Windows".} {The answer to the issue's open question, if it had one.} This issue closes when #{PR} merges.
 ```
 
+## Feature
+
+A feature waits for its spec ([spec-gate.md](spec-gate.md)). Keep "On hold" and the spec PR's `owner/repo#N` on one line, so `triage_state.py` reports BLOCKED until the spec merges and UNBLOCKED after. Don't use the word "implement" in this comment: the script reads the latest triage comment's verdict from it.
+
+```markdown
+Triage: **feature**. {What the new behaviour is, in one or two sentences, and why it isn't a bug fix or a contract tweak.}
+
+The spec is in #{spec PR} (`docs/specs/{NNN}-{slug}.md`), with its acceptance criteria. Merging it is the approval; the build starts after that.
+
+On hold: the build waits on {owner/repo}#{spec PR}, the spec
+```
+
+Once the spec merges, edit the issue body to link it, then comment the Implement template naming the spec and its criteria.
+
 ## Postpone
 
 ```markdown

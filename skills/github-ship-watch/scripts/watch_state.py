@@ -76,6 +76,8 @@ except ModuleNotFoundError:  # Python 3.10: the config is read with regexes inst
 SKILLS = Path(__file__).resolve().parents[2]
 SHIPPED = SKILLS / "github-pr-triage" / "scripts" / "shipped.py"
 TRIAGE_STATE = SKILLS / "github-issue-triage" / "scripts" / "triage_state.py"
+# triage_state.py's ACTION: the issue states that make it exit 1
+TRIAGE_ACTION = {"NEW", "NEEDS_PR", "UNBLOCKED", "SPEC_REFUSED", "REVISIT", "DONE_NOT_CLOSED", "SUSPECT_CLOSE"}
 POLICIES = (Path(".github/shipyard.toml"), Path(".github/release-policy.toml"))  # the config, then its alias
 VERSION_TAG = re.compile(r"^v\d+\.\d+")  # skips moving major tags such as v0
 ACTION = {
@@ -753,8 +755,7 @@ def intake_rows(repo: str) -> list[Row]:
         counts.setdefault(row["state"], []).append(f"#{row['number']}")
     rows = []
     if proc.returncode == 1:
-        acted = {"NEW", "NEEDS_PR", "UNBLOCKED", "REVISIT", "DONE_NOT_CLOSED", "SUSPECT_CLOSE"}
-        detail = "; ".join(f"{s} {' '.join(n)}" for s, n in sorted(counts.items()) if s in acted)
+        detail = "; ".join(f"{s} {' '.join(n)}" for s, n in sorted(counts.items()) if s in TRIAGE_ACTION)
         rows.append(Row("ISSUES", repo, detail))
     prs = json.loads(run(["gh", "pr", "list", "-R", repo, "--json", "number,isDraft", "-L", "100"]))
     ready = [f"#{p['number']}" for p in prs if not p["isDraft"]]

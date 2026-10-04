@@ -50,6 +50,15 @@ bot.
   trailer, and how many of those a person approved in a review). An empty measure reads
   "no data", never 0. A table by default, `--json`, and `--markdown` for a weekly post on
   the roadmap issue, which the user schedules (#56)
+- A spec gate in github-issue-triage: an issue asking for new behaviour gets the verdict
+  **feature** and a spec file `docs/specs/NNN-<slug>.md` (template in
+  `docs/specs/TEMPLATE.md`) with numbered acceptance criteria `S-NNN-k`, merged through
+  its own PR before any implementer starts. `specs.py` writes the next spec (`new`),
+  validates them (`check`), lists the specs a path or area touches (`find`), and prints a
+  spec's criteria for the implementer brief (`criteria`). `triage_state.py` reads a hold
+  on a pull request of the same repo: BLOCKED while it is open, UNBLOCKED once it
+  merges, and the new action state SPEC_REFUSED (exit 1) once it closes unmerged, until
+  a newer triage comment decides again (#54)
 
 ### Fixed
 

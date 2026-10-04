@@ -5,6 +5,7 @@
 | Verdict | When | Comment says |
 |---|---|---|
 | **implement** | A confirmed bug; or behaviour the docs already promise but the code breaks; or a small additive feature that fits the release phase | The plan in 2 to 4 bullets; "I'll link the PR here" |
+| **feature** | New behaviour beyond a bug fix or a contract tweak (a new command, layer, or workflow) that fits the release phase. A small additive feature such as a new flag stays **implement**, through the design gate | The spec PR's link and a hold line naming it; implementers start once it merges ([spec-gate.md](spec-gate.md)) |
 | **postpone** | A new capability, a new wire contract, or a design that must land with sibling issues | Why now is the wrong time, the plan, and what it waits on. Add the `postponed` label |
 | **clarify** | You can't reproduce it, or it needs a product or spec decision | The exact question, with options and your recommendation |
 | **duplicate** | Same root cause as another issue | A link; close it |
@@ -45,7 +46,8 @@ Read it from the tags and the manifest version.
 | IN_PROGRESS | Nothing, unless the PR stalled |
 | DONE_NOT_CLOSED | Close it and cite the merged PR |
 | SUSPECT_CLOSE | Check the fix is on the default branch. If it isn't, reopen and explain |
-| BLOCKED | Nothing, until the upstream issue closes |
+| BLOCKED | Nothing, until the upstream issue closes or the spec PR merges |
+| SPEC_REFUSED | The spec PR it waits on closed without merging: the spec was refused. Decide again in a new triage comment: revise the spec in a new PR (with a new hold line), postpone, or won't fix |
 | UNBLOCKED | Read the upstream outcome, update the plan on the issue, then resume |
 | POSTPONED | Skip it |
 | REVISIT | A stable release came out after it was postponed. Apply this rubric again under the new phase |

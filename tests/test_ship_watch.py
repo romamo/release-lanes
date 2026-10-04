@@ -428,3 +428,11 @@ def test_bad_input_exits_2_with_its_message(ws: ModuleType, tmp_path: Path) -> N
         ws.policy_file(tmp_path)
     assert refused.value.code == 2
     assert "shipyard refuses a repo with both" in str(refused.value)
+
+
+def test_the_issue_states_reported_are_the_ones_triage_state_acts_on(ws: ModuleType) -> None:
+    spec = importlib.util.spec_from_file_location("triage_state", ws.TRIAGE_STATE)
+    assert spec is not None and spec.loader is not None
+    triage_state = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(triage_state)
+    assert ws.TRIAGE_ACTION == triage_state.ACTION
