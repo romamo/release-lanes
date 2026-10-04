@@ -123,7 +123,7 @@ A project that only wants "release after merges stop" uses a single
 Ask whether releases deploy somewhere (a staging or production service), and skip this
 for a library that only publishes. For each environment the user names, add a table to the
 policy with exactly one of `lane` (deploy every release of that lane when it lands) or
-`from` (promoted from another environment; shipyard does not promote yet), plus the
+`from` (promoted from another environment once it baked there), plus the
 `workflow` that deploys and an optional `health` URL:
 
 ```toml
@@ -158,7 +158,19 @@ jobs:
 ```
 
 Turn an existing deploy workflow into this shape rather than writing a second one, and
-remove its own trigger on tags or pushes, so one release deploys once.
+remove its own trigger on tags or pushes, so one release deploys once. shipyard starts it on
+the tag, so the deployment GitHub records names the tag as its ref.
+
+When an environment has `health` or `from`, also run `$CR init --operate` in step 4. It
+writes `.github/workflows/operate.yml`, which runs `shipyard operate` every 10 minutes:
+it checks each `health` URL (2xx within 10 s; a JSON body's `version` must name the
+deployed release), records the result as deployment statuses, and promotes a `from`
+environment once its source stayed healthy for `bake_minutes`. Ask whether production
+should deploy by itself after the bake (the default) or wait for approval
+(`deploy.production = "propose"` in `[autonomy]`, approved with `gh workflow run
+operate.yml -f approve=production -f dry-run=false`). Point the user at
+`.github/workflows/operate.yml` as an extra scheduled workflow, and skip it for a
+library with no environments.
 
 ## 4. Write the files
 

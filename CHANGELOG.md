@@ -23,6 +23,17 @@ bot.
   `[agents]` section, the plugin in `.claude/settings.json`, and the labels the skills
   read, and `--fix` enables the plugin and creates the labels. The gate on launchd is a
   new choice for where agents run
+- `shipyard operate`, run every 10 minutes by the new reusable `operate.yml` through a
+  caller that `shipyard init --operate` writes: for each environment it reads the current
+  deployment from GitHub, checks its `health` URL (2xx within 10 s; a JSON body's `version`
+  must name the deployed release), and records the result as deployment statuses, written
+  only when the state changes. It promotes a `from` environment once its source has been
+  healthy on a tag for `bake_minutes`, and redeploys a `lane` environment that missed its
+  lane's newest tag, each at most once per tag and under `deploy.<environment>` autonomy:
+  act dispatches, propose (or the hold) opens a "Ready to promote" issue that `operate
+  --approve <environment>` deploys once, observe reports. `land` now starts environment
+  workflows on the tag, so each deployment's ref names it. `doctor` checks the operate
+  caller and its permissions once an environment uses `from` or `health` (#30)
 
 ## [0.8.0] - 2026-10-04
 
