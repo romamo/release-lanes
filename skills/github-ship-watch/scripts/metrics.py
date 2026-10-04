@@ -14,7 +14,12 @@ Measures, each over the --days before now:
                      "First shipped by" means its merge commit is among the commits the
                      release's tag adds over the previous stable version (by version, not by
                      date), from GitHub's compare; a release with no earlier stable version
-                     isn't measured
+                     isn't measured. One edge it misreads: a patch release cut from main and
+                     published before the window, when the previous version is a later patch
+                     on a release/X.Y branch that lacks it (v1.2.1 from main, then the hotfix
+                     v1.2.2 on release/1.2 from v1.2.0). The next minor (v1.3.0) adds
+                     v1.2.1's commits over v1.2.2, so their lead time runs to v1.3.0. Ruling
+                     it out takes a compare against every earlier release, not one
   Change failure     with deployments: issues labelled --incident-label opened in the window
   rate               / deployments. Without: --blocker-label issues opened in the window plus
                      hotfix releases / stable releases. A hotfix release is a stable X.Y.Z
@@ -514,17 +519,13 @@ def labelled(run: Runner, base: Variables, sizes: Sizes, label: str, since: str)
 
 
 def notice_issues(run: Runner, base: Variables, sizes: Sizes, since: str, window: Window) -> list[Node]:
-    """Issues updated since, each with its newest comments back to the window's start (a
-    notice older than that was posted before the window)"""
+    """Issues updated since, each with its newest comments paged back far enough to hold
+    its first "Released in" notice when that one may be in the window"""
     issues = pages(run, NOTICES, {**base, "since": since}, sizes, ["issues"], "issues updated in the window")
     for issue in issues:
         comments = issue["comments"]
         seen: set[str] = set()
-        while (
-            comments["pageInfo"]["hasPreviousPage"]
-            and comments["nodes"]
-            and timestamp(comments["nodes"][0]["createdAt"]) >= window.start
-        ):
+        while comments["pageInfo"]["hasPreviousPage"] and comments["nodes"] and not _first_notice_known(issue, window):
             cursor = advance(comments["pageInfo"]["startCursor"], seen, f"comments on #{issue['number']}")
             variables: Variables = {**base, "number": issue["number"], "cursor": cursor}
             what = f"the comments of #{issue['number']}"
@@ -532,6 +533,17 @@ def notice_issues(run: Runner, base: Variables, sizes: Sizes, since: str, window
             comments["nodes"] = page["nodes"] + comments["nodes"]
             comments["pageInfo"] = page["pageInfo"]
     return issues
+
+
+def _first_notice_known(issue: Node, window: Window) -> bool:
+    """Whether the comments fetched so far settle the issue's first notice for the window:
+    one before the window means the first was too (an in-window notice is a later one);
+    with none fetched, every comment back past the window's start holds none"""
+    nodes = issue["comments"]["nodes"]
+    notices = [timestamp(c["createdAt"]) for c in nodes if NOTICE.match(c["body"])]
+    if notices:
+        return min(notices) < window.start
+    return timestamp(nodes[0]["createdAt"]) < window.start
 
 
 # -- the measures ------------------------------------------------------------------------------

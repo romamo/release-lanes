@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "skills" / "github-issue-triage" / "scripts" / "triage_state.py"
+REPO = ("o", "r")
 
 
 @pytest.fixture(scope="module")
@@ -36,7 +37,7 @@ def tag(name: str, date: str) -> dict[str, Any]:
 
 
 def classify(ts: ModuleType, item: dict[str, Any], stable: tuple[Any, str] | None = None) -> str:
-    state: str = ts.classify_open(item, "Triage:", "postponed", {}, stable)[0]
+    state: str = ts.classify_open(item, "Triage:", "postponed", {}, stable, REPO)[0]
     return state
 
 
@@ -198,15 +199,15 @@ def test_a_verdict_and_hold_older_than_50_comments_are_read(ts: ModuleType) -> N
     )
     item = ts.fetch("o/r", 20, run=gh)["open"]["nodes"][0]
     assert item["comments"]["nodes"] == [hold, *newest]
-    assert ts.upstream_refs(item) == [("other", "lib", 5)]
+    assert ts.upstream_refs(item, REPO) == [("other", "lib", 5)]
     states = {("other", "lib", 5): "OPEN"}
-    assert ts.classify_open(item, "Triage:", "postponed", states, None)[0] == "BLOCKED"
+    assert ts.classify_open(item, "Triage:", "postponed", states, None, REPO)[0] == "BLOCKED"
 
 
 def test_a_hold_on_a_spec_pr_lifts_only_when_it_merges(ts: ModuleType) -> None:
     item = issue(("2026-09-01T10:00:00Z", "Triage: **feature**, the spec is o/r#60\n\nOn hold: waits on o/r#60"))
     ref = ("o", "r", 60)
-    assert ts.upstream_refs(item) == [ref]
+    assert ts.upstream_refs(item, REPO) == [ref]
     # issueOrPullRequest answers for a PR's number as for an issue's: they share one sequence
     for node, state in (
         ({"__typename": "PullRequest", "state": "OPEN"}, "BLOCKED"),
@@ -215,7 +216,25 @@ def test_a_hold_on_a_spec_pr_lifts_only_when_it_merges(ts: ModuleType) -> None:
         ({"__typename": "Issue", "state": "CLOSED"}, "UNBLOCKED"),
     ):
         states = {ref: ts.ref_state(node)}
-        assert ts.classify_open(item, "Triage:", "postponed", states, None)[0] == state, node
+        assert ts.classify_open(item, "Triage:", "postponed", states, None, REPO)[0] == state, node
+
+
+def test_a_plain_hash_number_on_a_hold_line_is_the_same_repo(ts: ModuleType) -> None:
+    item = issue(("2026-09-01T10:00:00Z", "Triage: **feature**, spec in #60\n\nOn hold: waits on #60 and other/lib#5"))
+    assert ts.upstream_refs(item, REPO) == [("o", "r", 60), ("other", "lib", 5)]
+    states = {("o", "r", 60): "OPEN", ("other", "lib", 5): "CLOSED"}
+    assert ts.classify_open(item, "Triage:", "postponed", states, None, REPO) == (
+        "BLOCKED",
+        "o/r#60:open other/lib#5:closed",
+    )
+    # Only a hold line counts, and a URL's #fragment or o/r#N's number is not a plain #N
+    quiet = issue(
+        (
+            "2026-09-01T10:00:00Z",
+            "Triage: implement, see #61\nblocked: o/r#62, https://github.com/o/r/pull/62#issuecomment-9",
+        )
+    )
+    assert ts.upstream_refs(quiet, REPO) == [("o", "r", 62)]
 
 
 REFUSED_SPEC = {("o", "r", 60): "CLOSED_UNMERGED"}
@@ -224,18 +243,21 @@ FEATURE = ("2026-09-01T10:00:00Z", "Triage: **feature**, the spec is o/r#60\n\nO
 
 def test_a_refused_spec_pr_asks_for_a_new_decision(ts: ModuleType) -> None:
     item = issue(FEATURE, ("2026-09-03T10:00:00Z", "The spec PR was closed: wrong layer"))
-    state, note = ts.classify_open(item, "Triage:", "postponed", REFUSED_SPEC, None)
+    state, note = ts.classify_open(item, "Triage:", "postponed", REFUSED_SPEC, None, REPO)
     assert (state, note) == ("SPEC_REFUSED", "o/r#60:closed_unmerged")
     assert "SPEC_REFUSED" in ts.ACTION
 
 
 def test_a_newer_verdict_settles_a_refused_spec_pr(ts: ModuleType) -> None:
     postponed = issue(FEATURE, ("2026-09-04T10:00:00Z", "Triage: postpone to v2"), labels=("postponed",))
-    assert ts.classify_open(postponed, "Triage:", "postponed", REFUSED_SPEC, None)[0] == "POSTPONED"
+    assert ts.classify_open(postponed, "Triage:", "postponed", REFUSED_SPEC, None, REPO)[0] == "POSTPONED"
     revised = issue(FEATURE, ("2026-09-04T10:00:00Z", "Triage: **feature**, revised\n\nOn hold: waits on o/r#70"))
     for state, expected in (("OPEN", "BLOCKED"), ("MERGED", "UNBLOCKED")):
         states = {**REFUSED_SPEC, ("o", "r", 70): state}
-        assert ts.classify_open(revised, "Triage:", "postponed", states, None) == (expected, f"o/r#70:{state.lower()}")
+        assert ts.classify_open(revised, "Triage:", "postponed", states, None, REPO) == (
+            expected,
+            f"o/r#70:{state.lower()}",
+        )
 
 
 def test_a_pr_linked_after_50_cross_references_is_in_progress(ts: ModuleType) -> None:

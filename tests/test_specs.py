@@ -164,9 +164,59 @@ def test_a_criterion_wrapped_onto_indented_lines_is_read_whole(tmp_path: Path) -
     assert specs(root, "check").returncode == 0
 
 
-def test_no_specs_folder_is_an_input_error(tmp_path: Path) -> None:
-    assert specs(tmp_path, "check").returncode == 2
+def test_no_specs_folder_passes_check_and_coverage(tmp_path: Path) -> None:
+    # A repo that copies the CI step before writing its first spec stays green
+    for command in ("check", "coverage"):
+        out = specs(tmp_path, command)
+        assert (out.returncode, out.stdout) == (0, "no specs\n"), command
+    assert specs(tmp_path, "coverage", "--spec", "7").returncode == 2
     assert specs(tmp_path, "find", "x").returncode == 2
+
+
+def fresh(root: Path, slug: str, status: str) -> Path:
+    """A spec straight from `specs.py new`, its status set to status"""
+    path = root / specs(root, "new", slug).stdout.strip()
+    path.write_text(path.read_text().replace("status: draft", f"status: {status}"))
+    return path
+
+
+def test_check_refuses_template_placeholders_once_approved(tmp_path: Path) -> None:
+    root = repo(tmp_path)
+    fresh(root, "draft", "draft")
+    fresh(root, "approved", "approved")
+    out = specs(root, "check")
+    assert out.returncode == 1
+    assert "001-draft.md" not in out.stdout
+    for section in ("Problem", "Behaviour", "Acceptance criteria", "Out of scope"):
+        assert f"approved, but '{section}' still holds the template's placeholder" in out.stdout, section
+    assert "002-approved.md:7: approved, but 'Problem'" in out.stdout
+    assert "- S-002-1: <a statement" in out.stdout
+    # Issues and Verification are filled in when the spec is built
+    assert "'Issues'" not in out.stdout and "'Verification'" not in out.stdout
+    assert "'Decisions relied on'" not in out.stdout  # "- none" is an answer, not a placeholder
+    assert specs(root, "criteria", "2").returncode == 1
+
+
+def test_check_refuses_every_placeholder_once_built(tmp_path: Path) -> None:
+    root = repo(tmp_path)
+    text = built("001").replace(
+        "## Issues\n\n",
+        "## Issues\n\nThe build issues, filled in once they are filed, one `owner/repo#N` per line.\n\n",
+    )
+    (root / "docs" / "specs" / "001-dry-run.md").write_text(text)
+    out = specs(root, "check")
+    assert out.returncode == 1
+    assert "built, but 'Issues' still holds the template's placeholder" in out.stdout
+
+
+def test_placeholders_come_from_the_repo_template(tmp_path: Path) -> None:
+    root = repo(tmp_path)
+    ours = (ROOT / "docs" / "specs" / "TEMPLATE.md").read_text()
+    (root / "docs" / "specs" / "TEMPLATE.md").write_text(ours.replace("Who needs this", "Who asks"))
+    (root / "docs" / "specs" / "001-dry-run.md").write_text(spec("001").replace("Runs write files.", "Who asks"))
+    assert specs(root, "check").returncode == 0  # one line of a paragraph is not the placeholder
+    fresh(root, "next", "approved")
+    assert "002-next.md:7: approved, but 'Problem' still holds" in specs(root, "check").stdout
 
 
 def test_the_repo_specs_pass_check() -> None:

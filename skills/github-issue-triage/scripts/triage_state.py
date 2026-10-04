@@ -14,7 +14,8 @@ For each open issue:
                    still owed, so the issue reads as its other state
   BLOCKED          labelled blocked, or a comment says it is on hold / blocked /
                    waiting on an upstream issue that is still open, or on a pull
-                   request (such as a spec PR) that is still open
+                   request (such as a spec PR) that is still open. The hold line
+                   names it as owner/repo#N, its URL, or a plain #N (this repo)
   SPEC_REFUSED     a pull request it waits on (such as its spec PR) closed without
                    merging, and no triage comment came after the hold: decide again
                    (revise the spec in a new PR, postpone, or won't fix). A newer
@@ -229,6 +230,9 @@ def resource_limited(response: dict[str, Any]) -> bool:
 ACTION = {"NEW", "NEEDS_PR", "UNBLOCKED", "SPEC_REFUSED", "REVISIT", "DONE_NOT_CLOSED", "SUSPECT_CLOSE"}
 HOLD = re.compile(r"\b(?:on hold|blocked|waits? on|waiting on|pending|depends on)\b", re.IGNORECASE)
 UPSTREAM = re.compile(r"(?:https://github\.com/)?(?P<owner>[\w.-]+)/(?P<name>[\w.-]+)(?:#|/issues/|/pull/)(?P<num>\d+)")
+# A plain #N on a hold line names an issue or pull request of the repo itself; the
+# lookbehind leaves the #N of an owner/repo#N to UPSTREAM
+SAME_REPO = re.compile(r"(?<![\w/#.-])#(?P<num>\d+)\b")
 STABLE = re.compile(r"^v?\d+\.\d+\.\d+$")
 KEYWORDS = r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)"
 
@@ -421,19 +425,20 @@ def merged_mentions(issue: dict[str, Any]) -> list[int]:
     )
 
 
-def upstream_refs(issue: dict[str, Any]) -> list[tuple[str, str, int]]:
+def upstream_refs(issue: dict[str, Any], repo: tuple[str, str]) -> list[tuple[str, str, int]]:
     """Issues and pull requests that a hold comment says this one waits on"""
-    return sorted(hold_refs(issue))
+    return sorted(hold_refs(issue, repo))
 
 
-def hold_refs(issue: dict[str, Any]) -> dict[tuple[str, str, int], int]:
+def hold_refs(issue: dict[str, Any], repo: tuple[str, str]) -> dict[tuple[str, str, int], int]:
     """Each issue or pull request a hold comment names, with the index of the newest
-    comment naming it"""
+    comment naming it; a plain #N is one of repo's own (owner, name)"""
     refs: dict[tuple[str, str, int], int] = {}
     for i, c in enumerate(issue["comments"]["nodes"]):
         for line in c["body"].splitlines():
             if HOLD.search(line):
                 refs.update(((m["owner"], m["name"], int(m["num"])), i) for m in UPSTREAM.finditer(line))
+                refs.update(((*repo, int(m["num"])), i) for m in SAME_REPO.finditer(line))
     return refs
 
 
@@ -496,6 +501,7 @@ def classify_open(
     postponed: str,
     states: dict[tuple[str, str, int], str],
     stable: tuple[dt.datetime, str] | None,
+    repo: tuple[str, str],
 ) -> tuple[str, str]:
     labels = {n["name"] for n in issue["labels"]["nodes"]}
     triaged = [c for c in issue["comments"]["nodes"] if c["body"].lstrip().startswith(marker)]
@@ -508,7 +514,7 @@ def classify_open(
         return "IN_PROGRESS", note
     if merged:
         return "DONE_NOT_CLOSED", note
-    named = hold_refs(issue)
+    named = hold_refs(issue, repo)
     comments = issue["comments"]["nodes"]
     verdict = max((i for i, c in enumerate(comments) if c["body"].lstrip().startswith(marker)), default=-1)
     # A refused PR named before the newest triage comment was decided again: it holds nothing
@@ -576,12 +582,13 @@ def main() -> int:
         parser.error(f"--stable-tag-regex: {exc}")
 
     data = fetch(args.repo, max(args.closed, 1), stable_pattern)
+    owner, _, name = args.repo.partition("/")  # fetch checked it is owner/name
     rows: list[dict[str, Any]] = []
-    refs = {r for issue in data["open"]["nodes"] for r in upstream_refs(issue)}
+    refs = {r for issue in data["open"]["nodes"] for r in upstream_refs(issue, (owner, name))}
     states = upstream_states(refs)
     stable = latest_stable(data["tags"]["nodes"], stable_pattern)
     for issue in data["open"]["nodes"]:
-        state, note = classify_open(issue, args.marker, args.postponed_label, states, stable)
+        state, note = classify_open(issue, args.marker, args.postponed_label, states, stable, (owner, name))
         rows.append({"number": issue["number"], "state": state, "title": issue["title"], "note": note})
     for issue in data["closed"]["nodes"][: args.closed]:
         verdict = classify_closed(issue, args.hold_label)

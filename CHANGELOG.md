@@ -7,6 +7,17 @@ bot.
 
 ## [Unreleased]
 
+### Fixed
+
+- Spec and metrics follow-ups: `specs.py check` and `coverage` report "no specs" and
+  exit 0 when `docs/specs/` doesn't exist yet, and `check` refuses the template's
+  placeholder text left in an `approved` spec (Problem through Out of scope) or a
+  `built` one (any section); `triage_state.py` reads a plain `#N` on a hold line as
+  the same repo; `metrics.py` pages an issue's comments back to its first "Released
+  in" notice, so a notice from before the window keeps a later one out of issue to
+  release, and its docstring and SKILL.md name the backport shape lead time misreads
+  (#68)
+
 ## [0.10.0] - 2026-10-04
 
 ### Added
