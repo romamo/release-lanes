@@ -46,7 +46,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 
 Pass `--grace` to give a slow publish more minutes before it reads NOT_PUBLISHED, and `--tool` when the shipyard bot isn't installed from `romamo/shipyard@v0`.
 
-HOLD shows for every repo with a shipyard config, since a hold stops releases too. The operations states show only when the config has `[environments.<name>]` tables; they come from the GitHub deployments and issues `shipyard operate` writes. The incident label is `[operate] incident_label`, `incident` by default.
+HOLD shows for every repo with a shipyard config, since a hold stops releases too. The operations states show only when the config declares environments (read with `tomllib`; on Python 3.10 only plain `[environments.<name>]` tables, and any other form stops the watch with a one-line message); they come from the GitHub deployments and issues `shipyard operate` writes. The incident label is `[operate] incident_label`, `incident` by default.
 
 ## Report
 

@@ -24,7 +24,7 @@ Hold (a repo with a shipyard config):
   HOLD            an open shipyard-hold issue, with who opened it and when (reported, never
                   an action by itself: a person stopped the factory on purpose)
 
-Operations (only when the config has [environments.<name>] tables; read from the
+Operations (only when the config declares environments; read from the
 deployments and issues shipyard operate writes):
   OPERATE_FAILED  the latest finished run of the workflow that calls shipyard's operate.yml
                   failed (cancelled runs are ignored)
@@ -62,6 +62,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10: the config is read with regexes instead
+    tomllib = None
+
 SKILLS = Path(__file__).resolve().parents[2]
 SHIPPED = SKILLS / "github-pr-triage" / "scripts" / "shipped.py"
 TRIAGE_STATE = SKILLS / "github-issue-triage" / "scripts" / "triage_state.py"
@@ -84,13 +89,25 @@ HOLD_LABEL = "shipyard-hold"  # shipyard's autonomy.HOLD_LABEL
 INCIDENT_LABEL = "incident"  # the default of [operate] incident_label
 HEALTH_PREFIX = "shipyard health"  # starts the description of every status shipyard operate writes
 OPERATE_SILENT = dt.timedelta(hours=1)  # a scheduled operate runs every 10 minutes
-ISSUE_LIMIT = 1000
+ISSUE_LIMIT = 1000  # per label or search; no repo has that many holds, incidents, or proposals
+PROPOSAL_SEARCH = 'in:title "Ready to"'  # shipyard's operate.proposal_title; the marker in the body decides
 PROPOSAL = re.compile(r"<!-- shipyard:propose deploy=(?P<env>\S+) -->")  # shipyard's operate.deploy_marker
 PROPOSED_TAG = re.compile(r"<!-- shipyard:tag=(?P<tag>\S+) -->")
 OPERATE_USES = re.compile(
     r"^\s*(?:-\s*)?uses:\s*[\"']?(?:[\w.-]+/[\w.-]+/\.github/workflows/operate\.ya?ml@|\./\.github/workflows/operate\.ya?ml)",
     re.MULTILINE,
 )
+
+
+class Refused(SystemExit):
+    """Bad input: the message goes to stderr, and the watch exits 2"""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(2)
+        self.message = message
+
+    def __str__(self) -> str:
+        return self.message
 
 
 @dataclass(frozen=True)
@@ -136,7 +153,7 @@ def policy_file(repo_dir: Path) -> Path | None:
     """The release policy shipyard reads, or None without one; both names is an error, as in shipyard"""
     found = [p for p in POLICIES if (repo_dir / p).is_file()]
     if len(found) > 1:
-        raise SystemExit(f"error: both {found[0]} and {found[1]} exist; shipyard refuses a repo with both")
+        raise Refused(f"error: both {found[0]} and {found[1]} exist; shipyard refuses a repo with both")
     return found[0] if found else None
 
 
@@ -151,7 +168,7 @@ def bot_workflow(repo_dir: Path) -> tuple[str, bool] | None:
         return "release.yml", True
     if (workflows / "release-bot.yml").is_file():
         return "release-bot.yml", False
-    raise SystemExit(f"error: {policy} exists but neither release.yml nor release-bot.yml calls a bot")
+    raise Refused(f"error: {policy} exists but neither release.yml nor release-bot.yml calls a bot")
 
 
 def bot_rows(runs: list[Run], due: str | None, now: dt.datetime, grace: dt.timedelta, name: str) -> list[Row]:
@@ -300,6 +317,14 @@ class Issue:
     closing_prs: tuple[int, ...]  # pull requests linked to close it
 
 
+@dataclass(frozen=True)
+class Config:
+    """What the watch reads from the shipyard config"""
+
+    environments: list[Environment]
+    incident_label: str
+
+
 def ago(span: dt.timedelta) -> str:
     minutes = int(span.total_seconds() // 60)
     if minutes < 120:
@@ -307,6 +332,48 @@ def ago(span: dt.timedelta) -> str:
     if minutes < 48 * 60:
         return f"{minutes // 60} h"
     return f"{minutes // (24 * 60)} d"
+
+
+def config(text: str, policy: Path) -> Config:
+    """The environments and the incident label of the config, read as shipyard reads it: with
+    tomllib on Python 3.11+, with the regex fallback on 3.10"""
+    if tomllib is None:
+        return Config(environments_310(text, policy), incident_label_310(text, policy))
+    try:
+        raw = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise Refused(f"error: {policy}: {exc}") from None
+    return Config(environments_toml(raw, policy), incident_label_toml(raw, policy))
+
+
+def environments_toml(raw: dict[str, object], policy: Path) -> list[Environment]:
+    """The [environments] tables of the parsed config, in the order the config declares them"""
+    tables = raw.get("environments", {})
+    if not isinstance(tables, dict):
+        raise Refused(f"error: {policy}: environments is not a table")
+    found = []
+    for name, table in tables.items():
+        if not isinstance(table, dict):
+            raise Refused(f"error: {policy}: environments.{name} is not a table")
+        source = table.get("from")
+        bake = table.get("bake_minutes", 0)
+        if not (source is None or isinstance(source, str)) or isinstance(bake, bool) or not isinstance(bake, int):
+            raise Refused(f"error: {policy}: environments.{name} has a malformed from or bake_minutes")
+        found.append(Environment(name, source or None, bake))
+    return found
+
+
+def incident_label_toml(raw: dict[str, object], policy: Path) -> str:
+    """[operate] incident_label of the parsed config, or the default"""
+    table = raw.get("operate", {})
+    label = table.get("incident_label", INCIDENT_LABEL) if isinstance(table, dict) else None
+    if not isinstance(label, str) or not label:
+        raise Refused(f"error: {policy}: [operate] incident_label must be a non-empty string")
+    return label
+
+
+# -- the Python 3.10 fallback: no tomllib, so the plain forms are read with regexes, and any
+# other form is refused rather than misread
 
 
 def toml_tables(text: str) -> dict[str, str]:
@@ -329,32 +396,50 @@ def toml_tables(text: str) -> dict[str, str]:
 
 
 def toml_string(body: str, key: str) -> str | None:
-    found = re.search(rf"^\s*{re.escape(key)}\s*=\s*(?:\"([^\"]*)\"|'([^']*)')", body, re.MULTILINE)
+    found = re.search(rf"^\s*[\"']?{re.escape(key)}[\"']?\s*=\s*(?:\"([^\"]*)\"|'([^']*)')", body, re.MULTILINE)
     return None if found is None else found.group(1) if found.group(1) is not None else found.group(2)
 
 
-def environments(text: str, policy: Path) -> list[Environment]:
+def blank(body: str) -> bool:
+    """Only whitespace and comments"""
+    return all(not line.strip() or line.strip().startswith("#") for line in body.splitlines())
+
+
+def environments_310(text: str, policy: Path) -> list[Environment]:
     """The [environments.<name>] tables of the config, in order; an empty list without any"""
+    unreadable = Refused(
+        f"error: {policy}: can't read [environments] on Python 3.10: use 3.11+ or plain [environments.<name>] tables"
+    )
     tables = toml_tables(text)
-    if "environments" in tables or re.search(r"^\s*environments\s*[.=]", tables.get("", ""), re.MULTILINE):
-        raise SystemExit(f"error: {policy}: write each environment as an [environments.<name>] table to watch it")
+    if not blank(tables.get("environments", "")) or re.search(
+        r"^\s*[\"']?environments[\"']?\s*[.=]", tables.get("", ""), re.MULTILINE
+    ):
+        raise unreadable
     found = []
     for name, body in tables.items():
         parts = name.split(".")
-        if parts[0] != "environments":
+        if parts[0] != "environments" or len(parts) == 1:
             continue
         if len(parts) != 2:
-            raise SystemExit(f"error: {policy}: [{name}] is not an [environments.<name>] table")
-        bake = re.search(r"^\s*bake_minutes\s*=\s*(\d+)\s*(?:#.*)?$", body, re.MULTILINE)
-        found.append(Environment(parts[1], toml_string(body, "from"), int(bake.group(1)) if bake else 0))
+            raise unreadable
+        bake = re.search(r"^\s*[\"']?bake_minutes[\"']?\s*=\s*(\d+)\s*(?:#.*)?$", body, re.MULTILINE)
+        if bake is None and re.search(r"^\s*[\"']?bake_minutes[\"']?\s*=", body, re.MULTILINE):
+            raise unreadable
+        found.append(Environment(parts[1], toml_string(body, "from") or None, int(bake.group(1)) if bake else 0))
     return found
 
 
-def incident_label(text: str) -> str:
+def incident_label_310(text: str, policy: Path) -> str:
     """[operate] incident_label, or the default"""
-    label = toml_string(toml_tables(text).get("operate", ""), "incident_label")
+    tables = toml_tables(text)
+    if re.search(r"^\s*[\"']?operate[\"']?\s*[.=]", tables.get("", ""), re.MULTILINE):
+        raise Refused(f"error: {policy}: can't read [operate] on Python 3.10: use 3.11+ or a plain [operate] table")
+    body = tables.get("operate", "")
+    label = toml_string(body, "incident_label")
+    if label is None and re.search(r"^\s*[\"']?incident_label[\"']?\s*=", body, re.MULTILINE):
+        raise Refused(f"error: {policy}: can't read [operate] incident_label on Python 3.10: use 3.11+")
     if label == "":
-        raise SystemExit("error: [operate] incident_label is empty")
+        raise Refused(f"error: {policy}: [operate] incident_label must be a non-empty string")
     return label or INCIDENT_LABEL
 
 
@@ -478,12 +563,13 @@ def ordered(rows: list[Row]) -> list[Row]:
     return sorted(rows, key=lambda r: LEAD.index(r.state) if r.state in LEAD else len(LEAD))
 
 
-def fetch_issues(repo: str) -> list[Issue]:
+def fetch_issues(repo: str, *filters: str) -> list[Issue]:
+    """The open issues a filter picks: a label, or a title search, so no repo has too many"""
     fields = "number,title,body,createdAt,author,labels,closedByPullRequestsReferences"
-    out = run(["gh", "issue", "list", "-R", repo, "--state", "open", "-L", str(ISSUE_LIMIT), "--json", fields])
-    found = json.loads(out)
+    cmd = ["gh", "issue", "list", "-R", repo, "--state", "open", *filters, "-L", str(ISSUE_LIMIT), "--json", fields]
+    found = json.loads(run(cmd))
     if len(found) >= ISSUE_LIMIT:
-        raise SystemExit(f"error: {repo} has {ISSUE_LIMIT}+ open issues; the watch reads at most {ISSUE_LIMIT - 1}")
+        raise Refused(f"error: {repo} has {ISSUE_LIMIT}+ open issues for {' '.join(filters)}")
     return [
         Issue(
             int(i["number"]),
@@ -515,7 +601,7 @@ def fetch_statuses(repo: str, deployment: int) -> list[Status]:
 
 
 def operations_rows(
-    repo: str, repo_dir: Path, envs: list[Environment], issues: list[Issue], label: str, now: dt.datetime
+    repo: str, repo_dir: Path, envs: list[Environment], held: bool, label: str, now: dt.datetime
 ) -> list[Row]:
     caller = operate_caller(repo_dir)
     runs = fetch_runs(repo, caller[0]) if caller else []
@@ -526,8 +612,9 @@ def operations_rows(
         row = unhealthy_row(env.name, current[env.name], now)
         if row is not None:
             rows.append(row)
-    held = any(HOLD_LABEL in i.labels for i in issues)
-    proposals = proposal_rows(issues, caller[0] if caller else "operate.yml", held)
+    proposals = proposal_rows(
+        fetch_issues(repo, "--search", PROPOSAL_SEARCH), caller[0] if caller else "operate.yml", held
+    )
     rows += proposals
     idle = operate_idle(caller, runs, now)
     if caller:
@@ -541,7 +628,7 @@ def operations_rows(
         row = unpromoted_row(env, current.get(env.source), deployments[env.name], idle, command, now)
         if row is not None:
             rows.append(row)
-    return rows + incident_rows(issues, label, now)
+    return rows + incident_rows(fetch_issues(repo, "--label", label), label, now)
 
 
 # -- intake --------------------------------------------------------------------------------
@@ -615,12 +702,11 @@ def main() -> int:
                 rows.append(Row("UNANNOUNCED", tag.name, f"{' '.join(issues)} (since {tags[i + 1].name})"))
 
     if policy is not None:
-        text = (repo_dir / policy).read_text()
-        envs = environments(text, policy)
-        issues = fetch_issues(args.repo)
-        rows += hold_rows(issues, now)
-        if envs:
-            rows += operations_rows(args.repo, repo_dir, envs, issues, incident_label(text), now)
+        read = config((repo_dir / policy).read_text(encoding="utf-8"), policy)
+        holds = hold_rows(fetch_issues(args.repo, "--label", HOLD_LABEL), now)
+        rows += holds
+        if read.environments:
+            rows += operations_rows(args.repo, repo_dir, read.environments, bool(holds), read.incident_label, now)
 
     rows += intake_rows(args.repo)
     for row in ordered(rows):
@@ -629,4 +715,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except Refused as refused:
+        sys.stderr.write(f"{refused}\n")
+        raise

@@ -259,19 +259,63 @@ file = "README.md"
 
 def test_environments_and_the_incident_label_come_from_the_config(ws: ModuleType) -> None:
     policy = Path(".github/shipyard.toml")
-    assert ws.environments(CONFIG, policy) == [
-        ws.Environment("staging", None, 0),
-        ws.Environment("production", "staging", 60),
-    ]
-    assert ws.environments('mode = "release"\n', policy) == []
-    assert ws.incident_label(CONFIG) == "incident"
-    assert ws.incident_label(CONFIG + "\n[operate]\nincident_label = 'sev1'\n") == "sev1"
+    want = [ws.Environment("staging", None, 0), ws.Environment("production", "staging", 60)]
+    for envs, label in (
+        (ws.environments_310(CONFIG, policy), ws.incident_label_310(CONFIG, policy)),
+        (ws.config(CONFIG, policy).environments, ws.config(CONFIG, policy).incident_label),
+    ):
+        assert envs == want
+        assert label == "incident"
+    assert ws.environments_310('mode = "release"\n', policy) == []
+    assert ws.environments_310(CONFIG.replace("# [environments.example]", "[environments]"), policy) == want
+    sev1 = CONFIG + "\n[operate]\nincident_label = 'sev1'\n"
+    assert ws.incident_label_310(sev1, policy) == "sev1"
+    assert ws.config('mode = "release"\n', policy) == ws.Config([], "incident")
+
+
+INLINE = """mode = "release"
+
+[environments]
+staging = { lane = "rc", workflow = "deploy.yml" }
+production = { from = "staging", workflow = "deploy.yml", bake_minutes = 60 }
+"""
+
+
+@pytest.mark.skipif(sys.version_info < (3, 11), reason="tomllib is 3.11+")
+@pytest.mark.parametrize(
+    "text",
+    [
+        INLINE,
+        'environments.staging.lane = "rc"\nenvironments.production = { from = "staging", bake_minutes = 60 }\n'
+        + "operate.incident_label = 'sev1'\n",
+    ],
+)
+def test_every_form_shipyard_accepts_is_read_on_311(ws: ModuleType, text: str) -> None:
+    read = ws.config(text, Path(".github/shipyard.toml"))
+    assert read.environments == [ws.Environment("staging", None, 0), ws.Environment("production", "staging", 60)]
+    assert read.incident_label == ("sev1" if "sev1" in text else "incident")
 
 
 @pytest.mark.parametrize(
     "config",
-    ['[environments]\nstaging = { lane = "rc" }\n', 'environments.staging.lane = "rc"\n', "[environments.a.b]\n"],
+    [
+        INLINE,
+        'environments.staging.lane = "rc"\n',
+        "[environments.a.b]\n",
+        "[environments.prod]\nfrom = 'staging'\nbake_minutes = 1_000\n",
+    ],
 )
-def test_environments_the_watch_cannot_read_are_refused(ws: ModuleType, config: str) -> None:
-    with pytest.raises(SystemExit, match="environments"):
-        ws.environments(config, Path(".github/shipyard.toml"))
+def test_the_310_fallback_refuses_what_it_cannot_read(ws: ModuleType, config: str) -> None:
+    with pytest.raises(SystemExit, match=r"can't read \[environments\] on Python 3\.10: use 3\.11\+") as refused:
+        ws.environments_310(config, Path(".github/shipyard.toml"))
+    assert refused.value.code == 2
+
+
+def test_bad_input_exits_2_with_its_message(ws: ModuleType, tmp_path: Path) -> None:
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "shipyard.toml").write_text("")
+    (tmp_path / ".github" / "release-policy.toml").write_text("")
+    with pytest.raises(SystemExit) as refused:
+        ws.policy_file(tmp_path)
+    assert refused.value.code == 2
+    assert "shipyard refuses a repo with both" in str(refused.value)
