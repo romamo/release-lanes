@@ -25,6 +25,11 @@ bot.
 
 - The design gate finds an open decisions PR by the log file it changes, not by
   `DECISIONS` in its title, which missed a PR titled "Record D-1 and D-2"
+- `triage_state.py` pages past the caps of its GitHub query instead of reading a capped
+  list as complete: open issues beyond the newest 100, an issue's comments beyond the
+  newest 50 (an older verdict or "On hold" line), cross-references beyond the oldest 50
+  (a later linked PR), and tags back to the newest stable one. An issue with more than 100
+  labels exits 2 as bad input. A repo under the caps still takes one query (#19)
 
 ## [0.5.2] - 2026-10-04
 

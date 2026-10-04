@@ -27,8 +27,10 @@ For the N most recently closed issues (default 20):
                    carries --hold-label (a release hold is meant to close by hand)
 
 Exit 0 when nothing needs action, 1 when any issue is NEW, NEEDS_PR, UNBLOCKED,
-REVISIT, DONE_NOT_CLOSED, or SUSPECT_CLOSE, 2 on bad input or a gh failure.
-Needs the gh CLI, authenticated. Python 3.10+, standard library only.
+REVISIT, DONE_NOT_CLOSED, or SUSPECT_CLOSE, 2 on bad input (an issue with more than 100
+labels) or a gh failure. It pages past 100 open issues and an issue's 50 comments or 50
+cross-references, and back through tags to the newest stable one, with one query when
+nothing is capped. Needs the gh CLI, authenticated. Python 3.10+, standard library only.
 """
 
 from __future__ import annotations
@@ -39,17 +41,10 @@ import json
 import re
 import subprocess
 import sys
-from typing import Any
+from collections.abc import Callable
+from typing import Any, NoReturn
 
-QUERY = """
-query($owner: String!, $name: String!, $closed: Int!) {
-  repository(owner: $owner, name: $name) {
-    open: issues(states: OPEN, first: 100, orderBy: {field: CREATED_AT, direction: DESC}) {
-      nodes {
-        number title
-        labels(first: 20) { nodes { name } }
-        comments(last: 50) { nodes { body createdAt } }
-        timelineItems(itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT], first: 50) {
+OPEN_TIMELINE = """
           nodes {
             ... on CrossReferencedEvent {
               willCloseTarget isCrossRepository
@@ -57,23 +52,54 @@ query($owner: String!, $name: String!, $closed: Int!) {
             }
             ... on ConnectedEvent { subject { ... on PullRequest { number state } } }
           }
-        }
-      }
-    }
-    tags: refs(refPrefix: "refs/tags/", last: 50, orderBy: {field: TAG_COMMIT_DATE, direction: ASC}) {
-      nodes { name target { ... on Tag { tagger { date } } ... on Commit { committedDate } } }
-    }
-    closed: issues(states: CLOSED, first: $closed, orderBy: {field: UPDATED_AT, direction: DESC}) {
-      nodes {
-        number title stateReason
-        labels(first: 20) { nodes { name } }
-        refs: timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], first: 50) {
+"""
+CLOSED_REFS = """
           nodes {
             ... on CrossReferencedEvent {
               isCrossRepository
               source { ... on PullRequest { number state } }
             }
           }
+"""
+TAG_NODES = "nodes { name target { ... on Tag { tagger { date } } ... on Commit { committedDate } } }"
+OPEN_ISSUE = (
+    """
+      nodes {
+        number title
+        labels(first: 100) { pageInfo { hasNextPage } nodes { name } }
+        comments(last: 50) { nodes { body createdAt } }
+        timelineItems(itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT], first: 50) {
+          pageInfo { hasNextPage endCursor }"""
+    + OPEN_TIMELINE
+    + """
+        }
+      }
+"""
+)
+
+QUERY = (
+    """
+query($owner: String!, $name: String!, $closed: Int!) {
+  repository(owner: $owner, name: $name) {
+    open: issues(states: OPEN, first: 100, orderBy: {field: CREATED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }"""
+    + OPEN_ISSUE
+    + """
+    }
+    tags: refs(refPrefix: "refs/tags/", last: 50, orderBy: {field: TAG_COMMIT_DATE, direction: ASC}) {
+      pageInfo { hasPreviousPage startCursor }
+      """
+    + TAG_NODES
+    + """
+    }
+    closed: issues(states: CLOSED, first: $closed, orderBy: {field: UPDATED_AT, direction: DESC}) {
+      nodes {
+        number title stateReason
+        labels(first: 100) { pageInfo { hasNextPage } nodes { name } }
+        refs: timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], first: 50) {
+          pageInfo { hasNextPage endCursor }"""
+    + CLOSED_REFS
+    + """
         }
         timelineItems(itemTypes: [CLOSED_EVENT], last: 1) {
           nodes {
@@ -91,6 +117,82 @@ query($owner: String!, $name: String!, $closed: Int!) {
   }
 }
 """
+)
+
+# Follow-up queries, each run only for a connection that an earlier page reports as capped
+# (comments: one that filled its page). Older open issues carry more history: a page of 100
+# tripped GitHub's resource limits on astral-sh/uv, so later pages hold 50
+OPEN_PAGE = (
+    """
+query($owner: String!, $name: String!, $cursor: String!) {
+  repository(owner: $owner, name: $name) {
+    open: issues(states: OPEN, first: 50, after: $cursor, orderBy: {field: CREATED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }"""
+    + OPEN_ISSUE
+    + """
+    }
+  }
+}
+"""
+)
+COMMENTS_PAGE = """
+query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      comments(last: 100, before: $cursor) { pageInfo { hasPreviousPage startCursor } nodes { body createdAt } }
+    }
+  }
+}
+"""
+TIMELINE_PAGE = (
+    """
+query($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      timelineItems(itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT], first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }"""
+    + OPEN_TIMELINE
+    + """
+      }
+    }
+  }
+}
+"""
+)
+REFS_PAGE = (
+    """
+query($owner: String!, $name: String!, $number: Int!, $cursor: String!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      refs: timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }"""
+    + CLOSED_REFS
+    + """
+      }
+    }
+  }
+}
+"""
+)
+TAGS_PAGE = (
+    """
+query($owner: String!, $name: String!, $cursor: String!) {
+  repository(owner: $owner, name: $name) {
+    tags: refs(refPrefix: "refs/tags/", last: 100, before: $cursor, orderBy: {field: TAG_COMMIT_DATE, direction: ASC}) {
+      pageInfo { hasPreviousPage startCursor }
+      """
+    + TAG_NODES
+    + """
+    }
+  }
+}
+"""
+)
+
+COMMENTS_CAP = 50  # comments(last: 50) in OPEN_ISSUE
+Variables = dict[str, str | int]
+# Runs one GraphQL query with its variables and returns the parsed JSON response
+Runner = Callable[[str, Variables], dict[str, Any]]
 
 ACTION = {"NEW", "NEEDS_PR", "UNBLOCKED", "REVISIT", "DONE_NOT_CLOSED", "SUSPECT_CLOSE"}
 HOLD = re.compile(r"\b(?:on hold|blocked|waits? on|waiting on|pending|depends on)\b", re.IGNORECASE)
@@ -99,33 +201,119 @@ STABLE = re.compile(r"^v?\d+\.\d+\.\d+$")
 KEYWORDS = r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)"
 
 
-def fetch(repo: str, closed: int) -> dict[str, Any]:
-    owner, _, name = repo.partition("/")
-    if not owner or not name or "/" in name:
-        sys.stderr.write(f"error: repo must be owner/name, got {repo!r}\n")
-        raise SystemExit(2)
-    proc = subprocess.run(
-        [
-            "gh",
-            "api",
-            "graphql",
-            "-f",
-            f"query={QUERY}",
-            "-F",
-            f"owner={owner}",
-            "-F",
-            f"name={name}",
-            "-F",
-            f"closed={closed}",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+def gh_graphql(query: str, variables: Variables) -> dict[str, Any]:
+    """The default runner: one ``gh api graphql`` call"""
+    cmd = ["gh", "api", "graphql", "-f", f"query={query}"]
+    for key, value in variables.items():
+        # -F sends an int as a number; -f keeps a string a string (a cursor, a numeric repo name)
+        cmd += ["-F" if isinstance(value, int) else "-f", f"{key}={value}"]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         sys.stderr.write(proc.stderr)
         raise SystemExit(2)
-    data: dict[str, Any] = json.loads(proc.stdout)["data"]["repository"]
+    response: dict[str, Any] = json.loads(proc.stdout)
+    return response
+
+
+def fail(message: str) -> NoReturn:
+    sys.stderr.write(f"error: {message}\n")
+    raise SystemExit(2)
+
+
+def repository(run: Runner, query: str, variables: Variables) -> dict[str, Any]:
+    response = run(query, variables)
+    if response.get("errors"):
+        fail(f"GitHub GraphQL errors: {json.dumps(response['errors'])}")
+    data = (response.get("data") or {}).get("repository")
+    if data is None:
+        fail(f"no repository {variables['owner']}/{variables['name']} in the GraphQL response")
+    result: dict[str, Any] = data
+    return result
+
+
+def advance(cursor: str | None, seen: set[str], what: str) -> str:
+    """The next page's cursor; a missing or repeated one would page forever"""
+    if not cursor or cursor in seen:
+        fail(f"GitHub reported more {what}, but the page cursor did not advance ({cursor!r})")
+    seen.add(cursor)
+    return cursor
+
+
+def issue_page(run: Runner, query: str, base: Variables, number: int, field: str, cursor: str | None) -> dict[str, Any]:
+    """One page of an issue's connection; with no cursor, its first page (for comments, the newest)"""
+    variables: Variables = {**base, "number": number}
+    if cursor is not None:
+        variables["cursor"] = cursor
+    issue = repository(run, query, variables).get("issue")
+    if issue is None:
+        fail(f"issue #{number} vanished while paging its {field}")
+    page: dict[str, Any] = issue[field]
+    return page
+
+
+def check_labels(issue: dict[str, Any]) -> None:
+    if issue["labels"]["pageInfo"]["hasNextPage"]:
+        fail(f"bad input: issue #{issue['number']} has more than 100 labels, which triage_state.py does not page")
+
+
+def complete_comments(run: Runner, base: Variables, issue: dict[str, Any]) -> None:
+    """Page an issue's comments backwards, keeping them oldest first. pageInfo on the first
+    query's comments trips GitHub's resource limits on a busy repo, so a full first page
+    (COMMENTS_CAP) is read again here with it"""
+    if len(issue["comments"]["nodes"]) < COMMENTS_CAP:
+        return
+    comments = issue_page(run, COMMENTS_PAGE, base, issue["number"], "comments", None)
+    issue["comments"] = comments
+    seen: set[str] = set()
+    while comments["pageInfo"]["hasPreviousPage"]:
+        cursor = advance(comments["pageInfo"]["startCursor"], seen, f"comments on #{issue['number']}")
+        page = issue_page(run, COMMENTS_PAGE, base, issue["number"], "comments", cursor)
+        comments["nodes"] = page["nodes"] + comments["nodes"]
+        comments["pageInfo"] = page["pageInfo"]
+
+
+def complete_refs(run: Runner, query: str, base: Variables, issue: dict[str, Any], field: str) -> None:
+    """Page an issue's cross-references forwards, oldest first"""
+    items = issue[field]
+    seen: set[str] = set()
+    while items["pageInfo"]["hasNextPage"]:
+        cursor = advance(items["pageInfo"]["endCursor"], seen, f"cross-references on #{issue['number']}")
+        page = issue_page(run, query, base, issue["number"], field, cursor)
+        items["nodes"] = items["nodes"] + page["nodes"]
+        items["pageInfo"] = page["pageInfo"]
+
+
+def fetch(repo: str, closed: int, stable_pattern: re.Pattern[str] = STABLE, run: Runner = gh_graphql) -> dict[str, Any]:
+    """One query, plus follow-up pages only for the connections it reports as capped"""
+    owner, _, name = repo.partition("/")
+    if not owner or not name or "/" in name:
+        fail(f"repo must be owner/name, got {repo!r}")
+    base: Variables = {"owner": owner, "name": name}
+    data = repository(run, QUERY, {**base, "closed": closed})
+
+    issues = data["open"]
+    seen: set[str] = set()
+    while issues["pageInfo"]["hasNextPage"]:
+        cursor = advance(issues["pageInfo"]["endCursor"], seen, "open issues")
+        page = repository(run, OPEN_PAGE, {**base, "cursor": cursor})["open"]
+        issues["nodes"] = issues["nodes"] + page["nodes"]
+        issues["pageInfo"] = page["pageInfo"]
+    for issue in issues["nodes"]:
+        check_labels(issue)
+        complete_comments(run, base, issue)
+        complete_refs(run, TIMELINE_PAGE, base, issue, "timelineItems")
+    for issue in data["closed"]["nodes"]:
+        check_labels(issue)
+        complete_refs(run, REFS_PAGE, base, issue, "refs")
+
+    # Only the newest stable tag is used: page back until one is in hand, not through every tag
+    tags = data["tags"]
+    seen = set()
+    while tags["pageInfo"]["hasPreviousPage"] and latest_stable(tags["nodes"], stable_pattern) is None:
+        cursor = advance(tags["pageInfo"]["startCursor"], seen, "tags")
+        page = repository(run, TAGS_PAGE, {**base, "cursor": cursor})["tags"]
+        tags["nodes"] = page["nodes"] + tags["nodes"]
+        tags["pageInfo"] = page["pageInfo"]
     return data
 
 
@@ -299,7 +487,7 @@ def main() -> int:
     except re.error as exc:
         parser.error(f"--stable-tag-regex: {exc}")
 
-    data = fetch(args.repo, max(args.closed, 1))
+    data = fetch(args.repo, max(args.closed, 1), stable_pattern)
     rows: list[dict[str, Any]] = []
     refs = {r for issue in data["open"]["nodes"] for r in upstream_refs(issue)}
     states = upstream_states(refs)
