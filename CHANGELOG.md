@@ -51,6 +51,27 @@ bot.
   --approve <environment>` deploys once, observe reports. `land` now starts environment
   workflows on the tag, so each deployment's ref names it. `doctor` checks the operate
   caller and its permissions once an environment uses `from` or `health` (#30)
+- `shipyard operate` rolls back an environment that fails `[operate] rollback_after`
+  health checks in a row (default 3) to the previous tag that reached `success` there,
+  under `rollback` autonomy and the hold: act dispatches, propose (or the hold) has the
+  incident propose it for `operate --approve-rollback <environment>`, observe reports.
+  It opens one issue per environment and bad tag, labelled `[operate] incident_label`
+  (default `incident`), with the failing check and the rollback, and comments on it
+  when the environment is healthy again or when the rollback fails its checks too, where
+  it stops. An open incident holds the `[gates] blocker_lanes` like the blocker label.
+  A failed check now writes a `failure` status each time, up to `rollback_after` in a
+  row, to count them. `doctor` validates `[operate]` and wants `issues: write` on the
+  operate job once an environment has `health` (#31)
+- github-ship-watch reports what `shipyard operate` found, for a repo whose config has
+  `[environments.<name>]` tables: OPERATE_FAILED (the operate caller's latest run failed;
+  the watch reruns a flaky one once), UNHEALTHY (an environment's newest `shipyard health`
+  status is a failure), PROMOTION_DUE (an open "Ready to promote" proposal, with its
+  approve command, or a baked source nothing promotes because operate isn't running on a
+  schedule), and INCIDENT_OPEN (an open issue labelled `[operate] incident_label`, default
+  `incident`, with its age and the PRs linked to close it). Every repo with a shipyard
+  config also gets a HOLD row for an open `shipyard-hold` issue, with who opened it and
+  when; a hold alone doesn't make the watch exit 1. Incidents and holds lead the report,
+  and the watch never deploys or rolls back itself (#33)
 
 ## [0.8.0] - 2026-10-04
 

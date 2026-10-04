@@ -9,7 +9,7 @@ from types import ModuleType
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "skills" / "github-ship-watch" / "scripts" / "watch_state.py"
-NOW = dt.datetime(2026, 10, 3, 12, 0, tzinfo=dt.UTC)
+NOW = dt.datetime(2026, 10, 3, 12, 0, tzinfo=dt.timezone.utc)  # noqa: UP017 (runs under 3.10 too, as the script does)
 GRACE = dt.timedelta(minutes=20)
 
 
@@ -94,3 +94,184 @@ def test_both_policy_names_are_refused(ws: ModuleType, tmp_path: Path) -> None:
 def test_package_name_reads_the_project_table(ws: ModuleType, tmp_path: Path) -> None:
     (tmp_path / "pyproject.toml").write_text('[tool.x]\nname = "not-it"\n\n[project]\nname = "pkg"\nversion = "1"\n')
     assert ws.package_name(tmp_path) == "pkg"
+
+
+# -- holds and operations -------------------------------------------------------------------
+
+
+def issue(ws: ModuleType, number: int, labels: tuple[str, ...] = (), body: str = "", **kw: object) -> object:
+    fields: dict[str, object] = {
+        "title": f"issue {number}",
+        "created": NOW - dt.timedelta(hours=3),
+        "author": "alice",
+        "closing_prs": (),
+    }
+    fields.update(kw)
+    return ws.Issue(number, fields["title"], body, fields["created"], fields["author"], labels, fields["closing_prs"])
+
+
+def deployment(ws: ModuleType, id_: int, tag: str, minutes_ago: int = 120) -> object:
+    return ws.Deployment(id_, tag, f"sha-{tag}", NOW - dt.timedelta(minutes=minutes_ago))
+
+
+def status(ws: ModuleType, id_: int, state: str, description: str, minutes_ago: int) -> object:
+    return ws.Status(id_, state, description, NOW - dt.timedelta(minutes=minutes_ago))
+
+
+def test_a_hold_names_who_opened_it_and_when(ws: ModuleType) -> None:
+    issues = [issue(ws, 7, ("shipyard-hold",), title="Stop: bad migration", author="bob"), issue(ws, 8)]
+    rows = ws.hold_rows(issues, NOW)
+    assert [(r.state, r.subject) for r in rows] == [("HOLD", "#7")]
+    assert rows[0].detail == "Stop: bad migration; opened by @bob 3 h ago (2026-10-03 09:00 UTC)"
+    assert "HOLD" not in ws.ACTION  # a person stopped the factory on purpose
+
+
+def test_an_incident_reports_its_age_and_linking_prs(ws: ModuleType) -> None:
+    issues = [
+        issue(ws, 3, ("incident",), created=NOW - dt.timedelta(days=2), closing_prs=(12,)),
+        issue(ws, 4, ("sev1",), created=NOW - dt.timedelta(minutes=30)),
+        issue(ws, 5, ("bug",)),
+    ]
+    assert [r.detail for r in ws.incident_rows(issues, "incident", NOW)] == ["issue 3; open 2 d, PR #12 links it"]
+    rows = ws.incident_rows(issues, "sev1", NOW)
+    assert [(r.state, r.subject, r.detail) for r in rows] == [
+        ("INCIDENT_OPEN", "#4", "issue 4; open 30 min, no PR links it")
+    ]
+
+
+def test_the_report_leads_with_incidents_and_holds(ws: ModuleType) -> None:
+    rows = [ws.Row(s, "x", "") for s in ("BOT_OK", "HOLD", "UNHEALTHY", "INCIDENT_OPEN", "ISSUES", "HOLD")]
+    assert states(ws.ordered(rows)) == ["INCIDENT_OPEN", "HOLD", "HOLD", "BOT_OK", "UNHEALTHY", "ISSUES"]
+
+
+def test_a_failed_operate_run_is_reported(ws: ModuleType) -> None:
+    failed = [run(ws, "completed", "failure", 5), run(ws, "completed", "success", 15)]
+    assert states(ws.operate_rows(failed, "operate.yml")) == ["OPERATE_FAILED"]
+    cancelled = [run(ws, "completed", "cancelled", 5), run(ws, "completed", "success", 15)]
+    assert ws.operate_rows(cancelled, "operate.yml") == []
+    assert ws.operate_rows([run(ws, "in_progress", "", 1), failed[1]], "operate.yml") == []
+
+
+def test_the_current_deployment_is_the_newest_that_succeeded(ws: ModuleType) -> None:
+    deployments = [deployment(ws, 3, "v1.3.0"), deployment(ws, 2, "refs/tags/v1.2.0")]
+    statuses = {3: [status(ws, 30, "failure", "deploy failed", 60)], 2: [status(ws, 20, "success", "", 200)]}
+    current = ws.current_deployment(deployments, statuses.__getitem__)
+    assert current is not None and current.tag == "v1.2.0"
+    assert ws.current_deployment(deployments[:1], statuses.__getitem__) is None
+
+
+def test_an_environment_whose_newest_health_status_failed_is_unhealthy(ws: ModuleType) -> None:
+    sick = ws.Current(
+        deployment(ws, 2, "v1.2.0"),
+        (
+            status(ws, 1, "success", "", 200),
+            status(ws, 2, "success", "shipyard health: healthy", 100),
+            status(ws, 3, "failure", "shipyard health: HTTP 503", 25),
+        ),
+    )
+    row = ws.unhealthy_row("staging", sick, NOW)
+    assert (row.state, row.subject, row.detail) == ("UNHEALTHY", "staging", "v1.2.0: HTTP 503, since 25 min ago")
+    recovered = ws.Current(sick.deployment, (*sick.statuses, status(ws, 4, "success", "shipyard health: healthy", 5)))
+    assert ws.unhealthy_row("staging", recovered, NOW) is None
+    # a failure someone else recorded isn't a shipyard health check
+    other = ws.Current(sick.deployment, (status(ws, 1, "success", "", 200), status(ws, 2, "failure", "smoke", 5)))
+    assert ws.unhealthy_row("staging", other, NOW) is None
+    assert ws.unhealthy_row("staging", None, NOW) is None
+
+
+PROPOSAL_BODY = "<!-- shipyard:propose deploy=production -->\n<!-- shipyard:tag=v1.2.0 -->\nshipyard would deploy"
+
+
+def test_an_open_proposal_is_due_with_its_approve_command(ws: ModuleType) -> None:
+    issues = [issue(ws, 9, body=PROPOSAL_BODY), issue(ws, 10, body="<!-- shipyard:propose lane=stable -->")]
+    rows = ws.proposal_rows(issues, "operate.yml", held=False)
+    assert [(r.state, r.subject) for r in rows] == [("PROMOTION_DUE", "production")]
+    assert rows[0].detail == "#9 v1.2.0: gh workflow run operate.yml -f approve=production -f dry-run=false"
+    held = ws.proposal_rows(issues, "operate.yml", held=True)
+    assert held[0].detail.startswith("#9 v1.2.0: close the shipyard-hold issues, then gh workflow run")
+
+
+def baked_source(ws: ModuleType, minutes_ago: int, *health: object) -> object:
+    return ws.Current(deployment(ws, 5, "v1.2.0"), (status(ws, 50, "success", "", minutes_ago), *health))
+
+
+def test_a_baked_source_nothing_promotes_is_due_while_operate_is_idle(ws: ModuleType) -> None:
+    prod = ws.Environment("production", "staging", 60)
+    source = baked_source(ws, 90)
+    idle = "no workflow calls shipyard's operate.yml"
+    row = ws.unpromoted_row(prod, source, [deployment(ws, 1, "v1.1.0")], idle, "run it", NOW)
+    assert (row.state, row.subject) == ("PROMOTION_DUE", "production")
+    assert row.detail == f"v1.2.0 on staging for 90 min, unpromoted: {idle}; run it"
+    # operate is running: its proposal or its deploy is the signal
+    assert ws.unpromoted_row(prod, source, [], None, "run it", NOW) is None
+    # still baking, unhealthy, or tried on production already
+    assert ws.unpromoted_row(prod, baked_source(ws, 30), [], idle, "run it", NOW) is None
+    sick = baked_source(ws, 90, status(ws, 51, "failure", "shipyard health: HTTP 500", 10))
+    assert ws.unpromoted_row(prod, sick, [], idle, "run it", NOW) is None
+    tried = [ws.Deployment(9, "v1.2.0", "sha-v1.2.0", NOW)]
+    assert ws.unpromoted_row(prod, source, tried, idle, "run it", NOW) is None
+    # a lane environment is never promoted
+    assert ws.unpromoted_row(ws.Environment("staging", None, 0), source, [], idle, "run it", NOW) is None
+
+
+def test_operate_idle_reasons(ws: ModuleType) -> None:
+    assert ws.operate_idle(None, [], NOW) == "no workflow calls shipyard's operate.yml"
+    assert ws.operate_idle(("operate.yml", False), [], NOW) == "operate.yml has no schedule"
+    assert ws.operate_idle(("operate.yml", True), [], NOW) == "operate.yml has never run"
+    stale = [run(ws, "completed", "success", 180)]
+    assert ws.operate_idle(("operate.yml", True), stale, NOW) == "operate.yml last ran 3 h ago"
+    assert ws.operate_idle(("operate.yml", True), [run(ws, "completed", "success", 8)], NOW) is None
+
+
+def test_the_operate_caller_is_found(ws: ModuleType, tmp_path: Path) -> None:
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    assert ws.operate_caller(tmp_path) is None
+    (workflows / "operate.yml").write_text("on:\n  workflow_call:\njobs:\n  operate:\n    runs-on: x\n")
+    assert ws.operate_caller(tmp_path) is None  # shipyard's own reusable workflow calls nothing
+    uses = "uses: romamo/shipyard/.github/workflows/operate.yml@v0"
+    caller = f"on:\n  workflow_dispatch:\njobs:\n  operate:\n    {uses}\n"
+    (workflows / "ops.yml").write_text(caller)
+    assert ws.operate_caller(tmp_path) == ("ops.yml", False)
+    (workflows / "ops.yml").write_text(caller.replace("on:\n", 'on:\n  schedule:\n    - cron: "*/10 * * * *"\n'))
+    assert ws.operate_caller(tmp_path) == ("ops.yml", True)
+
+
+CONFIG = """mode = "release"
+
+[lanes.rc]
+schedule = ["Mon 07:00 UTC"]
+
+# [environments.example]
+[environments.staging]
+lane = "rc"
+workflow = "deploy.yml"
+
+[environments."production"]   # promoted
+from = "staging"
+workflow = "deploy.yml"
+bake_minutes = 60
+
+[[version_lines]]
+file = "README.md"
+"""
+
+
+def test_environments_and_the_incident_label_come_from_the_config(ws: ModuleType) -> None:
+    policy = Path(".github/shipyard.toml")
+    assert ws.environments(CONFIG, policy) == [
+        ws.Environment("staging", None, 0),
+        ws.Environment("production", "staging", 60),
+    ]
+    assert ws.environments('mode = "release"\n', policy) == []
+    assert ws.incident_label(CONFIG) == "incident"
+    assert ws.incident_label(CONFIG + "\n[operate]\nincident_label = 'sev1'\n") == "sev1"
+
+
+@pytest.mark.parametrize(
+    "config",
+    ['[environments]\nstaging = { lane = "rc" }\n', 'environments.staging.lane = "rc"\n', "[environments.a.b]\n"],
+)
+def test_environments_the_watch_cannot_read_are_refused(ws: ModuleType, config: str) -> None:
+    with pytest.raises(SystemExit, match="environments"):
+        ws.environments(config, Path(".github/shipyard.toml"))
