@@ -303,8 +303,9 @@ docs/design/agent-modes.md has the details.
    it once now. Its log is under `~/Library/Logs/shipmill/`. `--remove` unloads it; on
    Linux, run the same `gate` command from a systemd timer
 6. **Hand over.** Tell the user how to see a session (`claude agents`, `claude attach
-   <id>`), that a session waiting on a question holds the repo until they answer, and
-   how to stop it all (`launchd <owner/repo> --remove`)
+   <id>`), that a session waiting on a question holds the repo until they answer, that an
+   open `shipmill-hold` issue stops every launch as well as every release (D-11), and how
+   to remove the job (`launchd <owner/repo> --remove`)
 
 ## Migrating from hand-made or scripted releases
 

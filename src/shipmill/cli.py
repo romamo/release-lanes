@@ -27,6 +27,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from shipmill.agents import AgentsConfig
+from shipmill.autonomy import Hold
 from shipmill.config import CONFIG_PATH, config_path
 from shipmill.doctor import CALLER, OPERATE_CALLER, doctor
 from shipmill.errors import ReleaseError
@@ -301,6 +302,7 @@ def _gate(root: Path, args: argparse.Namespace) -> int:
         ClaudeCli(args.claude_arg),
         lambda: watch(args.slug, root),
         dt.datetime.now(dt.UTC),
+        lambda: Hold.read(GhCli(root)),
         args.refresh,
         args.dry_run,
     )
