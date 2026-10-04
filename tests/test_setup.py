@@ -9,6 +9,7 @@ from shipyard.doctor import doctor
 from shipyard.errors import ReleaseError
 from shipyard.init import init
 from shipyard.policy import Lane, Policy
+from shipyard.roadmap import RoadmapConfig
 
 from .conftest import Repo
 
@@ -344,3 +345,15 @@ def test_doctor_warns_when_it_cannot_ask_origin(repo: Repo) -> None:
 
     repo.git.run("remote", "remove", "origin")
     assert check() == ("WARN", "no 'origin' remote to ask for a branch 'shipyard'")
+
+
+def test_doctor_reports_the_roadmap_only_when_configured(repo: Repo) -> None:
+    assert "roadmap" not in {c.name for c in doctor(repo.root)}
+    repo.write(repo.policy_file, repo.read(repo.policy_file) + "\n[roadmap]\nwip = 3\n")
+    checks = {c.name: c for c in doctor(repo.root)}
+    assert checks["roadmap"].status == "PASS"
+    assert checks["roadmap"].detail == "wip 3 open issues, a milestone every 2 weeks; read by the product-intake skill"
+    assert Policy.load(config_path(repo.root)).roadmap == RoadmapConfig(wip=3, cadence=2)
+    repo.write(repo.policy_file, repo.read(repo.policy_file).replace("wip = 3", "wip = 3\ncadence = 1\nteam = 2"))
+    checks = {c.name: c for c in doctor(repo.root)}
+    assert checks["policy"].status == "FAIL" and "[roadmap]: unknown keys ['team']" in checks["policy"].detail

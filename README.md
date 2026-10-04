@@ -342,6 +342,18 @@ prints the effective autonomy per stage and warns while a hold is open. Each `de
 must name an environment in `[environments]`. `deploy` and `rollback` take effect in
 `shipyard operate` (see Operate above).
 
+### Roadmap
+
+`[roadmap]` sets the capacity the `product-intake` skill plans milestones within. It
+proposes the next milestone from accepted opportunities, ranked by evidence per load, as an
+issue the maintainer approves; `doctor` validates the section:
+
+```toml
+[roadmap]
+wip = 5       # issues open at once across the open milestones (1..100)
+cadence = 2   # weeks from one milestone's due date to the next (1..26)
+```
+
 ### Versions
 
 - The next stable version is the last stable tag bumped by the pending entries, or the open

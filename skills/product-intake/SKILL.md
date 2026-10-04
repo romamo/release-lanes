@@ -1,6 +1,6 @@
 ---
 name: product-intake
-description: Turn a GitHub repo's product feedback into opportunity issues the maintainer accepts or declines. Groups feature requests, ideas, and discussions that ask for the same outcome (with thumbs-up reactions as demand) into one opportunity issue each, keeps it updated instead of opening a second, records a decline so the same request is never proposed again, and hands an accepted opportunity to github-issue-triage's spec gate. Use when the user asks to "group the feature requests", "run product intake", "what are users asking for", "turn feedback into opportunities", or "what should we build next". Not for bugs or contract changes (github-issue-triage) or for releases (github-ship-watch).
+description: Turn a GitHub repo's product feedback into opportunity issues the maintainer accepts or declines, and plan milestones from the accepted ones. Groups feature requests, ideas, and discussions that ask for the same outcome (with thumbs-up reactions as demand) into one opportunity issue each, keeps it updated instead of opening a second, records a decline so the same request is never proposed again, and hands an accepted opportunity to github-issue-triage's spec gate. Proposes the next milestone from accepted opportunities by evidence and effort within the config's work-in-progress limit and cadence, for the maintainer to approve. Use when the user asks to "group the feature requests", "run product intake", "what are users asking for", "turn feedback into opportunities", "what should we build next", "plan the next milestone", or "where is the roadmap". Not for bugs or contract changes (github-issue-triage) or for releases (github-ship-watch).
 ---
 
 # Product Intake
@@ -101,10 +101,66 @@ Accepting is the `planned` label, declining is closing the opportunity as not pl
 
 An ACCEPTED opportunity is a **feature**: under "intake and triage", run github-issue-triage on it, which runs the spec gate. The opportunity issue becomes the feature issue: the spec PR's body says "Spec for #N" with the opportunity's number, and triage's **feature** comment with its hold line makes the script read it HANDED_OFF. The spec's Problem section starts from the opportunity's Problem and Evidence. Without "and triage", list it in the report as waiting for triage.
 
+## Roadmap plan
+
+Milestones are the roadmap: shipyard already releases a lane when the milestone named after the next version has no open issues (`milestone = true`), so a planned milestone is a planned release. The accepted opportunities go into milestones, each with its spec PR and build issues, and the maintainer approves each milestone's contents before it exists. Run this section after intake, or alone when the user asks about the roadmap.
+
+### The capacity
+
+`[roadmap]` in `.github/shipyard.toml` sets it; `doctor` validates the section and refuses unknown keys:
+
+```toml
+[roadmap]
+wip = 5         # issues open at once across the open milestones (1..100)
+cadence = 2     # weeks from one milestone's due date to the next (1..26)
+```
+
+Without the section, the script plans with these defaults. `[autonomy] intake` covers this section too: under `observe`, report the plan and write nothing.
+
+### The script
+
+`scripts/roadmap_state.py <owner/repo>`, run from the checkout (it reads the config and the specs in `docs/specs/`). Exit 1 when a row below is an action.
+
+| State | Means | Do |
+|---|---|---|
+| WIP_OVER | The open milestones hold more open issues than `wip` | Report it; recommend finishing or moving issues out. Propose nothing new |
+| OVERDUE | An open milestone is past its due date with issues open | Report its progress; moving the date or the scope is the maintainer's call |
+| APPROVED | A proposal was approved, and its milestone is missing or lacks an opportunity it lists | Apply it (Approval, below) |
+| UNREADABLE | A proposal lacks its marker line | Fix the body from the template, or ask the maintainer what it proposes |
+| NEXT | No proposal is open, and accepted opportunities fit the free capacity | Write the proposal (below) |
+| UNPLANNED | An accepted opportunity in no milestone and no open proposal, with its rank | Nothing by itself: NEXT holds the ones that fit |
+| PROPOSAL_OPEN | A proposal waits for the maintainer | Nothing; list it in the report |
+| MILESTONE | An open milestone's progress and due date | Report it |
+
+What the script decides:
+
+- **Evidence** is an opportunity's requests plus their thumbs-up and its own
+- **Load** is the issues an opportunity adds to a milestone: itself plus its spec's build issues (the spec's Issues section, from the `docs/specs/NNN-*.md` its body links), or itself plus one while no spec is merged
+- **Rank** orders by evidence per load, then evidence, then the oldest first
+- **NEXT** fills the free capacity (`wip` less the open issues already in open milestones) in rank order, passing over one that doesn't fit, and dates the milestone `cadence` weeks after the latest open milestone's due date (or today). One proposal is open at a time: an open one holds its opportunities and the next plan
+- **Approval** is the proposal closed as completed with a comment starting "approve" (or "approved")
+
+### Propose the next milestone
+
+On a NEXT row, write the proposal with [references/milestone-proposal.md](references/milestone-proposal.md), labelled `milestone-proposal` (create the label once). Its marker line names the milestone and its due date; its Opportunities section lists NEXT's opportunities as `#N`. Name the milestone after the version it should release as, when a lane has `milestone = true`: the version after the newest open milestone's, or the next minor after the latest stable tag.
+
+The script's order is the default. Depart from it only for a reason you write into the proposal: one opportunity needs another first, or a `D-n` rule. An UNPLANNED row larger than `wip` never fits: recommend splitting it into specs the size of a milestone. When the newest proposal was closed as not planned, read its comment first and follow it; never propose the same list again unchanged, ask the maintainer instead.
+
+### Approval
+
+The maintainer may edit the Opportunities list before approving; the script reads the body as it is. On APPROVED (not under `observe`):
+
+```bash
+gh api repos/{owner}/{repo}/milestones -f title="{title}" -f due_on="{due}T23:59:59Z"   # only when it doesn't exist
+gh issue edit {n} -R {owner}/{repo} --milestone "{title}"                                 # each listed opportunity
+```
+
+Then move each opportunity's spec PR and existing build issues into the milestone too, and say so on the proposal. From there github-issue-triage works through the milestone in the proposal's order; a build issue filed later for one of its opportunities joins the same milestone.
+
 ## Report
 
-Lead with what needs the maintainer: the OPPORTUNITY_OPEN issues, strongest evidence first, each with its request count, thumbs-up, and a one-line recommendation (accept or decline, and why). Then what the pass wrote (opportunities opened and updated, requests linked), the NO_REASON issues, the ACCEPTED ones waiting for triage, and the feedback left ungrouped with the reason. On a quiet pass, one line: "No new feedback; N opportunities wait for your call."
+Lead with what needs the maintainer: the OPPORTUNITY_OPEN issues, strongest evidence first, each with its request count, thumbs-up, and a one-line recommendation (accept or decline, and why). Then what the pass wrote (opportunities opened and updated, requests linked), the NO_REASON issues, the ACCEPTED ones waiting for triage, and the feedback left ungrouped with the reason. For the roadmap: an open or new proposal first, then OVERDUE and WIP_OVER, then each open milestone's progress. On a quiet pass, one line: "No new feedback; N opportunities wait for your call."
 
 ## Improve the skill
 
-When a pass groups badly (two outcomes in one issue, a request proposed again after a decline), add the lesson to step 2. When the script misreads a state, fix `intake_state.py` and add a case to shipyard's `tests/test_intake_state.py`.
+When a pass groups badly (two outcomes in one issue, a request proposed again after a decline), add the lesson to step 2. When a script misreads a state, fix `intake_state.py` or `roadmap_state.py` and add a case to shipyard's `tests/test_intake_state.py` or `tests/test_roadmap_state.py`.

@@ -121,11 +121,17 @@ CASES: dict[str, list[Change]] = {
     "agents retry range": add('\n[agents]\nprompt = "/t"\nretry_hours = 0\n'),
     "agents prs a bool": add('\n[agents]\nprompt = "/t"\nprs = "yes"\n'),
     "agents a table": top("agents = 1"),
+    # [roadmap]
+    "roadmap unknown key": add("\n[roadmap]\nwip = 3\nvelocity = 2\n"),
+    "roadmap wip range": add("\n[roadmap]\nwip = 0\n"),
+    "roadmap cadence an integer": add('\n[roadmap]\ncadence = "2w"\n'),
+    "roadmap cadence range": add("\n[roadmap]\ncadence = 27\n"),
+    "roadmap a table": top("roadmap = 1"),
 }
 
 
 MESSAGES: dict[str, str] = {
-    "top unknown key": "shipyard.toml: unknown keys ['colour']; allowed: ['after_stamp', 'agents', 'autonomy', 'bot', 'branch', 'bump', 'changelog', 'environments', 'gates', 'lanes', 'mode', 'name', 'operate', 'publish', 'version_files', 'version_lines']",
+    "top unknown key": "shipyard.toml: unknown keys ['colour']; allowed: ['after_stamp', 'agents', 'autonomy', 'bot', 'branch', 'bump', 'changelog', 'environments', 'gates', 'lanes', 'mode', 'name', 'operate', 'publish', 'roadmap', 'version_files', 'version_lines']",
     "top name required": "shipyard.toml: name is required",
     "top name a string": "shipyard.toml: name must be a string, got 1",
     "top mode enum": "shipyard.toml: mode must be one of ['off', 'dry-run', 'release'], got 'on'",
@@ -192,6 +198,11 @@ MESSAGES: dict[str, str] = {
     "agents retry range": "shipyard.toml [agents]: retry_hours must be in 1..168, got 0",
     "agents prs a bool": "shipyard.toml [agents]: prs must be true or false, got 'yes'",
     "agents a table": "shipyard.toml: agents must be a table, got 1",
+    "roadmap unknown key": "shipyard.toml [roadmap]: unknown keys ['velocity']; allowed: ['cadence', 'wip']",
+    "roadmap wip range": "shipyard.toml [roadmap]: wip must be in 1..100, got 0",
+    "roadmap cadence an integer": "shipyard.toml [roadmap]: cadence must be an integer, got '2w'",
+    "roadmap cadence range": "shipyard.toml [roadmap]: cadence must be in 1..26, got 27",
+    "roadmap a table": "shipyard.toml: roadmap must be a table, got 1",
 }
 
 

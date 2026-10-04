@@ -50,6 +50,8 @@ def doctor(root: Path, github: GitHub | None = None) -> list[Check]:
             " `tool` is this release or newer"
         )
         add(False, "config", detail, warn=True)
+    if policy.roadmap is not None:
+        add(True, "roadmap", f"{policy.roadmap}; read by the product-intake skill")
     autonomy, hold = _autonomy(policy, github, root / CALLER)
     checks.extend(autonomy)
     if (operated := _operate(policy, hold, root, _operate_caller(root))) is not None:
