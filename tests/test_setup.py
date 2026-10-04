@@ -168,3 +168,36 @@ def test_doctor_fails_a_branch_on_origin_that_blocks_the_work_branch(repo: Repo)
         "FAIL",
         "origin has a branch 'shipyard', which blocks the work branch shipyard/<tag>; delete or rename it",
     )
+
+
+def test_doctor_asks_origin_not_the_clones_refs(repo: Repo) -> None:
+    # A shallow clone fetches one branch, so its refs/remotes never showed origin's
+    # 'shipyard' and doctor passed; a stale origin/shipyard failed it after the branch went
+    def check(root: Path) -> str:
+        [found] = [c for c in doctor(root) if c.name == "work branch"]
+        return found.status
+
+    origin = repo.root.parent / "origin.git"
+    repo.git.run("push", "-q", "origin", "main:refs/heads/shipyard")
+    shallow = repo.root.parent / "shallow"
+    repo.git.run("clone", "-q", "--depth", "1", origin.as_uri(), str(shallow))
+    assert not (shallow / ".git" / "refs" / "remotes" / "origin" / "shipyard").exists()
+    assert check(shallow) == "FAIL"
+
+    repo.git.run("fetch", "-q", "origin")
+    repo.git.run("push", "-q", str(origin), ":refs/heads/shipyard")  # leaves origin/shipyard behind
+    assert repo.git.ok("show-ref", "--verify", "-q", "refs/remotes/origin/shipyard")
+    assert check(repo.root) == "PASS"
+
+
+def test_doctor_warns_when_it_cannot_ask_origin(repo: Repo) -> None:
+    def check() -> tuple[str, str]:
+        [found] = [c for c in doctor(repo.root) if c.name == "work branch"]
+        return found.status, found.detail
+
+    repo.git.run("remote", "set-url", "origin", str(repo.root.parent / "gone.git"))
+    status, detail = check()
+    assert status == "WARN" and detail.startswith("can't ask origin for a branch 'shipyard': ")
+
+    repo.git.run("remote", "remove", "origin")
+    assert check() == ("WARN", "no 'origin' remote to ask for a branch 'shipyard'")

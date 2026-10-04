@@ -7,6 +7,13 @@ bot.
 
 ## [Unreleased]
 
+### Fixed
+
+- `doctor`'s `work branch` check asks origin for a `shipyard` branch, as `prepare` does,
+  instead of reading the clone's fetched refs: a shallow or single-branch clone (such as a
+  CI checkout) passed while origin had the branch, and a stale `origin/shipyard` failed
+  after it was deleted. It warns when there is no origin or origin can't be reached
+
 ## [0.5.1] - 2026-10-04
 
 ### Fixed
