@@ -9,13 +9,19 @@ bot.
 
 ### Added
 
-- A fleet file for github-ship-watch (spec S-001): `[[repos]]` tables naming each repo
-  as `owner/name`, with an optional `incident_label`, read by `fleet.py` and refused
-  (exit 2, naming the file and the problem) when it is missing, isn't TOML, has no
-  repos, has an entry without `repo` or with an unknown key, names a repo not in
-  owner/name form, or lists a repo twice. `watch_state.py --incident-label` takes the
-  place of the config's `[operate] incident_label`, so a fleet entry's label is the one
-  its watch reads (#91)
+- github-ship-watch reports a fleet (spec S-001): `fleet.py report --fleet <file>`
+  runs `watch_state.py` for every repo the fleet file lists, each on a fresh blobless
+  clone, and prints one table with the repo named on each row, the action rows of all
+  repos first. It exits 1 when any repo has an action row; a repo whose check fails
+  (not found, no access, a gh error) gets one REPO_ERROR row with the error's first
+  line, the rest are still reported, and the run exits 2. `--json` prints the report as
+  one object, each repo with its rows, and with `--metrics` each repo's `metrics.py`
+  measures over one shared window. The fleet file is `[[repos]]` tables naming each
+  repo as `owner/name`, with an optional `incident_label`, refused (exit 2, naming the
+  file and the problem) when it is missing, isn't TOML, has no repos, has an entry
+  without `repo` or with an unknown key, names a repo not in owner/name form, or lists
+  a repo twice. `watch_state.py --incident-label` takes the place of the config's
+  `[operate] incident_label`, so a fleet entry's label is the one its watch reads (#91)
 
 ## [0.11.0] - 2026-10-04
 
