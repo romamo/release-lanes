@@ -284,3 +284,81 @@ def test_graphql_errors_fail(ts: ModuleType, capsys: pytest.CaptureFixture[str])
         ts.fetch("o/r", 20, run=run)
     assert exc.value.code == 2
     assert "Resource limits" in capsys.readouterr().err
+
+
+# Back-off (#24): GitHub rejects a costly page with one RESOURCE_LIMITS_EXCEEDED error per
+# node it dropped; the fetch asks again at half the size, down to MIN_PAGE
+
+
+def rejected(nodes: int) -> dict[str, Any]:
+    error = {"type": "RESOURCE_LIMITS_EXCEEDED", "message": "Resource limits for this query exceeded."}
+    return {"data": {"repository": None}, "errors": [dict(error) for _ in range(nodes)]}
+
+
+class HeavyGitHub:
+    """A repo with ``count`` open issues that rejects any open-issue page bigger than
+    ``limit`` (``first_limit`` for the first query). A cursor is the index of the next
+    issue, so it holds across page sizes, as GitHub's do"""
+
+    def __init__(self, ts: ModuleType, count: int, limit: int, first_limit: int | None = None) -> None:
+        self.names = {ts.QUERY: "QUERY", ts.OPEN_PAGE: "OPEN_PAGE"}
+        self.issues = [open_issue(n) for n in range(count, 0, -1)]
+        self.limits = {"QUERY": limit if first_limit is None else first_limit, "OPEN_PAGE": limit}
+        self.calls: list[tuple[str, int]] = []
+
+    def __call__(self, query: str, variables: dict[str, str | int]) -> dict[str, Any]:
+        name, size = self.names[query], variables["size"]
+        assert isinstance(size, int)
+        self.calls.append((name, size))
+        if size > self.limits[name]:
+            return rejected(size)
+        start = int(variables.get("cursor", 0))
+        end = start + size
+        page = forward(self.issues[start:end], str(end) if end < len(self.issues) else None)
+        if name == "QUERY":
+            return {"data": {"repository": {"open": page, "tags": backward([]), "closed": {"nodes": []}}}}
+        return {"data": {"repository": {"open": page}}}
+
+
+def test_a_rejected_first_query_is_asked_again_at_half_the_size(ts: ModuleType) -> None:
+    gh = HeavyGitHub(ts, count=120, limit=30)
+    data = ts.fetch("o/r", 20, run=gh)
+    assert [i["number"] for i in data["open"]["nodes"]] == list(range(120, 0, -1))
+    assert {classify(ts, i) for i in data["open"]["nodes"]} == {"NEW"}
+    # 100, 50, then 25 fits; later pages start at 25 instead of being rejected at 50 first
+    assert gh.calls == [("QUERY", 100), ("QUERY", 50), ("QUERY", 25)] + [("OPEN_PAGE", 25)] * 4
+
+
+def test_a_rejected_later_page_backs_off_from_its_cursor(ts: ModuleType) -> None:
+    gh = HeavyGitHub(ts, count=160, limit=30, first_limit=100)
+    data = ts.fetch("o/r", 20, run=gh)
+    assert [i["number"] for i in data["open"]["nodes"]] == list(range(160, 0, -1))
+    assert gh.calls == [("QUERY", 100), ("OPEN_PAGE", 50)] + [("OPEN_PAGE", 25)] * 3
+
+
+def test_a_page_rejected_at_the_floor_fails_with_one_line(ts: ModuleType, capsys: pytest.CaptureFixture[str]) -> None:
+    gh = HeavyGitHub(ts, count=120, limit=ts.MIN_PAGE - 1)
+    with pytest.raises(SystemExit) as exc:
+        ts.fetch("o/r", 20, run=gh)
+    assert exc.value.code == 2
+    assert gh.calls == [("QUERY", 100), ("QUERY", 50), ("QUERY", 25), ("QUERY", 12), ("QUERY", 10)]
+    assert capsys.readouterr().err.splitlines() == [
+        "error: o/r: GitHub's resource limits rejected the first query (open issues, tags, recent closes)"
+        " even at 10 per page"
+    ]
+
+
+def test_an_error_besides_resource_limits_is_not_retried(ts: ModuleType, capsys: pytest.CaptureFixture[str]) -> None:
+    calls: list[str] = []
+
+    def run(query: str, variables: dict[str, str | int]) -> dict[str, Any]:
+        calls.append(query)
+        response = rejected(2)
+        response["errors"].append({"type": "NOT_FOUND", "message": "Could not resolve to a Repository"})
+        return response
+
+    with pytest.raises(SystemExit) as exc:
+        ts.fetch("o/r", 20, run=run)
+    assert exc.value.code == 2
+    assert len(calls) == 1
+    assert "NOT_FOUND" in capsys.readouterr().err

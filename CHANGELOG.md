@@ -16,6 +16,9 @@ bot.
   under Unreleased, and `union` keeps a blank line between a release heading and the
   heading it meets. The landing loop runs `move`, `check`, and the planner's dry run after
   every rebase, and prints the Unreleased section for the lander to read (#25)
+- `triage_state.py` reads a busy repo such as pypa/pip: a page GitHub rejects for its
+  resource limits is asked again at half the size, down to 10 issues, and one still
+  rejected there fails with one error line instead of gh's line per node (#24)
 
 ## [0.6.0] - 2026-10-04
 
