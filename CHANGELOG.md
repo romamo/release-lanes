@@ -37,6 +37,16 @@ bot.
   init` writes it, and `doctor` warns under `release = "propose"` until it is there).
   `shipyard operate` closes a "Ready to promote" or "Ready to deploy" issue once the
   environment runs its tag or a later one, whoever deployed it (#40)
+- github-ship-watch's `metrics.py` measures a repo over a window (`--days 30` by
+  default) from GitHub alone: deploy frequency (successful deployments per environment,
+  or stable releases for a repo without deployments), lead time for changes (a merged
+  PR's first commit to the first stable release that shipped its merge commit, median
+  and p90), change failure rate (incidents per deploy, or `release-blocker` issues and
+  hotfix releases per release), time to restore (an incident to operate's "healthy
+  again" comment or its close), issue to release (an issue to its "Released in" notice),
+  and human touch (merges a person merged or approved). An empty measure reads "no
+  data", never 0. A table by default, `--json`, and `--markdown` for a weekly post on
+  the roadmap issue, which the user schedules (#56)
 
 ### Fixed
 
