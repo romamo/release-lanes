@@ -1,6 +1,6 @@
 ---
 name: github-ship-watch
-description: Watch a GitHub repo's issue-to-release pipeline on a loop or a schedule, and finish what its standing policy already decided. Reports a failed or stalled release bot, a release missing from PyPI, fixed issues not yet told which version shipped them, issues that triage owes, and, for a repo running shipyard operate, a failed operate run, an unhealthy environment, a promotion waiting on approval, open incidents, a closed incident with no postmortem, and a hold; then reruns a flaky release job, starts a stalled lane, posts the shipped notices, and hands new issues to github-issue-triage when asked. Drafts a due postmortem as a pull request, and runs a weekly retro when the user schedules one. Use when the user asks to "watch the repo", "keep it shipping", "babysit releases", "check the release went out", or sets up /loop or /schedule for a repo. Not for triaging a backlog by hand (github-issue-triage), landing PRs (github-pr-triage), or setting up shipyard (shipyard-setup).
+description: Watch a GitHub repo's issue-to-release pipeline on a loop or a schedule, and finish what its standing policy already decided. Reports a failed or stalled release bot, a release missing from PyPI, fixed issues not yet told which version shipped them, issues that triage owes, and, for a repo running shipyard operate, a failed operate run, an unhealthy environment, a promotion waiting on approval, open incidents, a closed incident with no postmortem, and a hold; then reruns a flaky release job, starts a stalled lane, posts the shipped notices, and hands new issues to github-issue-triage when asked. Drafts a due postmortem as a pull request, and runs a weekly retro when the user schedules one. Use when the user asks to "watch the repo", "keep it shipping", "babysit releases", "check the release went out", sets up /loop or /schedule for a repo, or wants one report across several repos ("watch the fleet"). Not for triaging a backlog by hand (github-issue-triage), landing PRs (github-pr-triage), or setting up shipyard (shipyard-setup).
 ---
 
 # GitHub Ship Watch
@@ -47,7 +47,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 
 Pass `--grace` to give a slow publish more minutes before it reads NOT_PUBLISHED, and `--tool` when the shipyard bot isn't installed from `romamo/shipyard@v0`.
 
-HOLD and POSTMORTEM_DUE show for every repo with a shipyard config, since a hold stops releases too and an incident may be labelled by hand. POSTMORTEM_DUE reads the postmortems through the GitHub contents API on the default branch, so a draft counts only once merged. The operations states show only when the config declares environments (read with `tomllib`; on Python 3.10 only plain `[environments.<name>]` tables, and any other form stops the watch with a one-line message); they come from the GitHub deployments and issues `shipyard operate` writes. The incident label is `[operate] incident_label`, `incident` by default.
+HOLD and POSTMORTEM_DUE show for every repo with a shipyard config, since a hold stops releases too and an incident may be labelled by hand. POSTMORTEM_DUE reads the postmortems through the GitHub contents API on the default branch, so a draft counts only once merged. The operations states show only when the config declares environments (read with `tomllib`; on Python 3.10 only plain `[environments.<name>]` tables, and any other form stops the watch with a one-line message); they come from the GitHub deployments and issues `shipyard operate` writes. The incident label is `[operate] incident_label`, `incident` by default; `--incident-label` takes its place (the fleet report passes a fleet entry's label this way).
 
 ## Report
 
@@ -94,6 +94,42 @@ The retro writes only the proposal issues and that one comment. It never edits a
 - A measure with nothing to measure says "no data", never 0. A 0% change failure rate means releases shipped and none failed
 
 The weekly metrics post is an option the user schedules, never a default: `/schedule` a weekly routine that runs `metrics.py <repo> --markdown` and posts the table as one comment on the roadmap issue the user names (`gh issue comment <n> --body-file <file>`). Posting is the routine's only write.
+
+## Fleet
+
+A maintainer with several shipyard repos reads one report instead of one per repo, so an incident or a stalled release in one product doesn't hide among the others. The fleet report only reads: each repo's own watch pass still repairs.
+
+A fleet file lists the repos, in TOML:
+
+```toml
+[[repos]]
+repo = "romamo/shipyard"
+
+[[repos]]
+repo = "owner/other"
+incident_label = "sev"   # optional; the label that repo's incidents carry (default "incident")
+```
+
+`scripts/fleet.py report --fleet <file>` (run it with `uv run --no-project python`, 3.10+) clones each repo afresh (blobless, in a temporary folder it removes), runs `watch_state.py` on the clone, and prints one table: the repo, then each row's state, subject, and detail as `watch_state.py` prints them. The action rows of every repo come first, then the report-only rows. Exit 0 means no repo needs action, 1 that a row is an action, 2 that a repo's check failed or the fleet file is malformed.
+
+- `--metrics` adds `metrics.py`'s measures for each repo over the same 30 days, side by side, one column per repo; "no data" stays no data
+- `--json` prints the same report as one JSON object: the repos, each with its rows, and its metrics with `--metrics`
+- A repo whose check fails (not found, no access, a gh error) gets one REPO_ERROR row naming the failed step and the error's first line; the other repos are still reported, and the run exits 2 after printing everything
+- The fleet file is refused (exit 2, naming the file and the problem) when it is missing, isn't TOML, has no `[[repos]]`, has an entry without `repo`, has a key other than `repo` and `incident_label`, names a repo not in `owner/name` form, or lists a repo twice. On Python 3.10 only the plain form above is read
+- An action row is handed to that repo's own watch pass: run this skill on the repo, with the user's scope words
+
+The fleet watch is an option the user schedules, never a default. Keep the fleet file in a repo the routine clones (for example `.github/fleet.toml` in the user's ops repo), then `/schedule` a routine whose prompt is:
+
+```text
+Clone romamo/shipyard and <the repo holding the fleet file>. Run
+`uv run --no-project python skills/github-ship-watch/scripts/fleet.py report --fleet <path to fleet.toml> --metrics`.
+On exit 0, report one line: "Fleet: nothing owed". Otherwise report the incidents and
+holds first, then every action row with its repo and a recommendation, then each
+REPO_ERROR, then the metrics table. Change nothing: a repo that needs repairs gets its
+own github-ship-watch pass.
+```
+
+In a session, `/loop 1h` the same report.
 
 ## Improve the skill
 

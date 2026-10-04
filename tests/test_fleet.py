@@ -360,12 +360,53 @@ def test_s001_7_json_holds_each_repos_metrics_with_metrics(
     assert runs[1][-2:] == ["--incident-label", "sev"]
 
 
-def test_metrics_without_json_is_refused_until_the_table_shows_them(
+def test_s001_6_metrics_sit_side_by_side_one_column_per_repo(
     fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    with pytest.raises(SystemExit) as refused:
-        fleet_run(fl, tmp_path, capsys, quiet_fake(), FLEET, "--metrics")
-    assert refused.value.code == 2
+    fake = quiet_fake()
+    fake.metrics = {
+        "romamo/shipyard": measures("1.4/week (6 deploys)", "median 1.0 h, p90 1.9 h"),
+        "owner/other": measures("no data", "no data"),
+    }
+    code, out = fleet_run(fl, tmp_path, capsys, fake, FLEET, "--metrics")
+    assert code == 0
+    watch, metrics = out.split("\n\n")
+    assert len(watch.splitlines()) == 4
+    assert metrics.splitlines() == [
+        "Metrics: the 30 days to 2026-10-05 07:00 UTC",
+        "Measure          romamo/shipyard         owner/other",
+        "Deploy frequency 1.4/week (6 deploys)    no data",
+        "Lead time        median 1.0 h, p90 1.9 h no data",
+    ]
+
+
+def test_s001_6_a_repo_whose_check_failed_has_no_metrics_column(
+    fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = quiet_fake()
+    fake.metrics = {"romamo/shipyard": measures("no data", "no data"), "owner/other": measures("no data", "no data")}
+    fake.failing["owner/gone"] = ("clone", NOT_FOUND)
+    code, out = fleet_run(fl, tmp_path, capsys, fake, THREE, "--metrics")
+    assert code == 2
+    assert out.split("\n\n")[1].splitlines()[1:] == [
+        "Measure          romamo/shipyard owner/other",
+        "Deploy frequency no data         no data",
+        "Lead time        no data         no data",
+    ]
+    fake.failing = {"romamo/shipyard": ("clone", NOT_FOUND), "owner/other": ("metrics.py", "error: gh: 502")}
+    code, out = fleet_run(fl, tmp_path, capsys, fake, FLEET, "--metrics")
+    assert code == 2
+    assert "Metrics" not in out  # no repo measured: no table
+
+
+def test_s001_6_no_data_stays_no_data_in_json(
+    fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = quiet_fake()
+    fake.metrics = {"romamo/shipyard": measures("no data", "1.0 h"), "owner/other": measures("no data", "no data")}
+    _, out = fleet_run(fl, tmp_path, capsys, fake, FLEET, "--metrics", "--json")
+    first = json.loads(out)["repos"][0]["metrics"]["measures"][0]
+    assert (first["value"], first["text"]) == (None, "no data")
 
 
 def test_a_watch_line_that_isnt_a_row_stops_the_report(fl: ModuleType) -> None:
@@ -458,3 +499,20 @@ def test_s001_3_the_report_refuses_a_malformed_fleet_file_with_exit_2(tmp_path: 
     assert done.returncode == 2
     assert done.stdout == ""
     assert done.stderr == f"error: {path}: repos[0]: repo 'shipyard' is not in owner/name form\n"
+
+
+# -- the skill documents the fleet --------------------------------------------------------
+
+
+def test_s001_9_the_skill_documents_the_fleet_file_the_report_and_a_routine(fl: ModuleType) -> None:
+    skill = (SCRIPTS.parent / "SKILL.md").read_text(encoding="utf-8")
+    section = skill.split("\n## Fleet\n", 1)[1].split("\n## ", 1)[0]
+    assert "[[repos]]" in section and "incident_label" in section  # the fleet file
+    assert "scripts/fleet.py report --fleet" in section  # the report
+    for flag in ("--metrics", "--json", "REPO_ERROR"):
+        assert flag in section
+    assert "/schedule" in section and "fleet.py report" in section.split("/schedule", 1)[1]  # a routine runs it
+    example = section.split("```toml\n", 1)[1].split("```", 1)[0]
+    assert fl.parse_plain(example, Path("fleet.toml")) == {
+        "repos": [{"repo": "romamo/shipyard"}, {"repo": "owner/other", "incident_label": "sev"}]
+    }

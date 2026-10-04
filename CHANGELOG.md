@@ -14,9 +14,11 @@ bot.
   clone, and prints one table with the repo named on each row, the action rows of all
   repos first. It exits 1 when any repo has an action row; a repo whose check fails
   (not found, no access, a gh error) gets one REPO_ERROR row with the error's first
-  line, the rest are still reported, and the run exits 2. `--json` prints the report as
-  one object, each repo with its rows, and with `--metrics` each repo's `metrics.py`
-  measures over one shared window. The fleet file is `[[repos]]` tables naming each
+  line, the rest are still reported, and the run exits 2. `--metrics` adds each repo's
+  `metrics.py` measures over one shared 30-day window, side by side with one column per
+  repo, "no data" kept as no data. `--json` prints the report as one object, each repo
+  with its rows (and its metrics with `--metrics`). The skill's new Fleet section
+  documents the fleet file, the report, and a routine prompt that runs it. The fleet file is `[[repos]]` tables naming each
   repo as `owner/name`, with an optional `incident_label`, refused (exit 2, naming the
   file and the problem) when it is missing, isn't TOML, has no repos, has an entry
   without `repo` or with an unknown key, names a repo not in owner/name form, or lists

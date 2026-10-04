@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Report many repos' issue-to-release pipelines at once: ship-watch's states across a fleet.
 
-Usage: fleet.py report --fleet FILE [--metrics --json]
+Usage: fleet.py report --fleet FILE [--metrics] [--json]
 
 A fleet file lists the repos, in TOML:
 
@@ -24,10 +24,14 @@ temporary folder removed afterwards) with the repo's incident_label passed as
 detail as watch_state.py prints them. The rows watch_state.py counts as action come first,
 across all repos, then the report-only rows, each group in the fleet file's order.
 
+  --metrics   adds metrics.py's measures for each repo, over the same 30 days to the
+              run's start: a second table, one column per repo, each cell the measure's
+              text as metrics.py prints it ("no data" stays "no data"). A repo whose
+              check failed has no column
   --json      the same report as one JSON object: {"repos": [{"repo", "rows": [{"state",
-              "subject", "detail"}]}]}, each repo's rows in watch_state.py's order
-  --metrics   adds each repo's metrics.py --json measures (the 30 days to the run's
-              start, every repo over the same window) as the repo's "metrics"; needs --json
+              "subject", "detail"}]}]}, each repo's rows in watch_state.py's order; with
+              --metrics each repo also holds "metrics", metrics.py --json's object (null
+              when its check failed)
 
 A repo whose check fails (the clone, watch_state.py, or metrics.py exits 2: not found, no
 access, a gh error) gets one REPO_ERROR row, its subject the step that failed and its
@@ -306,6 +310,30 @@ def table(reports: list[RepoReport]) -> list[str]:
     return [f"{repo:<{width}} {row.state:<14} {row.subject:<16} {row.detail}".rstrip() for repo, row in first + rest]
 
 
+def metrics_table(reports: list[RepoReport]) -> list[str]:
+    """The measures side by side: one row per measure, one column per repo that has them"""
+    measured = [(r.repo, r.metrics) for r in reports if r.metrics is not None]
+    if not measured:
+        return []
+    columns: list[tuple[str, dict[str, str]]] = []
+    names: list[str] = []
+    for repo, found in measured:
+        texts = {str(m["measure"]): str(m["text"]) for m in found["measures"]}
+        if names and list(texts) != names:
+            raise Refused(f"error: metrics.py for {repo} measured {list(texts)}, not {names}")
+        names = list(texts)
+        columns.append((repo, texts))
+    first = measured[0][1]
+    end = dt.datetime.fromisoformat(str(first["end"])).astimezone(dt.timezone.utc)  # noqa: UP017 (3.10)
+    head = f"Metrics: the {first['days']} days to {end:%Y-%m-%d %H:%M} UTC"
+    widths = [max(len("Measure"), *(len(n) for n in names))]
+    widths += [max(len(repo), *(len(t) for t in texts.values())) for repo, texts in columns]
+    lines = [["Measure", *(repo for repo, _ in columns)]]
+    lines += [[name, *(texts[name] for _, texts in columns)] for name in names]
+    cells = (" ".join(f"{cell:<{w}}" for cell, w in zip(line, widths, strict=True)).rstrip() for line in lines)
+    return [head, *cells]
+
+
 def exit_code(reports: list[RepoReport]) -> int:
     if any(r.failed for r in reports):
         return 2
@@ -321,7 +349,7 @@ def arguments() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     rep = commands.add_parser("report", help="every repo's watch rows in one table")
     rep.add_argument("--fleet", required=True, type=Path, help="the fleet file")
-    rep.add_argument("--metrics", action="store_true", help="add each repo's metrics.py measures (needs --json)")
+    rep.add_argument("--metrics", action="store_true", help="add each repo's metrics.py measures")
     rep.add_argument("--json", action="store_true", help="one JSON object instead of a table")
     return parser
 
@@ -329,8 +357,6 @@ def arguments() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None, runner: Runner = run, clock: Callable[[], dt.datetime] = utc_now) -> int:
     parser = arguments()
     args = parser.parse_args(argv)
-    if args.metrics and not args.json:
-        parser.error("--metrics needs --json")
     entries = load(args.fleet)
     until = clock().isoformat() if args.metrics else None
     with tempfile.TemporaryDirectory(prefix="fleet-") as workdir:
@@ -338,7 +364,8 @@ def main(argv: Sequence[str] | None = None, runner: Runner = run, clock: Callabl
     if args.json:
         print(json.dumps({"repos": [r.json(args.metrics) for r in reports]}, indent=2, sort_keys=True))
     else:
-        print("\n".join(table(reports)))
+        found = metrics_table(reports) if args.metrics else []
+        print("\n".join(table(reports) + ([""] + found if found else [])))
     return exit_code(reports)
 
 
