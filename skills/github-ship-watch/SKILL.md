@@ -58,6 +58,18 @@ One line when exit 0: "Nothing owed: bot OK, <latest tag> published and announce
 - In the cloud: `/schedule` a routine whose prompt clones shipyard and follows this file, as `docs/flow.md` shows. A cloud session may not load plugins from the repo's settings
 - Don't start a loop or a routine unasked; offer it
 
+## Metrics
+
+`scripts/metrics.py <owner/repo> [--days 30]` measures the line over a window from what GitHub already holds: the four DORA measures (deploy frequency, lead time for changes, change failure rate, time to restore) plus issue to release (an issue opened to its "Released in" notice), human touch (merges a person merged or approved), and agent share (merges whose own work says an agent made them). Run it with `uv run --no-project python`; it changes nothing. `--json` is for a dashboard, `--markdown` for a post. The script's docstring defines each measure; the choices that matter when reading it:
+
+- A repo that has never deployed counts stable GitHub releases, and its change failures are `release-blocker` issues plus hotfix releases (on a `release/X.Y` branch). Pass `--environment` to count only the environments that matter (a `github-pages` deployment counts otherwise), and `--incident-label` when `[operate] incident_label` isn't `incident`
+- Lead time ends at the first stable release whose tag adds the PR's merge commit over the previous stable version, from GitHub's compare (one query per release in the window)
+- Human touch reads the merge actor and approvals: an app is a bot, a `[bot]` login is a bot, and `--bot <login>` names a machine user. An agent merging with a person's token counts as that person
+- Agent share reads what the work itself says, not who clicked merge: a PR is agent-made when its body carries Claude Code's "Generated with [Claude Code]" footer or a commit carries a `Co-Authored-By: Claude` or `Claude-Session:` trailer (case-insensitive; add another agent's mark to `AGENT_MARKS`). Its detail counts the agent-made merges a person approved in a GitHub review, the human gate. Where agents merge with the owner's token, human touch reads 100% and agent share is the number to watch
+- A measure with nothing to measure says "no data", never 0. A 0% change failure rate means releases shipped and none failed
+
+The weekly metrics post is an option the user schedules, never a default: `/schedule` a weekly routine that runs `metrics.py <repo> --markdown` and posts the table as one comment on the roadmap issue the user names (`gh issue comment <n> --body-file <file>`). Posting is the routine's only write.
+
 ## Improve the skill
 
 When a pass misses something stuck, or repairs something it shouldn't have, add a state to `watch_state.py` (with a test in shipyard's `tests/test_ship_watch.py`) or a rule here.
