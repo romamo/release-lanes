@@ -75,3 +75,11 @@ entry that supersedes it, never by editing an old one.
 - Why: a warning every existing setup gets for a feature it doesn't use trains people to ignore doctor; the failing job still explains the one-line fix when the need arises
 - Applies to: src/shipyard/doctor.py, .github/workflows/prepare.yml, caller permissions
 - Enforced by: review
+
+## D-10: A hold stops the gate from starting sessions
+
+- Decided: 2026-10-04, in romamo/shipyard#45
+- Rule: While an issue labelled shipyard-hold is open, shipyard gate starts no Claude Code session for the repo (it reports HELD); a session already running is left to finish, and the gate names it so a person can stop it
+- Why: A hold usually means an incident; an agent that triages, implements, or merges while one is open adds changes at the worst moment, and the stop switch should stop every automatic actor, not only releases (D-8)
+- Applies to: src/shipyard/gate.py, shipyard-hold label
+- Enforced by: tests/test_gate.py (with the implementing PR)
