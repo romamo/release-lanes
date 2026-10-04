@@ -47,13 +47,13 @@ There is no `act`: shipyard refuses it, since an opportunity is a proposal by na
 | NO_REASON | Closed as not planned with no comment | Ask the maintainer for the reason, and record it as a comment on the issue once they give it |
 | OPPORTUNITY_OPEN | Waiting for the maintainer | Nothing; list it in the report with its evidence |
 | HANDED_OFF | Accepted, and triage gave it a newer verdict | Nothing: triage and the spec gate own it |
-| DECLINED | Closed as not planned; the note is the reason | Nothing, except rule 3 for new requests |
+| DECLINED | Closed as not planned; the note is the reason, the oldest comment from an hour before the close on | Nothing, except rule 3 for new requests |
 | DONE | Closed as completed | Nothing |
 | MERGED | Closed as a duplicate of another opportunity | Check the surviving one lists its members; until it does they read NEW_FEEDBACK |
 
 What the script decides for you, so the pass doesn't re-derive it:
 
-- **Feedback** is an open issue with no skip label (`bug`, shipyard's own labels; `--skip-label` replaces the list) and no closing triage verdict, plus each open discussion outside Announcements when Discussions are on (`--category` names the ones to count)
+- **Feedback** is an open issue with no skip label and no closing triage verdict, plus each open discussion outside Announcements when Discussions are on (`--category` names the ones to count). The skip labels are `SKIP_LABELS` at the top of `intake_state.py`: `bug`, `roadmap` (a tracking issue isn't a request), and shipyard's own. `--skip-label L` (repeatable) adds to them for one run; for a label every pass should skip, add it to `SKIP_LABELS`
 - **A member** of an opportunity is any issue or discussion its `## Evidence` section links in this repo (`#N`, `owner/repo#N`, or a github.com link). Membership is what the opportunity's body says, so editing the Evidence section is how a request joins or leaves
 - **Evidence** per opportunity: its member count, and the thumbs-up reactions on the members and on the opportunity itself, closed members included
 - **The triage marker**: a comment starting `Triage:` with the verdict in bold. Intake's own comments use `Triage: **opportunity**`, so `triage_state.py` reads a grouped request or an opportunity as triaged instead of NEW. Never put the word "implement" in one: `triage_state.py` would read it as NEEDS_PR

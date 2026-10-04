@@ -233,6 +233,25 @@ def test_an_old_comment_is_not_a_decline_reason(ist: ModuleType) -> None:
     assert states(ist, Fake([], [old]))[13][0] == "NO_REASON"
 
 
+def test_a_later_reply_does_not_replace_the_decline_reason(ist: ModuleType) -> None:
+    declined = opportunity(13, "- #4", state="CLOSED", reason="NOT_PLANNED", closed_at="2026-10-02T10:00:00Z")
+    declined["comments"]["nodes"] = [
+        {"body": "Out of scope (D-6).", "createdAt": "2026-10-02T09:59:58Z"},
+        {"body": "Triage: **opportunity**", "createdAt": "2026-10-03T10:00:00Z"},
+        {"body": "Please reconsider, we need this", "createdAt": "2026-10-04T10:00:00Z"},
+    ]
+    assert states(ist, Fake([], [declined]))[13] == ("DECLINED", "Out of scope (D-6).")
+
+
+def test_a_roadmap_tracking_issue_is_not_feedback(ist: ModuleType) -> None:
+    """The default skip labels include roadmap (#26 read as NEW_FEEDBACK); --skip-label adds to them"""
+    fake = Fake([issue(1, labels=("roadmap",)), issue(2, labels=("epic",)), issue(3)], [])
+    assert states(ist, fake) == {2: ("NEW_FEEDBACK", "issue"), 3: ("NEW_FEEDBACK", "issue")}
+    skip = ist.skip_labels(["epic"])
+    assert skip == {*ist.SKIP_LABELS, "epic"}
+    assert states(ist, fake, skip=skip) == {3: ("NEW_FEEDBACK", "issue")}
+
+
 def test_a_declined_groups_members_are_never_proposed_again(ist: ModuleType) -> None:
     """A new request the skill links into the declined opportunity's evidence reads as declined"""
     fake = Fake(

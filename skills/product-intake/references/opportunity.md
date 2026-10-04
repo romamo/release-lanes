@@ -57,6 +57,8 @@ Triage: **opportunity**: grouped into #{opportunity} with {N-1} other requests f
 Triage: **opportunity**: this asks for the same outcome as #{opportunity}, which was declined: "{the recorded reason}". It is linked there as further evidence; the maintainer reopens #{opportunity} if the decision changes.
 ```
 
+Quote the reason without an issue number right after a hold phrase ("waits on #40", "blocked by #40"): `triage_state.py` would read the request as BLOCKED on it. Write "#40 has to land first" instead.
+
 ## On a request whose outcome shipped
 
 ```markdown

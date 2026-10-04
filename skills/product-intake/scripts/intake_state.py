@@ -7,7 +7,8 @@ Usage: intake_state.py <owner/repo> [--config PATH] [--label opportunity]
                        [--category C]... [--json]
 
 Feedback is an open issue, or an open discussion when the repo enables Discussions, that:
-  - carries no --skip-label (default: bug and shipyard's own labels) and not --label
+  - carries none of SKIP_LABELS (bug, roadmap, and shipyard's own labels), no --skip-label
+    (repeatable, added to SKIP_LABELS), and not --label
   - has no triage verdict of implement, feature, duplicate, or won't fix: the verdict is
     the first bold word of the newest comment starting with --marker
     ("Triage: **implement**"), so a bug or a contract change stays with triage
@@ -25,7 +26,8 @@ For each opportunity:
   HANDED_OFF        accepted, and triage gave it a newer verdict (feature, with its spec
                     PR on a hold line): triage owns it now
   DECLINED          closed as not planned. The note is the reason: the first line of the
-                    newest non-triage comment from an hour before the close on. Its members
+                    oldest non-triage comment from an hour before the close on, so a later
+                    comment on the closed issue doesn't replace it. Its members
                     read as declined and are never proposed again
   NO_REASON         closed as not planned with no such comment: the reason isn't recorded
   DONE              closed as completed
@@ -66,7 +68,17 @@ except ModuleNotFoundError:  # Python 3.10: the config is read with regexes inst
 
 CONFIGS = (Path(".github/shipyard.toml"), Path(".github/release-policy.toml"))  # the config, then its alias
 INTAKE_LEVELS = ("observe", "propose")  # shipyard's autonomy: intake never acts
-SKIP_LABELS = ("bug", "shipyard-proposal", "shipyard-hold", "incident", "release-blocker", "milestone-proposal")
+# Labels whose issues are never feedback: bugs, tracking issues, and shipyard's own. Extend
+# the list here for every repo, or per run with --skip-label
+SKIP_LABELS = (
+    "bug",
+    "roadmap",
+    "shipyard-proposal",
+    "shipyard-hold",
+    "incident",
+    "release-blocker",
+    "milestone-proposal",
+)
 SKIP_CATEGORIES = ("Announcements",)
 CLOSING_VERDICTS = ("implement", "feature", "duplicate", "won't fix", "won’t fix", "wont fix")
 OWN_VERDICT = "opportunity"  # intake's triage comment on an opportunity it opens
@@ -282,13 +294,15 @@ def timestamp(text: str) -> dt.datetime:
 
 
 def decline_reason(issue: dict[str, Any], marker: str) -> str | None:
-    """The first line of the newest comment that isn't a triage comment, from an hour before
-    the close on; None when there is none"""
+    """The first line of the oldest comment that isn't a triage comment, from an hour before
+    the close on: the maintainer's reason, not a later reply on the closed issue; None when
+    there is none"""
     closed = timestamp(issue["closedAt"]) - REASON_WINDOW
-    for comment in reversed(issue["comments"]["nodes"]):
+    for comment in issue["comments"]["nodes"]:
         if verdict(comment["body"], marker) is None and timestamp(comment["createdAt"]) >= closed:
-            lines = [line.strip() for line in comment["body"].strip().splitlines() if line.strip()]
-            return lines[0] if lines else None
+            lines = [line.strip() for line in comment["body"].splitlines() if line.strip()]
+            if lines:
+                return lines[0]
     return None
 
 
@@ -306,6 +320,11 @@ def opportunity_state(issue: dict[str, Any], accepted: str, marker: str) -> tupl
     if found is None or found.startswith(OWN_VERDICT):
         return "ACCEPTED", "hand it to triage's spec gate"
     return "HANDED_OFF", f"triage: {found}"
+
+
+def skip_labels(extra: list[str]) -> set[str]:
+    """SKIP_LABELS and the run's --skip-label additions"""
+    return {*SKIP_LABELS, *extra}
 
 
 def is_feedback(issue: dict[str, Any], skip: set[str], marker: str) -> bool:
@@ -518,7 +537,9 @@ def main() -> int:
     parser.add_argument("--label", default="opportunity", help="the label of opportunity issues")
     parser.add_argument("--accepted-label", default="planned", help="the label the maintainer accepts with")
     parser.add_argument("--marker", default="Triage:", help="prefix of a triage comment")
-    parser.add_argument("--skip-label", action="append", help=f"not feedback (repeatable; default {list(SKIP_LABELS)})")
+    parser.add_argument(
+        "--skip-label", action="append", default=[], help=f"not feedback, added to {list(SKIP_LABELS)} (repeatable)"
+    )
     parser.add_argument("--category", action="append", help="discussion categories that count (repeatable)")
     parser.add_argument("--json", action="store_true", help="JSON lines instead of a table")
     args = parser.parse_args()
@@ -529,7 +550,7 @@ def main() -> int:
         label=args.label,
         accepted=args.accepted_label,
         marker=args.marker,
-        skip=set(args.skip_label or SKIP_LABELS),
+        skip=skip_labels(args.skip_label),
         categories=set(args.category) if args.category else None,
         autonomy=autonomy,
     )
