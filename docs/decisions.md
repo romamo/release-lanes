@@ -75,3 +75,11 @@ entry that supersedes it, never by editing an old one.
 - Why: a warning every existing setup gets for a feature it doesn't use trains people to ignore doctor; the failing job still explains the one-line fix when the need arises
 - Applies to: src/shipyard/doctor.py, .github/workflows/prepare.yml, caller permissions
 - Enforced by: review
+
+## D-10: Product intake never acts; the maintainer accepts or declines
+
+- Decided: 2026-10-05, in romamo/shipyard#69
+- Rule: Product intake proposes and reports only ([autonomy] intake is observe or propose, never act): an opportunity becomes planned work only when the maintainer accepts it, and a declined opportunity keeps its recorded reason and is never re-proposed
+- Why: what to build is the maintainer's call; the factory's job is to gather the evidence and keep the decision on record, so the same request isn't argued twice
+- Applies to: skills/product-intake/*, src/shipyard/autonomy.py, [autonomy] intake, opportunity issues
+- Enforced by: tests/test_autonomy.py (intake refuses act, with #76); review
