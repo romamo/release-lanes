@@ -26,9 +26,9 @@ bot.
   init` writes it, and `doctor` names the file it read. `.github/release-policy.toml` keeps
   working as an alias with the same keys, and `doctor` warns to rename it with `git mv`; a
   repo with both files fails. `init` refuses when either file exists, and `--force` replaces
-  the alias with `shipyard.toml`. ship-watch finds either file. A repo whose `release.yml`
-  pins shipyard to an older tag than this release must keep `release-policy.toml` until it
-  moves the pin (#28)
+  the alias with `shipyard.toml`. ship-watch finds either file. Rename to `shipyard.toml`
+  only once the shipyard CLI your Release workflow runs (the `tool` input of `prepare.yml`
+  and `land.yml`, default `@v0`) is this release or newer (#28)
 
 ## [0.6.0] - 2026-10-04
 

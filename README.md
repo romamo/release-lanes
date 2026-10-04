@@ -119,7 +119,12 @@ routine that doesn't merge, read its first runs, then decide.
 
 `.github/shipyard.toml`, read on every run. A repository set up earlier may keep the
 same keys in `.github/release-policy.toml`, which still works; `doctor` suggests the
-rename, and a repository may not have both:
+rename, and a repository may not have both. Rename only once the shipyard CLI your Release
+workflow runs is a release that reads `shipyard.toml`: that CLI comes from the `tool` input
+of `prepare.yml` and `land.yml` (default `git+https://github.com/romamo/shipyard@v0`), not
+from the `uses:` ref, so pinning shipyard means setting both the `uses:` refs and `tool:`.
+
+The keys:
 
 ```toml
 name = "demo"

@@ -38,9 +38,13 @@ def doctor(root: Path) -> list[Check]:
         add(False, "policy", str(exc))
         return checks
     read = found.relative_to(root)
-    add(True, "policy", f"{read}: mode {policy.mode}, lanes {', '.join(policy.lanes)}")
+    add(True, "policy", f"{read}, mode {policy.mode}, lanes {', '.join(policy.lanes)}")
     if read == ALIAS_PATH:
-        add(False, "config", f"{ALIAS_PATH} is the alias; rename it to {CONFIG_PATH} (git mv)", warn=True)
+        detail = (
+            f"{ALIAS_PATH} is the alias; rename it to {CONFIG_PATH} (git mv) once your Release workflow's"
+            " `tool` is this release or newer"
+        )
+        add(False, "config", detail, warn=True)
 
     git = Git(root)
     add(git.ok("remote", "get-url", "origin"), "remote", "an 'origin' remote to push releases to")

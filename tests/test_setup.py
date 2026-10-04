@@ -91,14 +91,16 @@ def test_the_policy_loads_from_either_name_but_not_both(repo: Repo) -> None:
 
 def test_doctor_names_the_policy_file_and_warns_on_the_alias(repo: Repo) -> None:
     checks = {c.name: c for c in doctor(repo.root)}
-    assert checks["policy"].status == "PASS" and checks["policy"].detail.startswith(".github/shipyard.toml: mode")
+    assert checks["policy"].status == "PASS" and checks["policy"].detail.startswith(".github/shipyard.toml, mode")
     assert "config" not in checks
     repo.use_alias()
     checks = {c.name: c for c in doctor(repo.root)}
     assert checks["policy"].status == "PASS"
-    assert checks["policy"].detail.startswith(".github/release-policy.toml: mode")
+    assert checks["policy"].detail.startswith(".github/release-policy.toml, mode")
     assert checks["config"].status == "WARN"
-    assert "rename it to .github/shipyard.toml" in checks["config"].detail
+    assert checks["config"].detail.endswith(
+        "rename it to .github/shipyard.toml (git mv) once your Release workflow's `tool` is this release or newer"
+    )
 
 
 def test_doctor_reports_what_is_missing(repo: Repo) -> None:
