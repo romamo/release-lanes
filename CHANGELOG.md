@@ -78,6 +78,11 @@ bot.
   heading goes under the nearest `###` heading above it, joining that heading in
   Unreleased or creating it in Keep a Changelog order, and `move` refuses a bullet with
   no `###` heading anywhere above it instead of moving it as a block (#82)
+- `triage_state.py` no longer reads an incident closed as completed by hand as
+  SUSPECT_CLOSE: an incident closes once the environment is healthy again, and
+  github-ship-watch's POSTMORTEM_DUE follows it up. The label is `incident` by default;
+  the script can't read the shipyard config, so pass `[operate] incident_label` with the
+  new `--incident-label` when it differs (#83)
 
 ## [0.10.1] - 2026-10-04
 
