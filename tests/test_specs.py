@@ -1,5 +1,6 @@
 """The specs script of the github-issue-triage skill's spec gate"""
 
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -25,7 +26,7 @@ def spec(
     behaviour: str = "Adds `src/tool/run.py` and the `--dry-run` flag.",
     criteria: tuple[str, ...] = ("1: tool run exits 2 on a missing config", "2: tool run --dry-run writes nothing"),
     decisions: str = "- D-2: New",
-    issues: str = "- o/r#12",
+    issues: str | None = None,
     status: str = "approved",
     verification: str = "",
 ) -> str:
@@ -33,6 +34,8 @@ def spec(
     lines += ["", "## Behaviour", "", behaviour]
     lines += ["", "## Acceptance criteria", ""] + [f"- S-{number}-{c}" for c in criteria]
     lines += ["", "## Out of scope", "", "- Undo", "", "## Decisions relied on", "", decisions]
+    if issues is None:  # one build issue delivers every criterion
+        issues = "- o/r#12: " + ", ".join(f"S-{number}-{c.split(':')[0]}" for c in criteria)
     lines += ["", "## Issues", "", issues, "", "## Verification", "", verification, ""]
     return "\n".join(lines)
 
@@ -201,7 +204,8 @@ def test_check_refuses_every_placeholder_once_built(tmp_path: Path) -> None:
     root = repo(tmp_path)
     text = built("001").replace(
         "## Issues\n\n",
-        "## Issues\n\nThe build issues, filled in once they are filed, one `owner/repo#N` per line.\n\n",
+        "## Issues\n\nThe build issues, filled in once they are filed: one `- owner/repo#N: S-001-1, S-001-2` per\n"
+        "line, naming the criteria that issue delivers. Each criterion belongs to exactly one.\n\n",
     )
     (root / "docs" / "specs" / "001-dry-run.md").write_text(text)
     out = specs(root, "check")
@@ -309,3 +313,100 @@ def test_coverage_ignores_specs_not_yet_built_unless_named(tmp_path: Path) -> No
 def test_the_repo_built_specs_are_covered() -> None:
     out = specs(ROOT, "coverage")
     assert out.returncode == 0, out.stdout
+
+
+# Task graph (#71): an approved spec splits into build issues, each criterion in exactly one
+
+FOUR = ("1: a", "2: b", "3: c", "4: d")
+
+
+def test_check_assigns_each_criterion_to_exactly_one_build_issue(tmp_path: Path) -> None:
+    lines = "\n".join(
+        (
+            "- o/r#12: S-007-1, S-007-2",
+            "- o/r#13: S-007-2, S-007-9",
+            "- o/r#14",
+            "- o/r#12: S-006-3",
+            "- #15: S-007-x",
+        )
+    )
+    root = repo(tmp_path, **{"007-dry-run.md": spec("007", criteria=FOUR, issues=lines)})
+    out = specs(root, "check").stdout
+    assert "S-007-2 is in both o/r#12 and o/r#13" in out
+    assert "o/r#13 names S-007-9, which the spec lacks" in out
+    assert "o/r#14 names no criteria" in out
+    assert "lists o/r#12 twice" in out
+    assert "names S-006-3, a criterion of another spec" in out
+    assert "'S-007-x' is not a criterion id" in out
+    assert "S-007-3 is in no build issue" in out
+    assert "S-007-4 is in no build issue" in out
+
+
+def test_check_waits_for_the_split_and_ignores_drafts(tmp_path: Path) -> None:
+    approved = spec("007", issues="")
+    draft = spec("008", status="draft", issues="- o/r#3: S-008-1")
+    root = repo(tmp_path, **{"007-dry-run.md": approved, "008-draft.md": draft})
+    out = specs(root, "check")
+    assert (out.returncode, out.stdout) == (0, "")
+
+
+def test_split_puts_every_criterion_in_one_issue_by_default(tmp_path: Path) -> None:
+    root = repo(tmp_path, **{"007-dry-run.md": spec("007", issues="")})
+    out = specs(root, "split", "7")
+    assert out.returncode == 0, out.stderr
+    assert "=== B1 (depends on nothing)\ntitle: Dry run (S-007-1, S-007-2)\n" in out.stdout
+    assert "- S-007-1: tool run exits 2 on a missing config\n- S-007-2: tool run --dry-run" in out.stdout
+    assert "Depends on" not in out.stdout
+    assert out.stdout.endswith("filed:\n\n- #{B1}: S-007-1, S-007-2\n")
+
+
+def test_split_groups_criteria_into_a_graph_that_passes_check(tmp_path: Path) -> None:
+    root = repo(tmp_path, **{"007-dry-run.md": spec("007", criteria=FOUR, issues="")})
+    groups = ("--group", "1,S-007-2", "--group", "3", "--group", "4")
+    after = ("--after", "2:1", "--after", "3:1", "--after", "3:2")
+    out = specs(root, "split", "--json", "--repo", "o/r", *groups, *after, "007")
+    assert out.returncode == 0, out.stderr
+    graph = json.loads(out.stdout)
+    assert [i["criteria"] for i in graph["issues"]] == [["S-007-1", "S-007-2"], ["S-007-3"], ["S-007-4"]]
+    assert [i["depends_on"] for i in graph["issues"]] == [[], ["B1"], ["B1", "B2"]]
+    assert graph["issues"][2]["body"].endswith("\n\nDepends on o/r#{B1}\nDepends on o/r#{B2}\n")
+    # The triage agent files them in order, replacing each key with the number it got
+    lines = [i["issues_line"].replace("{" + i["key"] + "}", str(20 + k)) for k, i in enumerate(graph["issues"], 1)]
+    assert lines == ["- o/r#21: S-007-1, S-007-2", "- o/r#22: S-007-3", "- o/r#23: S-007-4"]
+    (root / "docs" / "specs" / "007-dry-run.md").write_text(spec("007", criteria=FOUR, issues="\n".join(lines)))
+    assert specs(root, "check").returncode == 0
+    assert specs(root, "split", "7").stdout == "S-007: every criterion is in a build issue already\n"
+    assert "nothing to group" in specs(root, "split", "7", "--group", "1").stderr
+
+
+def test_split_proposes_only_the_criteria_no_issue_has(tmp_path: Path) -> None:
+    root = repo(tmp_path, **{"007-dry-run.md": spec("007", criteria=FOUR, issues="- o/r#21: S-007-1, S-007-2")})
+    assert specs(root, "check").returncode == 1  # until the rest is filed
+    out = specs(root, "split", "7")
+    assert out.returncode == 0, out.stderr
+    assert "title: Dry run (S-007-3, S-007-4)\n" in out.stdout
+    assert "already in o/r#21" in specs(root, "split", "7", "--group", "1", "--group", "3,4").stderr
+
+
+def test_split_refuses_a_bad_graph(tmp_path: Path) -> None:
+    approved = spec("007", criteria=FOUR, issues="")
+    root = repo(tmp_path, **{"007-dry-run.md": approved, "008-draft.md": spec("008", status="draft")})
+    cases = {
+        ("8",): "S-008 is draft; only an approved spec is split",
+        ("7", "--group", "1,2"): "S-007-3, S-007-4 in no --group",
+        ("7", "--group", "1,2,3", "--group", "3,4"): "S-007-3 is in both --group 1 and --group 2",
+        ("7", "--group", "1,2,3,4,5"): "S-007 has no criterion S-007-5",
+        ("7", "--group", "1,2", "--group", "3,4", "--after", "1:2"): "depends only on an earlier group",
+        ("7", "--group", "1,2", "--group", "3,4", "--after", "2:3"): "numbered 1 to 2",
+        ("7", "--after", "2-1"): "--after is B:A",
+        ("7", "--repo", "r"): "--repo must be owner/repo",
+        ("7", "--group", "S-008-1"): "named k or S-007-k",
+    }
+    for args, message in cases.items():
+        out = specs(root, "split", *args)
+        assert (out.returncode, message in out.stderr) == (2, True), (args, out.stderr)
+    broken = spec("007", criteria=("1: a", "3: c"), issues="")
+    (root / "docs" / "specs" / "007-dry-run.md").write_text(broken)
+    out = specs(root, "split", "7")
+    assert out.returncode == 1
+    assert "must pass check before it is split" in out.stderr

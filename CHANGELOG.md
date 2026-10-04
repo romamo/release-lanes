@@ -7,6 +7,23 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- A merged spec becomes a task graph: `specs.py split NNN` proposes its build issues,
+  one per `--group` of criteria, each with a title, a body naming its `S-NNN-k`
+  criteria, and `Depends on` lines (`--after B:A`) to fill in as the issues get numbers
+  (`--json` for the same as one object). `specs.py check` reads the Issues section as
+  `- owner/repo#N: S-NNN-1, S-NNN-2` and holds every criterion of an approved or built
+  spec to exactly one build issue there. `triage_state.py` reads a `Depends on
+  owner/repo#N` (or same-repo `#N`) line in an issue's body as a hold: BLOCKED while the
+  dependency is open, UNBLOCKED once it closes, and UNFILLED (an action state) while a
+  `#{Bk}` placeholder from `split` is left unfilled; `--wip N` reports the room left
+  under a WIP limit. The triage skill files the build issues as sub-issues of the
+  feature issue, dispatches them in dependency order within `[roadmap] wip` once the
+  config has it (#70), stacks a
+  dependent PR on its dependency's open one, and verifies the whole spec when the last
+  build issue closes (#71)
+
 ## [0.10.1] - 2026-10-04
 
 ### Fixed

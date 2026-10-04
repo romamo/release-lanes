@@ -3,7 +3,7 @@
 
 Usage: triage_state.py <owner/repo> [--marker "Triage:"] [--postponed-label postponed]
                        [--stable-tag-regex REGEX] [--hold-label release-blocker]
-                       [--closed N] [--json]
+                       [--closed N] [--json] [--wip N]
 
 For each open issue:
   NEW              no comment starts with the triage marker
@@ -18,13 +18,21 @@ For each open issue:
                    names it as owner/repo#N or its URL anywhere on the line, or
                    as a plain #N (this repo) right after "waits on", "waiting on",
                    "depends on", "blocked by", "blocked on", "decided in", or
-                   "on hold until" (a #N elsewhere on the line is context)
+                   "on hold until" (a #N elsewhere on the line is context). Or,
+                   once triaged, its body has a "Depends on owner/repo#N" line (or
+                   "#N" anywhere on that line, the same repo: a build issue split
+                   from a spec) naming an issue still open; an untriaged issue
+                   reads NEW whatever its body depends on
+  UNFILLED         a "Depends on" line of its body still names a placeholder such
+                   as #{B1} from specs.py split: put in the dependency's number
   SPEC_REFUSED     a pull request it waits on (such as its spec PR) closed without
                    merging, and no triage comment came after the hold: decide again
                    (revise the spec in a new PR, postpone, or won't fix). A newer
                    triage comment is that decision, and the refused PR stops counting
   UNBLOCKED        every upstream issue it waits on has closed, and every pull
-                   request merged: resume it
+                   request merged: resume it. One closed as not planned shows as
+                   owner/repo#N:not_planned in the note: its work never landed, so
+                   decide whether the issue still makes sense before resuming
   POSTPONED        has the postponed label
   REVISIT          postponed before the newest stable tag: decide again. Stable means
                    the tag matches --stable-tag-regex (default: vX.Y.Z, no pre-release)
@@ -36,7 +44,11 @@ For the N most recently closed issues (default 20):
                    trailer, or closed as COMPLETED with no closer at all, unless it
                    carries --hold-label (a release hold is meant to close by hand)
 
-Exit 0 when nothing needs action, 1 when any issue is NEW, NEEDS_PR, UNBLOCKED,
+With --wip N (a work-in-progress limit, such as [roadmap] wip once the config has it), a
+last line says how many issues are IN_PROGRESS, the room left under N, and the issues
+ready to start (NEEDS_PR or UNBLOCKED), oldest first; with --json, as one JSON object.
+
+Exit 0 when nothing needs action, 1 when any issue is NEW, NEEDS_PR, UNBLOCKED, UNFILLED,
 SPEC_REFUSED, REVISIT, DONE_NOT_CLOSED, or SUSPECT_CLOSE, 2 on bad input (an issue with more than 100
 labels) or a gh failure. It pages past 100 open issues and an issue's 50 comments or 50
 cross-references, and back through tags to the newest stable one, with one query when
@@ -77,7 +89,7 @@ TAG_NODES = "nodes { name target { ... on Tag { tagger { date } } ... on Commit 
 OPEN_ISSUE = (
     """
       nodes {
-        number title
+        number title body
         labels(first: 100) { pageInfo { hasNextPage } nodes { name } }
         comments(last: 50) { nodes { body createdAt } }
         timelineItems(itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT], first: 50) {
@@ -230,7 +242,7 @@ def resource_limited(response: dict[str, Any]) -> bool:
     return bool(errors) and all(isinstance(e, dict) and e.get("type") == RESOURCE_LIMITS for e in errors)
 
 
-ACTION = {"NEW", "NEEDS_PR", "UNBLOCKED", "SPEC_REFUSED", "REVISIT", "DONE_NOT_CLOSED", "SUSPECT_CLOSE"}
+ACTION = {"NEW", "NEEDS_PR", "UNBLOCKED", "UNFILLED", "SPEC_REFUSED", "REVISIT", "DONE_NOT_CLOSED", "SUSPECT_CLOSE"}
 HOLD = re.compile(r"\b(?:on hold|blocked|waits? on|waiting on|pending|depends on)\b", re.IGNORECASE)
 UPSTREAM = re.compile(r"(?:https://github\.com/)?(?P<owner>[\w.-]+)/(?P<name>[\w.-]+)(?:#|/issues/|/pull/)(?P<num>\d+)")
 # A plain #N right after a hold phrase names the issue or pull request of the repo itself
@@ -239,6 +251,15 @@ SAME_REPO = re.compile(
     r"\b(?:waits? on|waiting on|depends on|blocked (?:by|on)|decided in|on hold until)[ \t]+#(?P<num>\d+)\b",
     re.IGNORECASE,
 )
+# A "Depends on" line of an issue body (a build issue split from a spec) and the issues it
+# names: owner/repo#N, a URL, or a plain #N for the same repo anywhere on the line, since
+# the line itself is the dependency
+DEPENDS = re.compile(r"^[ \t]*(?:[-*][ \t]+)?depends on\b:?(?P<refs>.*)$", re.IGNORECASE | re.MULTILINE)
+DEPENDENCY = re.compile(
+    r"(?:(?:https://github\.com/)?(?P<owner>[\w.-]+)/(?P<name>[\w.-]+)(?:#|/issues/|/pull/)|(?<![\w/])#)(?P<num>\d+)\b"
+)
+# A dependency specs.py split names by key until the issue is filed: #{B1}, o/r#{B1}
+PLACEHOLDER = re.compile(r"#\{(?P<key>[^{}\s]*)\}")
 STABLE = re.compile(r"^v?\d+\.\d+\.\d+$")
 KEYWORDS = r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)"
 
@@ -448,13 +469,30 @@ def hold_refs(issue: dict[str, Any], repo: tuple[str, str]) -> dict[tuple[str, s
     return refs
 
 
+def dependency_refs(issue: dict[str, Any], repo: tuple[str, str]) -> list[tuple[str, str, int]]:
+    """The issues a "Depends on" line of the issue's body names; a plain #N is one of
+    repo's own (owner, name)"""
+    found: set[tuple[str, str, int]] = set()
+    for line in DEPENDS.finditer(issue["body"]):
+        for m in DEPENDENCY.finditer(line["refs"]):
+            found.add((m["owner"], m["name"], int(m["num"])) if m["owner"] is not None else (*repo, int(m["num"])))
+    return sorted(found)
+
+
+def unfilled_dependencies(issue: dict[str, Any]) -> list[str]:
+    """The placeholders ({B1}) a "Depends on" line of the issue's body still names instead
+    of an issue number: specs.py split's keys, never filled in"""
+    keys = (m["key"] for line in DEPENDS.finditer(issue["body"]) for m in PLACEHOLDER.finditer(line["refs"]))
+    return list(dict.fromkeys(keys))
+
+
 def upstream_states(refs: set[tuple[str, str, int]]) -> dict[tuple[str, str, int], str]:
     if not refs:
         return {}
     ordered = sorted(refs)
     parts = [
         f'r{i}: repository(owner: "{o}", name: "{n}") {{ issueOrPullRequest(number: {k}) '
-        "{ __typename ... on Issue { state } ... on PullRequest { state } } }"
+        "{ __typename ... on Issue { state stateReason } ... on PullRequest { state } } }"
         for i, (o, n, k) in enumerate(ordered)
     ]
     proc = subprocess.run(
@@ -468,11 +506,14 @@ def upstream_states(refs: set[tuple[str, str, int]]) -> dict[tuple[str, str, int
 
 
 def ref_state(node: dict[str, Any]) -> str:
-    """An upstream issue's state (OPEN, CLOSED), or a pull request's (OPEN, MERGED, and
-    CLOSED_UNMERGED for one closed without merging, such as a refused spec PR: the issue
-    reads SPEC_REFUSED until a newer triage comment decides again). GitHub numbers issues and PRs in one sequence, so
-    owner/repo#N may be either"""
+    """An upstream issue's state (OPEN, CLOSED, and NOT_PLANNED for one closed as not
+    planned: it holds nothing, but its work never landed), or a pull request's (OPEN,
+    MERGED, and CLOSED_UNMERGED for one closed without merging, such as a refused spec PR:
+    the issue reads SPEC_REFUSED until a newer triage comment decides again). GitHub
+    numbers issues and PRs in one sequence, so owner/repo#N may be either"""
     state: str = node.get("state", "UNKNOWN")
+    if node.get("__typename") == "Issue" and state == "CLOSED" and node.get("stateReason") == "NOT_PLANNED":
+        return "NOT_PLANNED"
     if node.get("__typename") == "PullRequest" and state == "CLOSED":
         return "CLOSED_UNMERGED"
     return state
@@ -520,16 +561,23 @@ def classify_open(
         return "IN_PROGRESS", note
     if merged:
         return "DONE_NOT_CLOSED", note
-    named = hold_refs(issue, repo)
+    # The body's dependencies are older than every comment; a comment naming one too is newer.
+    # They hold a triaged issue only: an untriaged one with "Depends on #48" still reads NEW
+    body = dependency_refs(issue, repo) if triage else []
+    named = {**dict.fromkeys(body, -1), **hold_refs(issue, repo)}
     comments = issue["comments"]["nodes"]
     verdict = max((i for i, c in enumerate(comments) if c["body"].lstrip().startswith(marker)), default=-1)
     # A refused PR named before the newest triage comment was decided again: it holds nothing
     waits = sorted(r for r, i in named.items() if states.get(r) != "CLOSED_UNMERGED" or i >= verdict)
+    shown = " ".join(f"{o}/{n}#{k}:{states.get((o, n, k), '?').lower()}" for o, n, k in waits)
+    unfilled = unfilled_dependencies(issue)
+    if unfilled:
+        # Which issue it waits on is unknown, so neither BLOCKED nor ready: someone fills it in
+        return "UNFILLED", " ".join([*(f"unfilled dependency {{{k}}}" for k in unfilled), shown]).strip()
     if waits or "blocked" in labels:
-        shown = " ".join(f"{o}/{n}#{k}:{states.get((o, n, k), '?').lower()}" for o, n, k in waits)
         if any(states.get(r) == "CLOSED_UNMERGED" for r in waits):
             return "SPEC_REFUSED", shown
-        still = [r for r in waits if states.get(r) != "CLOSED" and states.get(r) != "MERGED"]
+        still = [r for r in waits if states.get(r) not in ("CLOSED", "NOT_PLANNED", "MERGED")]
         if waits and not still:
             return "UNBLOCKED", shown
         return "BLOCKED", shown or "labelled blocked"
@@ -564,6 +612,15 @@ def classify_closed(issue: dict[str, Any], hold: str) -> tuple[str, str] | None:
     return "SUSPECT_CLOSE", f"commit {closer.get('abbreviatedOid')} names #{number} only mid-line"
 
 
+def wip_room(rows: list[dict[str, Any]], wip: int) -> dict[str, Any]:
+    """How many more issues may start under a WIP limit of ``wip``, counting each issue with
+    an open PR as in progress, and the issues ready to start (NEEDS_PR or UNBLOCKED), oldest
+    first: build issues are filed in build order"""
+    in_progress = sum(1 for r in rows if r["state"] == "IN_PROGRESS")
+    ready = sorted(r["number"] for r in rows if r["state"] in ("NEEDS_PR", "UNBLOCKED"))
+    return {"wip": wip, "in_progress": in_progress, "room": max(wip - in_progress, 0), "ready": ready}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("repo", help="owner/name")
@@ -579,9 +636,12 @@ def main() -> int:
     )
     parser.add_argument("--closed", type=int, default=20, help="recently closed issues to check")
     parser.add_argument("--json", action="store_true", help="JSON lines instead of a table")
+    parser.add_argument("--wip", type=int, help="at most N issues in progress at once: report the room left")
     args = parser.parse_args()
     if not 0 <= args.closed <= 100:
         parser.error("--closed must be 0..100")
+    if args.wip is not None and args.wip < 1:
+        parser.error("--wip must be at least 1")
     try:
         stable_pattern = re.compile(args.stable_tag_regex)
     except re.error as exc:
@@ -591,6 +651,7 @@ def main() -> int:
     owner, _, name = args.repo.partition("/")  # fetch checked it is owner/name
     rows: list[dict[str, Any]] = []
     refs = {r for issue in data["open"]["nodes"] for r in upstream_refs(issue, (owner, name))}
+    refs |= {r for issue in data["open"]["nodes"] for r in dependency_refs(issue, (owner, name))}
     states = upstream_states(refs)
     stable = latest_stable(data["tags"]["nodes"], stable_pattern)
     for issue in data["open"]["nodes"]:
@@ -605,6 +666,7 @@ def main() -> int:
         "SUSPECT_CLOSE",
         "DONE_NOT_CLOSED",
         "UNBLOCKED",
+        "UNFILLED",
         "SPEC_REFUSED",
         "REVISIT",
         "NEW",
@@ -620,6 +682,13 @@ def main() -> int:
             print(json.dumps(r, sort_keys=True))
         else:
             print(f"#{r['number']:<5} {r['state']:<16} {r['title'][:70]}" + (f"  [{r['note']}]" if r["note"] else ""))
+    if args.wip is not None:
+        room = wip_room(rows, args.wip)
+        if args.json:
+            print(json.dumps(room, sort_keys=True))
+        else:
+            ready = " ".join(f"#{n}" for n in room["ready"]) or "none"
+            print(f"WIP {room['wip']}: {room['in_progress']} in progress, room for {room['room']}; ready: {ready}")
     return 1 if any(r["state"] in ACTION for r in rows) else 0
 
 

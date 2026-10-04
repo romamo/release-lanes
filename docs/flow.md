@@ -64,9 +64,10 @@ The bump, registry, and install commands per ecosystem (Python, Node, Rust, Go, 
 | IN_PROGRESS | An open PR fixes it | Wait, or review the PR |
 | DONE_NOT_CLOSED | Its PR merged, the issue is still open | Close it, citing the PR |
 | SUSPECT_CLOSE | Closed by a commit that only quoted "Fixes #N" | Check the fix landed; reopen if not |
-| BLOCKED | Waiting on an open upstream issue, or on a spec PR not yet merged | Nothing, until it closes or merges |
+| BLOCKED | Waiting on an open upstream issue, a spec PR not yet merged, or (a build issue) an issue its body says it depends on | Nothing, until it closes or merges |
+| UNFILLED | A `Depends on` line of its body still names a `specs.py split` placeholder such as `#{B1}` | Put in the dependency's issue number |
 | SPEC_REFUSED | The PR it waits on (its spec PR) closed without merging | Decide again: revise the spec in a new PR, postpone, or won't fix |
-| UNBLOCKED | The upstream issue it waited on has closed, or its spec PR merged | Resume |
+| UNBLOCKED | The upstream issue it waited on has closed, its spec PR merged, or its last dependency closed | Resume; a dependency noted `:not_planned` never landed, so decide again first |
 | POSTPONED | Labelled `postponed` | Skip it |
 | REVISIT | Postponed before the newest stable release | Decide again |
 | TRIAGED | Triaged, with nothing pending | Nothing |
@@ -102,6 +103,7 @@ tmp/shipyard/skills/github-ship-watch/SKILL.md for <owner/repo> — watch and tr
 
 - A change to a flag, format, default, public API, or stored state is designed in its issue first and checked against the repo's decisions log (`DECISIONS.md` or `docs/decisions.md`); what you settle is recorded there, so it isn't asked again
 - A feature (new behaviour beyond a bug fix or a contract tweak) gets a spec first: a file `docs/specs/NNN-<slug>.md` with numbered acceptance criteria, merged through its own PR before any implementer starts. Merging the spec is your approval, and the issue reads BLOCKED until then. Each criterion is proven by a test that names it (`test_sNNN_k_...` or a `proves: S-NNN-k` comment), and `specs.py coverage` fails CI when a built spec has a criterion without one
+- A merged spec splits into build issues, one PR each (`specs.py split`), linked as sub-issues of the feature issue, with `Depends on #N` lines that hold each one until its dependency closes. Every criterion belongs to exactly one build issue, which `specs.py check` verifies in CI, and a `[roadmap] wip` limit, once the config has it (#70), caps how many are in progress at once
 - Scope is read narrowly: "triage" never merges, and "merge" never tags, unless you say so
 - A change that departs from a spec, breaks existing users, or belongs to a held PR stops and asks you, whatever the scope
 - When another session works the same repo, the skills message it first, and your word in the current session wins

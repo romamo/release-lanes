@@ -34,7 +34,7 @@ The spec is in #{spec PR} (`docs/specs/{NNN}-{slug}.md`), with its acceptance cr
 On hold: the build waits on {owner/repo}#{spec PR}, the spec
 ```
 
-Once the spec merges, edit the issue body to link it, then comment the Implement template naming the spec and its criteria.
+Once the spec merges, edit the issue body to link it and split the spec into build issues ([spec-gate.md](spec-gate.md), Split it into build issues). Comment the Implement template on each build issue, naming the spec and the criteria it delivers.
 
 ## Postpone
 

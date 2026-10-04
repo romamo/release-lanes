@@ -8,6 +8,7 @@ Usage:
   specs.py find [--dir D] TERM...
   specs.py criteria [--dir D] NNN
   specs.py coverage [--dir D] [--root R] [--spec NNN]...
+  specs.py split [--dir D] [--repo OWNER/REPO] [--group K,K...]... [--after B:A]... [--json] NNN
 
 A spec has a title line, a status line, and fixed sections, in this order:
 
@@ -20,18 +21,21 @@ A spec has a title line, a status line, and fixed sections, in this order:
   ## Acceptance criteria    (- S-007-1: <checkable statement>, numbered from 1)
   ## Out of scope
   ## Decisions relied on    (- D-5 ..., or - none)
-  ## Issues                 (- owner/repo#N, filled in once the build issues exist)
+  ## Issues                 (- owner/repo#N: S-007-1, S-007-2: each build issue and the
+                            criteria it delivers, filled in once the build issues exist)
   ## Verification           (once built: each criterion id, how it was checked on main)
 
 new       write the next spec from D/TEMPLATE.md (or the built-in template), replacing
           S-NNN and <title>; prints the new path
 check     every spec is well formed: its file name, title, and sections; criterion ids
           unique and sequential; the decisions it names exist in the log and are active;
-          a built spec lists its issues and names every criterion under Verification.
-          A draft may keep the template's placeholder text (D/TEMPLATE.md, or the
-          built-in template: each paragraph of a section, word for word, past "- none");
-          an approved spec may not in Problem, Behaviour, Acceptance criteria, or Out of
-          scope, and a built spec in no section. No folder D: "no specs", exit 0
+          a built spec lists its issues and names every criterion under Verification;
+          once an approved or built spec lists build issues, each criterion is assigned
+          to exactly one of them. A draft may keep the template's placeholder text
+          (D/TEMPLATE.md, or the built-in template: each paragraph of a section, word
+          for word, past "- none"); an approved spec may not in Problem, Behaviour,
+          Acceptance criteria, or Out of scope, and a built spec in no section. No
+          folder D: "no specs", exit 0
 find      specs whose Behaviour touches a TERM (a path matches a backticked path, glob,
           or directory there; any term matches as a substring of the section).
           `find $(git diff --name-only origin/main...)` lists the specs a diff touches
@@ -45,9 +49,16 @@ coverage  for every built spec (or each --spec, whatever its status), list each 
           node_modules, target, vendor, venv, dist, build are skipped, and so are the
           lines inside a Python multi-line string (a fixture, not a test). No folder
           D (and no --spec): "no specs", exit 0
+split    propose the build issues of an approved spec, for the criteria its Issues
+          section doesn't assign yet: one issue per --group of criterion numbers (default:
+          all of them in one), in the order given, each depending on the earlier groups
+          named by --after B:A (B depends on A). Prints each issue's title and body, whose
+          "Depends on #{Bk}" lines and the Issues lines to add name the issues by key
+          until they are filed: replace {Bk} with each issue's number as it is created.
+          --json prints the same as one JSON object
 
-Exit 0 on success (find: at least one match), 1 when check (or criteria, for its spec)
-finds a problem, find matches nothing, or coverage finds a criterion with no test (or a
+Exit 0 on success (find: at least one match), 1 when check (or criteria or split, for
+its spec) finds a problem, find matches nothing, or coverage finds a criterion with no test (or a
 test naming a criterion its spec lacks), 2 on bad input. Python 3.10+, standard library
 only.
 """
@@ -56,6 +67,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import json
 import os
 import re
 import sys
@@ -64,6 +76,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from io import StringIO
 from pathlib import Path
+from typing import Any
 
 from decisions import CANDIDATES as DECISION_LOGS
 from decisions import parse as parse_log
@@ -89,7 +102,10 @@ STATUSES = ("draft", "approved", "built")
 FILLED_WHEN_APPROVED = ("Problem", "Behaviour", "Acceptance criteria", "Out of scope")
 CRITERION = re.compile(r"^- S-(\d{3,})-(\d+): (\S.*)$")
 DECISION_ITEM = re.compile(r"^- D-(\d+)\b")
-ISSUE_ITEM = re.compile(r"^- (?:[\w.-]+/[\w.-]+)?#\d+$")
+ISSUE_ITEM = re.compile(r"^- ((?:[\w.-]+/[\w.-]+)?#\d+)(?::[ \t]*(.*))?$")
+ASSIGNED = re.compile(r"^S-(\d{3,})-(\d+)$")
+REPO = re.compile(r"^[\w.-]+/[\w.-]+$")
+UNASSIGNED = "is in no build issue under Issues"
 ID = re.compile(r"^(?:S-)?(\d+)$")
 # Reports one problem at a line of the spec being parsed
 ProblemSink = Callable[[int, str], None]
@@ -144,7 +160,8 @@ proves one names the id.
 
 ## Issues
 
-The build issues, filled in once they are filed, one `owner/repo#N` per line.
+The build issues, filled in once they are filed: one `- owner/repo#N: S-NNN-1, S-NNN-2` per
+line, naming the criteria that issue delivers. Each criterion belongs to exactly one.
 
 ## Verification
 
@@ -165,6 +182,13 @@ class Criterion:
 
 
 @dataclass
+class BuildIssue:
+    ref: str  # owner/repo#N or #N
+    criteria: list[int]  # the criterion numbers it delivers
+    line: int
+
+
+@dataclass
 class Spec:
     path: Path
     number: int
@@ -174,6 +198,7 @@ class Spec:
     sections: dict[str, list[tuple[int, str]]] = field(default_factory=dict)
     criteria: list[Criterion] = field(default_factory=list)
     decisions: list[tuple[int, int]] = field(default_factory=list)  # (D-n, line)
+    issues: list[BuildIssue] = field(default_factory=list)
 
     @property
     def id(self) -> str:
@@ -245,7 +270,7 @@ def parse(path: Path) -> tuple[Spec | None, list[str]]:
     if not spec.status:
         problem(1, f"no status line ('status: {'|'.join(STATUSES)}') after the title")
     if spec.status == "built":
-        if not any(ISSUE_ITEM.match(line.strip()) for _, line in spec.sections.get("Issues", [])):
+        if not spec.issues:
             problem(1, "built, but lists no build issues")
         verified = {
             int(m.group(2)) for m in PROVEN_ID.finditer(spec.text("Verification")) if int(m.group(1)) == spec.number
@@ -266,6 +291,7 @@ def parse(path: Path) -> tuple[Spec | None, list[str]]:
     none = [n for n, line in spec.sections.get("Decisions relied on", []) if line.strip() == "- none"]
     if none and spec.decisions:
         problem(none[0], "'- none' next to named decisions")
+    check_assignment(spec, problem)
     return spec, problems
 
 
@@ -285,8 +311,54 @@ def item(spec: Spec, section: str, n: int, line: str, problem: ProblemSink) -> N
             spec.decisions.append((int(decision.group(1)), n))
         elif line.strip() != "- none":
             problem(n, "a decision must read '- D-<n>' (a title may follow), or '- none'")
-    elif section == "Issues" and not ISSUE_ITEM.match(line.strip()):
-        problem(n, "an issue must read '- owner/repo#N' or '- #N'")
+    elif section == "Issues":
+        build_issue(spec, n, line, problem)
+
+
+def build_issue(spec: Spec, n: int, line: str, problem: ProblemSink) -> None:
+    """One line of the Issues section: a build issue and the criteria it delivers"""
+    match = ISSUE_ITEM.match(line.strip())
+    if match is None:
+        problem(n, f"an issue must read '- owner/repo#N: {spec.id}-1, {spec.id}-2' (or '- #N: ...')")
+        return
+    numbers = []
+    for name in (match.group(2) or "").split(","):
+        if not name.strip():
+            continue
+        criterion = ASSIGNED.match(name.strip())
+        if criterion is None:
+            problem(n, f"{name.strip()!r} is not a criterion id; list them as {spec.id}-1, {spec.id}-2")
+        elif int(criterion.group(1)) != spec.number:
+            problem(n, f"names {name.strip()}, a criterion of another spec than {spec.id}")
+        else:
+            numbers.append(int(criterion.group(2)))
+    spec.issues.append(BuildIssue(match.group(1), numbers, n))
+
+
+def check_assignment(spec: Spec, problem: ProblemSink) -> None:
+    """Once an approved or built spec lists its build issues, each criterion is delivered by
+    exactly one of them. An approved spec with no build issues yet hasn't been split"""
+    if spec.status not in ("approved", "built") or not spec.issues:
+        return
+    known = {c.number for c in spec.criteria}
+    owner: dict[int, str] = {}
+    refs: set[str] = set()
+    for issue in spec.issues:
+        if issue.ref in refs:
+            problem(issue.line, f"lists {issue.ref} twice")
+        refs.add(issue.ref)
+        if not issue.criteria:
+            problem(issue.line, f"{issue.ref} names no criteria; write '- {issue.ref}: {spec.id}-1, ...'")
+        for number in issue.criteria:
+            if number not in known:
+                problem(issue.line, f"{issue.ref} names {spec.id}-{number}, which the spec lacks")
+            elif number in owner:
+                problem(issue.line, f"{spec.id}-{number} is in both {owner[number]} and {issue.ref}")
+            else:
+                owner[number] = issue.ref
+    for criterion in spec.criteria:
+        if criterion.number not in owner:
+            problem(criterion.line, f"{spec.id}-{criterion.number} {UNASSIGNED}")
 
 
 def decision_states(given: str | None) -> dict[int, str | None] | None:
@@ -544,10 +616,133 @@ def coverage(directory: Path, root: Path, wanted: list[str]) -> int:
     return 1 if failed else 0
 
 
+def criterion_number(spec: Spec, name: str) -> int:
+    """A criterion named as 3 or S-007-3"""
+    text = name.strip()
+    full = ASSIGNED.match(text)
+    if full and int(full.group(1)) == spec.number:
+        return int(full.group(2))
+    if text.isdigit():
+        return int(text)
+    raise SpecError(f"a criterion of {spec.id} is named k or {spec.id}-k, got {text!r}")
+
+
+def groups_of(spec: Spec, groups: list[str], unassigned: list[int], assigned: dict[int, str]) -> list[list[int]]:
+    """Each --group's criterion numbers (default: every unassigned criterion in one), each
+    unassigned criterion in exactly one"""
+    chosen = [[criterion_number(spec, n) for n in g.split(",") if n.strip()] for g in groups] or [unassigned]
+    known = {c.number for c in spec.criteria}
+    seen: dict[int, int] = {}
+    for k, group in enumerate(chosen, 1):
+        if not group:
+            raise SpecError(f"--group {k} names no criteria")
+        for number in group:
+            if number not in known:
+                raise SpecError(f"--group {k}: {spec.id} has no criterion {spec.id}-{number}")
+            if number in assigned:
+                raise SpecError(f"--group {k}: {spec.id}-{number} is already in {assigned[number]}")
+            if number in seen:
+                raise SpecError(f"{spec.id}-{number} is in both --group {seen[number]} and --group {k}")
+            seen[number] = k
+    left = [n for n in unassigned if n not in seen]
+    if left:
+        raise SpecError(f"{', '.join(f'{spec.id}-{n}' for n in left)} in no --group; each criterion needs one")
+    return chosen
+
+
+def dependencies(after: list[str], count: int) -> dict[int, list[int]]:
+    """Each build issue (1..count) to the earlier ones it depends on, from --after B:A"""
+    depends: dict[int, list[int]] = {k: [] for k in range(1, count + 1)}
+    for edge in after:
+        match = re.match(r"^(\d+):(\d+)$", edge.strip())
+        if match is None:
+            raise SpecError(f"--after is B:A (build issue B depends on A, numbered as the groups), got {edge!r}")
+        later, earlier = int(match.group(1)), int(match.group(2))
+        if later not in depends or earlier not in depends:
+            raise SpecError(f"--after {edge}: the groups are numbered 1 to {count}")
+        if earlier >= later:
+            raise SpecError(f"--after {edge}: a build issue depends only on an earlier group; give them in build order")
+        if earlier not in depends[later]:
+            depends[later].append(earlier)
+    return {k: sorted(v) for k, v in depends.items()}
+
+
+def task_graph(spec: Spec, groups: list[str], after: list[str], repo: str | None) -> list[dict[str, Any]]:
+    """The build issues proposed for an approved spec's criteria that no build issue has yet,
+    in the order to file them. Each names the others by key, {B1}, until they have numbers"""
+    if spec.status != "approved":
+        raise SpecError(f"{spec.id} is {spec.status or 'without a status'}; only an approved spec is split")
+    if repo is not None and REPO.match(repo) is None:
+        raise SpecError(f"--repo must be owner/repo, got {repo!r}")
+    assigned = {n: issue.ref for issue in spec.issues for n in issue.criteria}
+    unassigned = [c.number for c in spec.criteria if c.number not in assigned]
+    chosen = groups_of(spec, groups, unassigned, assigned)
+    depends = dependencies(after, len(chosen))
+    texts = {c.number: c.text for c in spec.criteria}
+    prefix = repo or ""
+    issues = []
+    for k, group in enumerate(chosen, 1):
+        ids = [f"{spec.id}-{n}" for n in group]
+        body = [
+            f"Builds part of spec {spec.id}, `{spec.path.as_posix()}`: the acceptance criteria below. Each needs a "
+            f"test that names its id (`test_s{spec.number:03d}_<k>_...`, or a `proves: {ids[0]}` comment line).",
+            "",
+            *(f"- {spec.id}-{n}: {texts[n]}" for n in group),
+        ]
+        if depends[k]:
+            body += ["", *(f"Depends on {prefix}#{{B{d}}}" for d in depends[k])]
+        issues.append(
+            {
+                "key": f"B{k}",
+                "title": f"{spec.title} ({', '.join(ids)})",
+                "body": "\n".join(body) + "\n",
+                "criteria": ids,
+                "depends_on": [f"B{d}" for d in depends[k]],
+                "issues_line": f"- {prefix}#{{B{k}}}: {', '.join(ids)}",
+            }
+        )
+    return issues
+
+
+def split(directory: Path, wanted: str, groups: list[str], after: list[str], repo: str | None, as_json: bool) -> int:
+    match = ID.match(wanted)
+    if match is None:
+        raise SpecError(f"a spec is named NNN, 7, or S-007, got {wanted!r}")
+    specs, _ = load(directory)
+    spec = next((s for s in specs if s.number == int(match.group(1))), None)
+    if spec is None:
+        raise SpecError(f"no spec S-{int(match.group(1)):03d} in {directory}")
+    # A criterion in no build issue yet is what split is for; any other problem stops it
+    problems = [p for p in parse(spec.path)[1] if not p.endswith(UNASSIGNED)]
+    if problems:
+        for problem in problems:
+            print(problem, file=sys.stderr)
+        print(f"{spec.id} must pass check before it is split", file=sys.stderr)
+        return 1
+    if spec.status == "approved" and all(any(c.number in i.criteria for i in spec.issues) for c in spec.criteria):
+        if groups or after:
+            raise SpecError(f"every criterion of {spec.id} is in a build issue already; there is nothing to group")
+        print(f"{spec.id}: every criterion is in a build issue already")
+        return 0
+    issues = task_graph(spec, groups, after, repo)
+    if as_json:
+        print(json.dumps({"spec": spec.id, "path": spec.path.as_posix(), "issues": issues}, indent=2))
+        return 0
+    print(f"{spec.id}: {len(issues)} build issue(s) for {spec.path.as_posix()}, to file in this order.")
+    print("Replace each {Bk} with that issue's number once it is filed.")
+    for issue in issues:
+        depends = ", ".join(issue["depends_on"]) or "nothing"
+        print(f"\n=== {issue['key']} (depends on {depends})\ntitle: {issue['title']}\n\n{issue['body']}", end="")
+    print("\nThe spec's Issues section, once they are filed:\n")
+    for issue in issues:
+        print(issue["issues_line"])
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("new", "check", "find", "criteria", "coverage"):
+    for name in ("new", "check", "find", "criteria", "coverage", "split"):
         p = sub.add_parser(name)
         p.add_argument("--dir", type=Path, default=DEFAULT_DIR, help="the specs folder (default: docs/specs)")
         if name == "new":
@@ -562,6 +757,12 @@ def main() -> int:
         if name == "coverage":
             p.add_argument("--root", type=Path, default=Path("."), help="where the tests are (default: .)")
             p.add_argument("--spec", action="append", default=[], metavar="NNN", help="check this spec, built or not")
+        if name == "split":
+            p.add_argument("--repo", metavar="OWNER/REPO", help="name the issues OWNER/REPO#N (default: #N)")
+            p.add_argument("--group", action="append", default=[], metavar="K,K", help="one build issue's criteria")
+            p.add_argument("--after", action="append", default=[], metavar="B:A", help="build issue B depends on A")
+            p.add_argument("--json", action="store_true", help="print the task graph as one JSON object")
+            p.add_argument("spec", metavar="NNN")
     args = parser.parse_args()
     try:
         if args.command == "new":
@@ -570,6 +771,8 @@ def main() -> int:
             return criteria(args.dir, args.spec)
         if args.command == "coverage":
             return coverage(args.dir, args.root, args.spec)
+        if args.command == "split":
+            return split(args.dir, args.spec, args.group, args.after, args.repo, args.json)
         if args.command == "check" and not args.dir.is_dir():
             print("no specs")
             return 0

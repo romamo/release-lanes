@@ -22,10 +22,11 @@ def ts() -> ModuleType:
     return module
 
 
-def issue(*comments: tuple[str, str], labels: tuple[str, ...] = ()) -> dict[str, Any]:
+def issue(*comments: tuple[str, str], labels: tuple[str, ...] = (), body: str = "") -> dict[str, Any]:
     """Comments as (createdAt, body), oldest first, as GitHub returns them"""
     return {
         "number": 7,
+        "body": body,
         "labels": {"nodes": [{"name": n} for n in labels]},
         "comments": {"nodes": [{"createdAt": at, "body": body} for at, body in comments]},
         "timelineItems": {"nodes": []},
@@ -131,6 +132,7 @@ def open_issue(
     return {
         "number": number,
         "title": f"issue {number}",
+        "body": "",
         "labels": {"pageInfo": {"hasNextPage": more_labels}, "nodes": [{"name": n} for n in labels]},
         "comments": {"nodes": comments or []},
         "timelineItems": timeline or forward([]),
@@ -214,6 +216,7 @@ def test_a_hold_on_a_spec_pr_lifts_only_when_it_merges(ts: ModuleType) -> None:
         ({"__typename": "PullRequest", "state": "CLOSED"}, "SPEC_REFUSED"),
         ({"__typename": "PullRequest", "state": "MERGED"}, "UNBLOCKED"),
         ({"__typename": "Issue", "state": "CLOSED"}, "UNBLOCKED"),
+        ({"__typename": "Issue", "state": "CLOSED", "stateReason": "NOT_PLANNED"}, "UNBLOCKED"),
     ):
         states = {ref: ts.ref_state(node)}
         assert ts.classify_open(item, "Triage:", "postponed", states, None, REPO)[0] == state, node
@@ -487,3 +490,98 @@ def test_backward_pages_back_off_mid_pagination(ts: ModuleType) -> None:
     comments = [("COMMENTS_PAGE", 100), ("COMMENTS_PAGE", 100), ("COMMENTS_PAGE", 50)] + [("COMMENTS_PAGE", 25)] * 4
     tags = [("TAGS_PAGE", 100), ("TAGS_PAGE", 50)] + [("TAGS_PAGE", 25)] * 5
     assert gh.calls == [("QUERY", 100), *comments, *tags]
+
+
+# Build issues split from a spec (#71): "Depends on" lines in the issue body are holds
+
+
+def test_depends_on_lines_name_issues_in_any_form(ts: ModuleType) -> None:
+    body = (
+        "Builds part of spec S-007.\n\n"
+        "Depends on #3\n"
+        "- Depends on: other/lib#4, #5\n"
+        "depends on https://github.com/o/r/issues/6\n"
+        "This depends on #9 only mid-sentence\n"
+        "Depends on #{B1}, a placeholder never filled in\n"
+    )
+    refs = ts.dependency_refs(issue(body=body), ("o", "r"))
+    assert refs == [("o", "r", 3), ("o", "r", 5), ("o", "r", 6), ("other", "lib", 4)]
+
+
+def test_a_body_dependency_reads_a_plain_number_anywhere_on_its_line(ts: ModuleType) -> None:
+    # A hold comment counts a plain #N only right after a hold phrase (#68); a "Depends on"
+    # line of the body is the dependency itself, so every #N on it counts, in any case
+    body = "DEPENDS ON: the parser (#3) and the docs, #4\n"
+    assert ts.dependency_refs(issue(body=body), ("o", "r")) == [("o", "r", 3), ("o", "r", 4)]
+    comment = issue(("2026-09-01T10:00:00Z", "On hold: depends on the parser (#3)"))
+    assert ts.upstream_refs(comment, ("o", "r")) == []
+
+
+def test_an_unfilled_dependency_is_reported_not_ignored(ts: ModuleType) -> None:
+    # specs.py split names a dependency #{B1} until it is filed: left in, it holds nothing
+    # known, so the issue must not read NEEDS_PR (ready to start) or plain BLOCKED
+    triaged = ("2026-09-01T10:00:00Z", "Triage: implement, a build issue of S-007")
+    item = issue(triaged, body="Depends on o/r#{B1}\nDepends on #3, #{B2}\n")
+    assert ts.unfilled_dependencies(item) == ["B1", "B2"]
+    states = {("o", "r", 3): "CLOSED"}
+    assert ts.classify_open(item, "Triage:", "postponed", states, None, ("o", "r")) == (
+        "UNFILLED",
+        "unfilled dependency {B1} unfilled dependency {B2} o/r#3:closed",
+    )
+    assert "UNFILLED" in ts.ACTION
+    alone = issue(triaged, body="- Depends on: #{B1}\n")
+    assert ts.classify_open(alone, "Triage:", "postponed", {}, None, ("o", "r")) == (
+        "UNFILLED",
+        "unfilled dependency {B1}",
+    )
+    # A placeholder mid-sentence is not a "Depends on" line
+    prose = issue(triaged, body="Split names each one #{Bk} until filed\n")
+    assert ts.classify_open(prose, "Triage:", "postponed", {}, None, ("o", "r"))[0] == "NEEDS_PR"
+
+
+def test_a_build_issue_is_blocked_until_its_dependency_closes(ts: ModuleType) -> None:
+    item = issue(("2026-09-01T10:00:00Z", "Triage: implement, a build issue of S-007"), body="Depends on #3\n")
+    for state, expected in (("OPEN", "BLOCKED"), ("CLOSED", "UNBLOCKED")):
+        states = {("o", "r", 3): state}
+        verdict = ts.classify_open(item, "Triage:", "postponed", states, None, ("o", "r"))
+        assert verdict == (expected, f"o/r#3:{state.lower()}")
+    both = issue(("2026-09-01T10:00:00Z", "Triage: implement"), body="Depends on #3\nDepends on other/lib#4\n")
+    states = {("o", "r", 3): "CLOSED", ("other", "lib", 4): "OPEN"}
+    assert ts.classify_open(both, "Triage:", "postponed", states, None, ("o", "r"))[0] == "BLOCKED"
+
+
+def test_an_untriaged_issue_reads_new_whatever_its_body_depends_on(ts: ModuleType) -> None:
+    # romamo/shipyard#49 says "Depends on #48." in its body and was never triaged: once #48
+    # merged it read UNBLOCKED ("resume"), skipping the triage it is still owed
+    item = issue(body="Depends on #48. The other session takes it once #48 lands.\n")
+    for state in ("OPEN", "CLOSED", "MERGED"):
+        verdict = ts.classify_open(item, "Triage:", "postponed", {("o", "r", 48): state}, None, ("o", "r"))
+        assert verdict[0] == "NEW", state
+
+
+def test_a_dependency_closed_as_not_planned_unblocks_but_says_so(ts: ModuleType) -> None:
+    # Its code never landed: the issue is UNBLOCKED (decide again), and the note says why
+    node = {"__typename": "Issue", "state": "CLOSED", "stateReason": "NOT_PLANNED"}
+    assert ts.ref_state(node) == "NOT_PLANNED"
+    assert ts.ref_state({**node, "stateReason": "COMPLETED"}) == "CLOSED"
+    item = issue(("2026-09-01T10:00:00Z", "Triage: implement, a build issue of S-007"), body="Depends on #3\n")
+    states = {("o", "r", 3): ts.ref_state(node)}
+    verdict = ts.classify_open(item, "Triage:", "postponed", states, None, ("o", "r"))
+    assert verdict == ("UNBLOCKED", "o/r#3:not_planned")
+
+
+def test_a_stacked_pr_on_an_open_dependency_reads_in_progress(ts: ModuleType) -> None:
+    item = issue(body="Depends on #3\n")
+    item["timelineItems"] = {"nodes": [{"willCloseTarget": True, "source": {"number": 8, "state": "OPEN"}}]}
+    states = {("o", "r", 3): "OPEN"}
+    assert ts.classify_open(item, "Triage:", "postponed", states, None, ("o", "r"))[0] == "IN_PROGRESS"
+
+
+def test_the_wip_limit_leaves_room_for_the_oldest_ready_issues(ts: ModuleType) -> None:
+    rows = [
+        {"number": n, "state": s}
+        for n, s in ((9, "NEEDS_PR"), (4, "UNBLOCKED"), (5, "IN_PROGRESS"), (6, "IN_PROGRESS"), (7, "BLOCKED"))
+    ]
+    assert ts.wip_room(rows, 3) == {"wip": 3, "in_progress": 2, "room": 1, "ready": [4, 9]}
+    assert ts.wip_room(rows, 2)["room"] == 0
+    assert ts.wip_room(rows, 1)["room"] == 0

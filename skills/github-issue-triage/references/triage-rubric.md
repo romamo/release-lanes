@@ -47,7 +47,8 @@ Read it from the tags and the manifest version.
 | DONE_NOT_CLOSED | Close it and cite the merged PR |
 | SUSPECT_CLOSE | Check the fix is on the default branch. If it isn't, reopen and explain |
 | BLOCKED | Nothing, until the upstream issue closes or the spec PR merges |
+| UNFILLED | A `Depends on #{Bk}` placeholder from `specs.py split` was never filled in: edit the issue body to name the dependency's number |
 | SPEC_REFUSED | The spec PR it waits on closed without merging: the spec was refused. Decide again in a new triage comment: revise the spec in a new PR (with a new hold line), postpone, or won't fix |
-| UNBLOCKED | Read the upstream outcome, update the plan on the issue, then resume |
+| UNBLOCKED | Read the upstream outcome, update the plan on the issue, then resume. A dependency noted `:not_planned` was closed without its work: decide again whether the issue still stands |
 | POSTPONED | Skip it |
 | REVISIT | A stable release came out after it was postponed. Apply this rubric again under the new phase |
