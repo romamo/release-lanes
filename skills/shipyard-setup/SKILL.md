@@ -153,6 +153,19 @@ or the tags are wrong; fix those, not the version.
    release commit in the run summary
 3. Create the `release-blocker` label if the policy uses it
 4. Ask the user to switch `mode = "release"` once the dry run looks right
+5. Ask where the agents will run: releasing needs none of them, but triage, landing, and
+   the shipped notices do. Recommend on demand to start, and offer the other two:
+
+   | Option | Runs | Stops when |
+   |---|---|---|
+   | On demand | in the user's session, when they invoke a skill | the task is done |
+   | `/loop 30m /github-ship-watch <owner/repo> — watch and triage` | in this session | the session closes |
+   | A `/schedule` routine | in the cloud, with the user's computer off | the user deletes it |
+
+   For a routine, also ask whether it may merge: it merges only when its prompt says
+   "merge when green". Write the prompt so it clones shipyard rather than relying on the
+   plugin, which a cloud routine may not load (docs/flow.md, Keeping it running), and offer
+   to create it with `/schedule`
 
 ## Migrating from hand-made or scripted releases
 
