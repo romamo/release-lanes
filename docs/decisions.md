@@ -27,3 +27,35 @@ entry that supersedes it, never by editing an old one.
 - Why: 'Run by agents and one release bot' read as a service separate from shipyard, when it is shipyard's own prepare.yml and land.yml running the shipyard CLI; people still ask for 'a release bot', so skill descriptions keep the phrase to match
 - Applies to: README.md, docs/*.md, .github/workflows/*.yml, src/shipyard/init.py, skills/*/SKILL.md
 - Enforced by: review
+
+## D-4: One factory config file: .github/shipyard.toml
+
+- Decided: 2026-10-04, in romamo/shipyard#26
+- Rule: Every shipyard layer reads its settings from one file, .github/shipyard.toml, one top-level section per layer; .github/release-policy.toml stays a supported alias with the same release keys, and a repo may not have both
+- Why: doctor checks the whole factory in one pass, and users learn one file; the alias keeps every existing repo working without a migration
+- Applies to: src/shipyard/policy.py, src/shipyard/doctor.py, src/shipyard/init.py, .github/shipyard.toml, .github/release-policy.toml
+- Enforced by: review, until the config loader tests land
+
+## D-5: Specs are files in docs/specs/
+
+- Decided: 2026-10-04, in romamo/shipyard#26
+- Rule: A feature's spec is a file docs/specs/NNN-<slug>.md merged through a pull request before its build starts; issue bodies link to the spec, they don't hold it
+- Why: a file is reviewed line by line, versioned with the code it describes, and readable by agents from the checkout
+- Applies to: docs/specs/*, skills/github-issue-triage/*, spec gate
+- Enforced by: review
+
+## D-6: Operations data starts minimal
+
+- Decided: 2026-10-04, in romamo/shipyard#26
+- Rule: The operate and incident layers read only health URLs from the config and GitHub deployments; an external tracker or metrics source is added later behind its own config section, never required
+- Why: a factory that needs no third-party account works for every repo on day one; richer sources can come once the minimal loop is proven
+- Applies to: operate layer, incident layer, deploy_state.py, ops-watch skill
+- Enforced by: review
+
+## D-7: Production deploys act by default
+
+- Decided: 2026-10-04, in romamo/shipyard#26
+- Rule: A production environment's autonomy defaults to act: it deploys once its source environment has passed health checks for the bake time, with no human approval, unless the config sets propose or the stop switch is on
+- Why: the release lanes already gate what ships; a bake time with health checks and automatic rollback is the safety, and the stop switch is the human override
+- Applies to: deploy layer, [autonomy] config, environments config
+- Enforced by: review
