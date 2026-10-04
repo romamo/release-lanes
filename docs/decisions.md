@@ -59,3 +59,19 @@ entry that supersedes it, never by editing an old one.
 - Why: the release lanes already gate what ships; a bake time with health checks and automatic rollback is the safety, and the stop switch is the human override
 - Applies to: deploy layer, [autonomy] config, environments config
 - Enforced by: review
+
+## D-8: A hold stops every release except a hand-started hotfix
+
+- Decided: 2026-10-04, in romamo/shipyard#32
+- Rule: While an issue labelled shipyard-hold is open, no lane releases (scheduled, push, or started by hand), except a hotfix a person starts by hand; the skip reason names the hold and says a hotfix can still be started
+- Why: A hold usually means an incident, and a hotfix is its cure; making a person close the hold first adds a step at the worst moment, while everything automatic still stops
+- Applies to: src/shipyard/autonomy.py, src/shipyard/planner.py, shipyard-hold label
+- Enforced by: tests/test_autonomy.py (with #38)
+
+## D-9: Warn about a new permission only where it is needed
+
+- Decided: 2026-10-04, in romamo/shipyard#32
+- Rule: doctor warns about a permission the caller's release.yml lacks only when the repo's config or state needs it (issues: write when a stage proposes or a hold is open); setups that don't use the feature see no new warning
+- Why: a warning every existing setup gets for a feature it doesn't use trains people to ignore doctor; the failing job still explains the one-line fix when the need arises
+- Applies to: src/shipyard/doctor.py, .github/workflows/prepare.yml, caller permissions
+- Enforced by: review
