@@ -18,6 +18,10 @@ bot.
 - `github-pr-triage` launches reviewer agents from the repo's root and has each confirm
   its remote: from a nested clone, worktree isolation copied the wrong repository and a
   reviewer's fix commits were lost with its worktree
+- `triage_state.py` reads an issue's newest triage comment, not its oldest, so a
+  re-decision changes NEEDS_PR and clears REVISIT. It compares comment and tag times as
+  instants, so a tag date with a UTC offset no longer misorders against a comment's `Z`
+  time
 
 ## [0.5.0] - 2026-10-03
 
