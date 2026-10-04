@@ -17,6 +17,7 @@ from shipyard.schedule import Freeze, Window
 from shipyard.version import Part
 
 if TYPE_CHECKING:
+    from shipyard.agents import AgentsConfig
     from shipyard.environments import Environment
 
 CONFIG_PATH = Path(".github") / "shipyard.toml"
@@ -115,6 +116,7 @@ class Policy:
     bot_email: str
     environments: Mapping[str, Environment]
     autonomy: AutonomyPolicy = AutonomyPolicy()
+    agents: AgentsConfig | None = None  # the gate's [agents] section; validated here, read by the gate
 
     @classmethod
     def load(cls, path: Path) -> Policy:
@@ -144,6 +146,7 @@ class Policy:
             "version_lines",
             "environments",
             "autonomy",
+            "agents",
         )
         changelog = top.table("changelog")
         changelog.allow("path", "style")
@@ -183,6 +186,9 @@ class Policy:
         declared = environments.parse(top.table("environments", optional=True), lanes)
         autonomy = AutonomyPolicy.parse(top.table("autonomy", optional=True).raw, f"{where} [autonomy]")
         autonomy.require_environments(declared.keys(), f"{where} [autonomy]")
+        from shipyard.agents import AgentsConfig  # it reads tables as this module does, so it imports from here
+
+        agents = AgentsConfig.parse(top.table("agents")) if "agents" in raw else None
         return cls(
             name=top.string("name"),
             mode=top.enum("mode", Mode),
@@ -206,6 +212,7 @@ class Policy:
             bot_email=bot.string("email", default="41898282+github-actions[bot]@users.noreply.github.com"),
             environments=declared,
             autonomy=autonomy,
+            agents=agents,
         )
 
     def rule(self, lane: Lane) -> LaneRule:

@@ -74,6 +74,7 @@ The bump, registry, and install commands per ecosystem (Python, Node, Rust, Go, 
 
 `github-ship-watch` is the routine: each pass checks the release runs, the newest releases, and the issue intake, finishes what the policy already decided (a stalled lane, a flaky release job, the shipped notices), and hands flagged issues to triage when asked.
 
+- `shipyard gate` on launchd: a new background session on this machine only when the repo needs one, with the prompt from the config's `[agents]` section; quiet ticks make no model call (shipyard-setup, The gate)
 - `/loop 30m /github-ship-watch <owner/repo> — watch and triage`: every 30 minutes in this session
 - `/schedule`: a cloud routine, with the prompt below that clones shipyard
 - Status only: `python3 $S/github-ship-watch/scripts/watch_state.py <owner/repo>` (exit 1 when anything needs action)
