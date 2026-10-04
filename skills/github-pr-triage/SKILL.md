@@ -41,6 +41,7 @@ Judgment stays with you: which PRs to delegate, each PR's risks, whether a revie
 | `landed.py --onto <ref> <sha>...` | Did these commits land, even rebased or with a hand-merged CHANGELOG? | Before deleting a worktree or branch |
 | `release_ready.py <repo> <sha> <version>` | Is the release commit ready to tag: CI green on it, on the default branch, tag free, version in manifest and CHANGELOG, "not additive" if Breaking, compare link? Lists open PRs to judge | Right before tagging |
 | `shipped.py <repo> <prev-tag> <tag> [--post]` | Which closed issues did this release fix, and which haven't been told yet? Dry run by default | After the publish is verified |
+| `../github-issue-triage/scripts/specs.py coverage --spec NNN` | For a PR that builds a spec, each acceptance criterion and the tests that name it (`test_sNNN_k_...` or a `proves: S-NNN-k` comment); exit 1 when one has none | In every reviewer brief for a spec's build PR (`{specs_script}`) |
 | `../github-issue-triage/scripts/decisions.py find\|check\|add` | Which settled rules a PR's files touch; the log's format; recording a rule the user settles during review | `find` in every reviewer brief (`{decisions_script}`); `add` when a held PR's answer sets a rule |
 
 ## Workflow

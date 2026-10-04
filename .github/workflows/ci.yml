@@ -31,6 +31,10 @@ jobs:
       - run: uv run ruff format --check src tests skills
       - run: uv run mypy
       - run: uv run pytest -q
+      - name: Check the specs, and that a test proves each criterion of a built one
+        run: |
+          uv run --no-project python skills/github-issue-triage/scripts/specs.py check
+          uv run --no-project python skills/github-issue-triage/scripts/specs.py coverage
       - name: Lint the workflows, including the template init writes
         run: |
           uvx --from actionlint-py actionlint .github/workflows/*.yml

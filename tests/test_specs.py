@@ -26,12 +26,20 @@ def spec(
     criteria: tuple[str, ...] = ("1: tool run exits 2 on a missing config", "2: tool run --dry-run writes nothing"),
     decisions: str = "- D-2: New",
     issues: str = "- o/r#12",
+    status: str = "approved",
+    verification: str = "",
 ) -> str:
-    lines = [f"# S-{number}: Dry run", "", "## Problem", "", "Runs write files.", "", "## Behaviour", "", behaviour]
+    lines = [f"# S-{number}: Dry run", "", f"status: {status}", "", "## Problem", "", "Runs write files."]
+    lines += ["", "## Behaviour", "", behaviour]
     lines += ["", "## Acceptance criteria", ""] + [f"- S-{number}-{c}" for c in criteria]
     lines += ["", "## Out of scope", "", "- Undo", "", "## Decisions relied on", "", decisions]
-    lines += ["", "## Issues", "", issues, ""]
+    lines += ["", "## Issues", "", issues, "", "## Verification", "", verification, ""]
     return "\n".join(lines)
+
+
+def built(number: str) -> str:
+    verified = f"- S-{number}-1: ran it on main, exit 2\n- S-{number}-2: ran it on main, no files"
+    return spec(number, status="built", verification=verified)
 
 
 def repo(tmp_path: Path, **files: str) -> Path:
@@ -89,8 +97,8 @@ def test_check_reports_each_problem(tmp_path: Path) -> None:
     assert out.returncode == 1
     for problem in (
         "5-short.md: not named NNN-<slug>.md",
-        "002-bad.md:14: expected S-002-2",
-        "002-bad.md:15: expected S-002-3",
+        "002-bad.md:16: expected S-002-2",
+        "002-bad.md:17: expected S-002-3",
         "unknown section 'Out Of Scope'",
         "missing the section 'Out of scope'",
         "a decision must read '- D-<n>'",
@@ -98,7 +106,7 @@ def test_check_reports_each_problem(tmp_path: Path) -> None:
         "names D-1, superseded by D-2",
         "names D-9, which the decisions log lacks",
         "003-wrong.md:1: the title says S-004, the file name S-003",
-        "004-dup.md:24: repeats the section 'Problem'",
+        "004-dup.md:26: repeats the section 'Problem'",
     ):
         assert problem in out.stdout, problem
 
@@ -164,3 +172,90 @@ def test_no_specs_folder_is_an_input_error(tmp_path: Path) -> None:
 def test_the_repo_specs_pass_check() -> None:
     out = specs(ROOT, "check")
     assert (out.returncode, out.stdout) == (0, "")
+
+
+def test_status_is_required_and_a_built_spec_is_verified(tmp_path: Path) -> None:
+    root = repo(
+        tmp_path,
+        **{
+            "001-built.md": built("001"),
+            "002-odd.md": spec("002", status="done"),
+            "003-none.md": spec("003").replace("status: approved\n", ""),
+            "004-unverified.md": spec("004", status="built", issues="", verification="- S-004-1: ran it"),
+        },
+    )
+    out = specs(root, "check").stdout
+    assert "001-built.md" not in out
+    assert "002-odd.md:3: status must be one of draft, approved, built, got 'done'" in out
+    assert "003-none.md:1: no status line" in out
+    assert "004-unverified.md:1: built, but lists no build issues" in out
+    assert "004-unverified.md:1: built, but Verification doesn't name S-004-2" in out
+    assert "S-004-1" not in out
+    specs(root, "new", "next")
+    assert "\nstatus: draft\n" in (root / "docs" / "specs" / "005-next.md").read_text()
+
+
+def write(root: Path, path: str, *lines: str) -> None:
+    file = root / path
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text("\n".join(lines) + "\n")
+
+
+def test_coverage_finds_both_forms_in_each_language(tmp_path: Path) -> None:
+    root = repo(tmp_path, **{"007-dry-run.md": built("007"), "008-later.md": spec("008")})
+    write(root, "tests/test_run.py", "def test_s007_1_exits_2_on_a_missing_config():", "    pass")
+    write(root, "web/run.test.ts", "// proves: S-007-1, S-007-2", "it('runs', () => {})")
+    write(root, "web/__tests__/dry.js", "test('s007_2 writes nothing', () => {})")
+    write(root, "go/run_test.go", "func TestS007_2DryRun(t *testing.T) {}")
+    write(root, "src/lib.rs", "    #[test]", "    fn test_s007_1_missing() {}")
+    write(root, "tests/conftest.py", "def test_s007_2_not_a_test_file(): pass")
+    write(root, "node_modules/x/a.test.js", "// proves: S-007-2")
+    out = specs(root, "coverage")
+    assert out.returncode == 0, out.stdout
+    assert out.stdout == (
+        "S-007: Dry run (built)\n"
+        "  S-007-1: tool run exits 2 on a missing config\n"
+        "    src/lib.rs:2 test_s007_1_missing\n"
+        "    tests/test_run.py:1 test_s007_1_exits_2_on_a_missing_config\n"
+        "    web/run.test.ts:1\n"
+        "  S-007-2: tool run --dry-run writes nothing\n"
+        "    go/run_test.go:1 TestS007_2DryRun\n"
+        "    web/__tests__/dry.js:1 s007_2 writes nothing\n"
+        "    web/run.test.ts:1\n"
+    )
+
+
+def test_coverage_reports_a_criterion_with_no_test(tmp_path: Path) -> None:
+    root = repo(tmp_path, **{"007-dry-run.md": built("007")})
+    write(root, "tests/test_run.py", "# proves: S-007-1", "def test_exits():", "    pass")
+    write(root, "tests/test_old.py", "def test_s007_9_renamed(): pass", "def test_s0071_1_other_spec(): pass")
+    out = specs(root, "coverage")
+    assert out.returncode == 1
+    assert "  S-007-2: tool run --dry-run writes nothing\n    no test proves it\n" in out.stdout
+    assert "S-007-9: no such criterion, yet named by tests/test_old.py:1 test_s007_9_renamed" in out.stdout
+
+
+def test_coverage_skips_a_python_fixture_inside_a_string(tmp_path: Path) -> None:
+    root = repo(tmp_path, **{"007-dry-run.md": built("007")})
+    fixture = ('FIXTURE = """', "# proves: S-007-2", "def test_s007_2_in_a_string():", '"""')
+    write(root, "tests/test_run.py", *fixture, "", "# proves: S-007-1", "def test_exits():", "    pass")
+    out = specs(root, "coverage")
+    assert out.returncode == 1
+    assert "    tests/test_run.py:6\n" in out.stdout
+    assert "  S-007-2: tool run --dry-run writes nothing\n    no test proves it\n" in out.stdout
+
+
+def test_coverage_ignores_specs_not_yet_built_unless_named(tmp_path: Path) -> None:
+    root = repo(tmp_path, **{"007-dry-run.md": spec("007"), "008-draft.md": spec("008", status="draft")})
+    out = specs(root, "coverage")
+    assert (out.returncode, out.stdout) == (0, "no built specs\n")
+    write(root, "tests/test_run.py", "def test_s007_1_x(): pass", "def test_s007_2_x(): pass")
+    assert specs(root, "coverage", "--spec", "7").returncode == 0
+    assert specs(root, "coverage", "--spec", "S-008").returncode == 1
+    assert specs(root, "coverage", "--spec", "9").returncode == 2
+    assert specs(root, "coverage", "--root", "missing").returncode == 2
+
+
+def test_the_repo_built_specs_are_covered() -> None:
+    out = specs(ROOT, "coverage")
+    assert out.returncode == 0, out.stdout
