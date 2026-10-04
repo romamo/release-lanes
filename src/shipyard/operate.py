@@ -12,7 +12,8 @@ GitHub, D-6), and then:
 Either deploy follows the environment's deploy autonomy under the hold: act dispatches its
 workflow, propose opens or updates one issue that `--approve <env>` acts on, observe only
 reports. shipyard deploys a tag to an environment at most once: a deployment of that tag
-there, in any state, means it was tried.
+there, in any state, means it was tried, and so does a run of the environment's workflow on
+the tag (still queued, or failed before its deploy job made a deployment).
 
 Health: a GET of `health` answering 2xx within 10 s. When the body is a JSON object with a
 string `version`, it must name the deployed release (`1.2.0` or `v1.2.0`), so a stale
@@ -35,7 +36,7 @@ from shipyard.autonomy import HOLD_LABEL, Autonomy, EnvironmentName, Hold, Stage
 from shipyard.doctor import OPERATE_CALLER
 from shipyard.environments import Environment
 from shipyard.errors import ReleaseError
-from shipyard.github import Deployment, DeploymentState, DeploymentStatus, GitHub
+from shipyard.github import Deployment, DeploymentState, DeploymentStatus, GitHub, WorkflowRun
 from shipyard.gitrepo import Tag
 from shipyard.policy import Lane, Policy
 from shipyard.propose import upsert
@@ -205,6 +206,7 @@ class Wanted:
     tag: Version
     why: str
     promote: bool  # from a source environment, rather than a missed lane deploy
+    since: dt.datetime  # a run of the environment's workflow on the tag since then deployed it already
 
 
 def _minutes(span: dt.timedelta) -> int:
@@ -276,7 +278,9 @@ def _wanted(seen: Observed, observed: Mapping[str, Observed], tags: Sequence[Tag
             return f"{env.source} is unhealthy on {source.tag.tag}"
         if _minutes(healthy) < env.bake_minutes:
             return f"{source.tag.tag} baking on {env.source}: {_minutes(healthy)} of {env.bake_minutes} min"
-        return Wanted(source.tag, f"healthy on {env.source} for the {env.bake_minutes} min bake", promote=True)
+        why = f"healthy on {env.source} for the {env.bake_minutes} min bake"
+        # the source's own run of a shared workflow made its deployment, so it started before it
+        return Wanted(source.tag, why, promote=True, since=source.current.created_at)
     assert env.lane is not None  # an environment takes a lane or a source
     released = _lane_versions(env.lane, tags)
     if released is None:
@@ -292,7 +296,14 @@ def _wanted(seen: Observed, observed: Mapping[str, Observed], tags: Sequence[Tag
         return "up to date"
     if now - newest.date < MISSED_GRACE:
         return f"{newest.name} just landed; its deploy may still be starting"
-    return Wanted(newest.version, f"the newest {env.lane} release, which its deploy missed", promote=False)
+    why = f"the newest {env.lane} release, which its deploy missed"
+    return Wanted(newest.version, why, promote=False, since=newest.date)
+
+
+def _started(github: GitHub, env: Environment, tag: Version, since: dt.datetime) -> WorkflowRun | None:
+    """The newest run of the environment's workflow on the tag started since then"""
+    runs = [r for r in github.workflow_runs(env.workflow, tag.tag) if r.created_at >= since]
+    return runs[0] if runs else None
 
 
 def deploy_marker(env: str) -> str:
@@ -380,6 +391,13 @@ def operate(
             states = github.deployment_statuses(tried.id)
             state = states[-1].state if states else DeploymentState.PENDING
             actions.append(f"{wanted.tag.tag} was deployed here already ({state}); shipyard doesn't deploy it again")
+        elif (started := _started(github, seen.env, wanted.tag, wanted.since)) is not None:
+            # a deploy job makes its deployment only when it starts, after the jobs it needs and
+            # a wait for a runner: until then the run is the only sign the tag was dispatched
+            actions.append(
+                f"{seen.env.workflow} already ran with {wanted.tag.tag} ({started.status}, run {started.id});"
+                " shipyard doesn't deploy it again"
+            )
         else:
             actions.append(_act(policy, github, seen.env, wanted, hold, dry_run))
         tag = seen.tag.tag if seen.tag else (seen.current.ref if seen.current else "-")
@@ -408,6 +426,12 @@ def approve(policy: Policy, github: GitHub, name: str, dry_run: bool) -> str:
     if tried:
         raise ReleaseError(
             f"{tag.tag} was deployed to {name} already (deployment {tried[0].id}); close #{issue.number}"
+        )
+    running = [r for r in github.workflow_runs(env.workflow, tag.tag) if r.status != "completed"]
+    if running:
+        raise ReleaseError(
+            f"{env.workflow} is running with {tag.tag} already (run {running[0].id}, {running[0].status});"
+            f" close #{issue.number} once its deployment shows"
         )
     if dry_run:
         return f"would dispatch {env.workflow} with {tag.tag} to {name} and close #{issue.number}"

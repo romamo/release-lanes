@@ -56,6 +56,15 @@ class DeploymentStatus:
     description: str
 
 
+@dataclass(frozen=True, slots=True)
+class WorkflowRun:
+    """A run of a workflow: `status` is GitHub's (queued, in_progress, waiting, completed, ...)"""
+
+    id: int
+    status: str
+    created_at: dt.datetime
+
+
 class GitHub(Protocol):
     def open_issues(self, label: str) -> list[str]:
         """'#N title' for each open issue with the label"""
@@ -93,6 +102,10 @@ class GitHub(Protocol):
 
     def create_deployment_status(self, deployment: int, state: DeploymentState, description: str) -> None:
         """Add a status, leaving the environment's other deployments as they are"""
+        ...
+
+    def workflow_runs(self, workflow: str, ref: str) -> list[WorkflowRun]:
+        """The workflow's runs on the branch or tag, newest first (the newest 100)"""
         ...
 
 
@@ -208,3 +221,11 @@ class GhCli:
             "-F",
             "auto_inactive=false",
         )
+
+    def workflow_runs(self, workflow: str, ref: str) -> list[WorkflowRun]:
+        found = self._api(
+            "-X", "GET", f"repos/{{owner}}/{{repo}}/actions/workflows/{workflow}/runs", "-f", f"branch={ref}",
+            "-f", "per_page=100",
+        )  # fmt: skip
+        runs = [WorkflowRun(int(r["id"]), str(r["status"]), _time(r["created_at"])) for r in found["workflow_runs"]]
+        return sorted(runs, key=lambda r: r.id, reverse=True)

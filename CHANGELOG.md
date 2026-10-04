@@ -29,7 +29,8 @@ bot.
   must name the deployed release), and records the result as deployment statuses, written
   only when the state changes. It promotes a `from` environment once its source has been
   healthy on a tag for `bake_minutes`, and redeploys a `lane` environment that missed its
-  lane's newest tag, each at most once per tag and under `deploy.<environment>` autonomy:
+  lane's newest tag, each at most once per tag (a deployment of it or a run of the
+  workflow on it counts) and under `deploy.<environment>` autonomy:
   act dispatches, propose (or the hold) opens a "Ready to promote" issue that `operate
   --approve <environment>` deploys once, observe reports. `land` now starts environment
   workflows on the tag, so each deployment's ref names it. `doctor` checks the operate

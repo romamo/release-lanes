@@ -3,7 +3,7 @@ unbroken bake, a missed lane deploy, autonomy and the hold, --approve, and the o
 
 import datetime as dt
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pytest
@@ -188,6 +188,44 @@ def test_a_promotion_is_dispatched_once(setup: tuple[Repo, FakeHttp]) -> None:
     found = run(repo, http, minutes(71))
     assert repo.github.dispatched == [TO_PRODUCTION]
     assert "v1.1.0rc1 was deployed here already (in_progress)" in found["production"].action
+
+
+def test_a_promotion_still_queued_is_not_dispatched_again(setup: tuple[Repo, FakeHttp]) -> None:
+    # a deploy job creates its deployment only when it starts: behind a build job or a wait
+    # for a runner, the next operate run finds no deployment of the tag yet, but the run
+    repo, http = setup
+    run(repo, http, minutes(61))
+    found = run(repo, http, minutes(71))
+    assert repo.github.dispatched == [TO_PRODUCTION]
+    assert "deploy.yml already ran with v1.1.0rc1 (queued, run 1)" in found["production"].action
+
+
+def test_a_deploy_run_that_failed_before_its_deployment_is_not_retried(setup: tuple[Repo, FakeHttp]) -> None:
+    repo, http = setup
+    run(repo, http, minutes(61))
+    workflow, ref, queued = repo.github.runs[0]
+    repo.github.runs[0] = (workflow, ref, replace(queued, status="completed"))  # its build job failed
+    found = run(repo, http, minutes(81))
+    assert repo.github.dispatched == [TO_PRODUCTION]
+    assert "deploy.yml already ran with v1.1.0rc1 (completed, run 1)" in found["production"].action
+
+
+def test_the_source_run_of_a_shared_workflow_does_not_block_the_promotion(setup: tuple[Repo, FakeHttp]) -> None:
+    repo, http = setup
+    repo.github.now = minutes(-3)  # staging's own deploy.yml run on the tag, before its deployment
+    repo.github.dispatch("deploy.yml", "v1.1.0rc1", "v1.1.0rc1", {"environment": "staging"})
+    repo.github.dispatched.clear()
+    run(repo, http, minutes(61))
+    assert repo.github.dispatched == [TO_PRODUCTION]
+
+
+def test_approve_refuses_while_a_run_of_the_tag_is_queued(setup: tuple[Repo, FakeHttp]) -> None:
+    repo, http = setup
+    configure(repo, 'deploy.production = "propose"\n')
+    run(repo, http, minutes(61))
+    repo.github.dispatch(*TO_PRODUCTION)  # approved by hand already; its run is still queued
+    with pytest.raises(ReleaseError, match=r"deploy.yml is running with v1.1.0rc1 already \(run 1, queued\)"):
+        approve(repo.policy, repo.github, "production", dry_run=False)
 
 
 def test_repeated_runs_write_no_duplicate_statuses(setup: tuple[Repo, FakeHttp]) -> None:

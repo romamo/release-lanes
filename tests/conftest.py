@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from shipyard.autonomy import HOLD_LABEL
-from shipyard.github import Deployment, DeploymentState, DeploymentStatus, Issue, Milestone
+from shipyard.github import Deployment, DeploymentState, DeploymentStatus, Issue, Milestone, WorkflowRun
 from shipyard.gitrepo import Git
 from shipyard.policy import ALIAS_PATH, CONFIG_PATH, Policy, config_path
 
@@ -104,6 +104,7 @@ class FakeGitHub:
     envs: dict[str, list[Deployment]] = field(default_factory=dict)  # deployments by environment, newest first
     statuses: dict[int, list[DeploymentStatus]] = field(default_factory=dict)  # by deployment, oldest first
     status_writes: list[tuple[int, DeploymentState, str]] = field(default_factory=list)
+    runs: list[tuple[str, str, WorkflowRun]] = field(default_factory=list)  # (workflow, ref, run), as dispatched
 
     def deploy(self, environment: str, ref: str, at: dt.datetime, *states: DeploymentState) -> int:
         """Record a deployment of ref, with its statuses one minute apart from at; its id"""
@@ -133,6 +134,10 @@ class FakeGitHub:
 
     def dispatch(self, workflow: str, ref: str, tag: str, inputs: Mapping[str, str] | None = None) -> None:
         self.dispatched.append((workflow, ref, tag, dict(inputs or {})))
+        self.runs.append((workflow, ref, WorkflowRun(len(self.runs) + 1, "queued", self.now)))
+
+    def workflow_runs(self, workflow: str, ref: str) -> list[WorkflowRun]:
+        return [run for w, r, run in reversed(self.runs) if (w, r) == (workflow, ref)]
 
     def find_issue(self, marker: str) -> Issue | None:
         hits = [i for i in self.issues.values() if marker in i.body]

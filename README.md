@@ -237,8 +237,9 @@ Either deploy follows `deploy.<environment>` in `[autonomy]` under the hold: `ac
 default) starts the environment's workflow on the tag; `propose`, or `act` while a
 `shipyard-hold` issue is open, opens one "Ready to promote vX to `<environment>`" issue and
 keeps it up to date; `observe` only reports. shipyard deploys a tag to an environment at
-most once: a deployment of that tag there, in any state, means it was tried, and a failed
-one is not retried. Approve a proposal with `gh workflow run operate.yml -f
+most once: a deployment of that tag there, in any state, means it was tried, and so does a
+run of its workflow on the tag (still queued, or failed before its deploy job made a
+deployment); a failed one is not retried. Approve a proposal with `gh workflow run operate.yml -f
 approve=<environment> -f dry-run=false`: it deploys the proposed tag once and closes the
 issue, under `propose` or `observe`, but not while a hold is open. The run summary lists
 each environment's tag, health, and what the run did; `shipyard operate --dry-run` shows the
