@@ -172,6 +172,10 @@ def test_doctor_checks_each_environments_workflow(repo: Repo) -> None:
     no_input = DEPLOY.replace("      environment:\n        type: string\n        required: true\n", "")
     repo.write(".github/workflows/deploy.yml", no_input)
     assert checks()[0] == ("FAIL", "deploy.yml (staging) lacks the 'environment' input")
+    # a blank line between inputs doesn't end the inputs (#53)
+    spaced = DEPLOY.replace("      environment:\n", "\n      environment:\n")
+    repo.write(".github/workflows/deploy.yml", spaced)
+    assert checks()[0] == ("PASS", f"deploy.yml (staging) {passed}")
     # the input alone is not the job's environment
     repo.write(".github/workflows/deploy.yml", DEPLOY.replace("    environment: ${{ inputs.environment }}\n", ""))
     assert checks()[0] == (

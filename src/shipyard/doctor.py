@@ -330,5 +330,8 @@ def _local_sources(pyproject: Path) -> list[str]:
 
 def _takes_input(text: str, event: str, name: str) -> bool:
     """Whether a workflow's event block declares the input; a text check, not a YAML parse"""
-    m = re.search(rf"^(?P<indent>\s*){event}:\s*(?:#.*)?$(?P<body>(?:\n(?P=indent)\s+.*|\n\s*)*)", text, re.MULTILINE)
+    # the block runs to the first line indented no deeper than the event; a blank line doesn't end it
+    m = re.search(
+        rf"^(?P<indent>[ \t]*){event}:[ \t]*(?:#.*)?$(?P<body>(?:\n(?:(?P=indent)[ \t]+.*|[ \t]*$))*)", text, re.M
+    )
     return m is not None and re.search(rf"^\s+{name}:", m["body"], re.MULTILINE) is not None

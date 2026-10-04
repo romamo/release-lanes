@@ -38,8 +38,8 @@ bot.
   an agent whose worktree was removed can't be resumed
 - `doctor` accepts the repository hosting shipyard calling its own `operate.yml` locally:
   there `.github/workflows/operate.yml` is the reusable workflow, so the operate check
-  reads the workflow that `uses: ./.github/workflows/operate.yml` instead. It also no
-  longer misses a deploy job's `environment:` after a blank line in an earlier job (#53)
+  reads the workflow that `uses: ./.github/workflows/operate.yml` instead. A blank line no
+  longer hides what follows it: a later job's `environment:`, or a workflow input (#53)
 
 ## [0.9.0] - 2026-10-04
 
