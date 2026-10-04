@@ -148,7 +148,8 @@ def doctor(root: Path, github: GitHub | None = None) -> list[Check]:
 
 def _deploy(path: Path, environment: str) -> Check:
     """An environment's workflow takes the tag and the environment, and a job names the
-    environment, without which GitHub records no deployment"""
+    environment, without which GitHub records no deployment; a WARN when no step fails a run
+    off the tag it deploys (#80)"""
     name = f"{path.name} ({environment})"
     if not path.is_file():
         return Check("FAIL", "environment", f"{name}: no .github/workflows/{path.name}")
@@ -158,7 +159,20 @@ def _deploy(path: Path, environment: str) -> Check:
         missing.append("a job with environment: (GitHub records a deployment only then)")
     if missing:
         return Check("FAIL", "environment", f"{name} lacks {', '.join(missing)}")
-    return Check("PASS", "environment", f"{name} runs on workflow_dispatch with 'tag' and 'environment' inputs")
+    passed = f"{name} runs on workflow_dispatch with 'tag' and 'environment' inputs"
+    if not _REF_GUARD.search(text):
+        detail = (
+            f"{passed}, but no step fails a run whose github.ref isn't refs/tags/<tag>: a run started"
+            " without --ref <tag> deploys the tag under the branch's ref, which names no release tag"
+            " (the README's deploy workflow shows the guard)"
+        )
+        return Check("WARN", "environment", detail)
+    return Check("PASS", "environment", f"{passed}; fails a run that isn't on the tag")
+
+
+# the guard a deploy workflow runs: a line that compares the run's ref (github.ref or
+# GITHUB_REF; ref_name doesn't tell a branch from a tag) with refs/tags/<tag>, in either order
+_REF_GUARD = re.compile(r"^(?=.*(?:\bgithub\.ref|\bGITHUB_REF)\b)(?=.*refs/tags/).*$", re.MULTILINE)
 
 
 def _sets_environment(path: Path, seen: set[Path]) -> bool:

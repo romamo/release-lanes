@@ -2,7 +2,7 @@ name: Deploy
 
 # shipyard's own deploy target: GitHub Pages at https://romamo.github.io/shipyard/. land
 # starts it on each stable tag, and shipyard operate on a rollback, with -f tag=<tag>
-# -f environment=github-pages. The site is site/ at the tag plus a health.json naming the
+# -f environment=github-pages; by hand, run it on the tag too (--ref <tag>), or it fails. The site is site/ at the tag plus a health.json naming the
 # release, {"version": "X.Y.Z"}, which shipyard operate checks against the deployed tag.
 
 on:
@@ -47,6 +47,13 @@ jobs:
           fi
           if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+[0-9A-Za-z.+-]*$ ]]; then
             echo "::error::tag must be a release tag such as v1.2.0, got '$TAG'"
+            exit 1
+          fi
+          # GitHub records the deployment under the run's ref, which operate reads as the tag
+          # that runs there (#80): a run started without --ref <tag> would record a branch
+          if [ "$GITHUB_REF" != "refs/tags/$TAG" ]; then
+            echo "::error::run deploy.yml on the tag it deploys, not $GITHUB_REF:" \
+              "gh workflow run deploy.yml --ref $TAG -f tag=$TAG -f environment=$ENVIRONMENT"
             exit 1
           fi
 

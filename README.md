@@ -215,6 +215,44 @@ The workflow's job sets `environment: ${{ inputs.environment }}`, so GitHub reco
 deployment for each run, whose ref is the tag: those deployments, not shipyard, say what
 runs where.
 
+The deployment's ref is the run's, not the tag it checks out, so a run started by hand
+without `--ref <tag>` would record a branch that names no release. The `ref` job fails such
+a run before the deploy job starts (and makes its deployment), with the command to run
+instead; `doctor` warns about a deploy workflow without that guard:
+
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        type: string
+        required: true
+      environment:
+        type: string
+        required: true
+jobs:
+  ref:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail a run that isn't on the tag it deploys
+        env:
+          TAG: ${{ inputs.tag }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          if [ "$GITHUB_REF" != "refs/tags/$TAG" ]; then
+            echo "::error::run it on the tag: gh workflow run deploy.yml --ref $TAG -f tag=$TAG -f environment=$ENVIRONMENT"
+            exit 1
+          fi
+  deploy:
+    needs: ref
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+```
+
 A GitHub environment with deployment protection must allow the release tags, since `land`
 starts the workflow on the tag: enabling GitHub Pages, for one, creates `github-pages`
 allowing only `main`, and rejects a run on `v1.2.0`. Add a tag rule `v*` under Settings →

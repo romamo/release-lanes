@@ -148,7 +148,20 @@ on:
         type: string
         required: true
 jobs:
+  ref:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail a run that isn't on the tag it deploys
+        env:
+          TAG: ${{ inputs.tag }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          if [ "$GITHUB_REF" != "refs/tags/$TAG" ]; then
+            echo "::error::run it on the tag: gh workflow run deploy.yml --ref $TAG -f tag=$TAG -f environment=$ENVIRONMENT"
+            exit 1
+          fi
   deploy:
+    needs: ref
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps:
@@ -159,7 +172,10 @@ jobs:
 
 Turn an existing deploy workflow into this shape rather than writing a second one, and
 remove its own trigger on tags or pushes, so one release deploys once. shipyard starts it on
-the tag, so the deployment GitHub records names the tag as its ref.
+the tag, so the deployment GitHub records names the tag as its ref. Keep the `ref` job: GitHub
+records the run's ref, not the checked-out tag, so a run started by hand without `--ref <tag>`
+would record a branch, and the job fails it first with the command to run instead (`doctor`
+warns when a deploy workflow lacks it).
 
 If the environment already exists on GitHub with deployment protection, it must also allow
 the release tags, since `land` starts the workflow on the tag (enabling GitHub Pages creates

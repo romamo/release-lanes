@@ -83,6 +83,12 @@ bot.
   github-ship-watch's POSTMORTEM_DUE follows it up. The label is `incident` by default;
   the script can't read the shipyard config, so pass `[operate] incident_label` with the
   new `--incident-label` when it differs (#83)
+- A deploy workflow started by hand without `--ref <tag>` recorded its deployment under the
+  branch, which names no release tag, so `shipyard operate` couldn't tell what ran there.
+  The deploy workflow in the README and the shipyard-setup skill now starts with a `ref`
+  job that fails such a run, with the right `gh workflow run ... --ref <tag>` command, and
+  `doctor` warns when an environment's deploy workflow has no step comparing `github.ref`
+  with `refs/tags/<tag>` (#80)
 
 ## [0.10.1] - 2026-10-04
 
