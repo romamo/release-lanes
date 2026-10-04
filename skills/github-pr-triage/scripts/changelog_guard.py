@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """CHANGELOG safety for rebases (Keep a Changelog layout, `## [Unreleased]` then `## [X]`).
 
-check --base REF   exit 1 if lines added (or removed) since REF fall outside Unreleased
-move --base REF    move lines added since REF that sit in a released section under Unreleased
-union FILE         resolve conflict blocks by keeping both sides, ours first
+check --base REF   exit 1 if lines added (or removed) since REF fall outside Unreleased, or if
+                   Unreleased has a bullet with no ### heading or the same ### heading twice
+move --base REF    move entries added since REF that sit in a released section under Unreleased,
+                   each under its own ### heading (created in Keep a Changelog order if missing)
+union FILE         resolve conflict blocks by keeping both sides, ours first, with a blank line
+                   between a heading and the other side
 
 Exit codes: 0 ok; 1 a problem was found (check) or nothing to do (move, union);
 2 bad input, such as no Unreleased heading or malformed conflict markers.
@@ -20,6 +23,9 @@ from pathlib import Path
 UNRELEASED = "## [Unreleased]"
 RELEASE = re.compile(r"^## \[")
 HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+CATEGORY = "### "
+BULLET = ("- ", "* ")
+ORDER = ("Added", "Changed", "Deprecated", "Removed", "Fixed", "Security")
 
 
 def fail(message: str) -> None:
@@ -70,23 +76,54 @@ def base_lines(base: str, path: Path) -> list[str]:
     return proc.stdout.splitlines(keepends=True)
 
 
+def heading_problems(lines: list[str], start: int, end: int) -> list[str]:
+    """A bullet with no ### heading above it, or a ### heading seen twice, under Unreleased.
+    A CHANGELOG with no ### heading anywhere has no categories to check."""
+    uses_headings = any(line.startswith(CATEGORY) for line in lines)
+    problems: list[str] = []
+    seen: dict[str, int] = {}
+    for n in range(start + 1, end):
+        line = lines[n - 1]
+        if line.startswith(CATEGORY):
+            name = line[len(CATEGORY) :].strip()
+            if name in seen:
+                problems.append(
+                    f"duplicate heading under Unreleased, line {n}: {line.rstrip()} (first at line {seen[name]})"
+                )
+            else:
+                seen[name] = n
+        elif line.startswith(BULLET) and not seen and uses_headings:
+            problems.append(f"bullet with no ### heading under Unreleased, line {n}: {line.rstrip()}")
+    return problems
+
+
+def released_removals(base: str, path: Path, removed: list[int]) -> tuple[bool, list[int]]:
+    """Whether the base has an Unreleased heading, and the removed base lines outside it.
+    Right after a release the base has no Unreleased heading: every base line is released,
+    and the heading itself is one of the added lines"""
+    old = base_lines(base, path)
+    has_unreleased = any(line.rstrip() == UNRELEASED for line in old)
+    old_start, old_end = unreleased_range(old) if has_unreleased else (0, 0)
+    return has_unreleased, [n for n in removed if not old_start < n < old_end]
+
+
 def cmd_check(path: Path, base: str, allow_released_edits: bool) -> int:
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
     start, end = unreleased_range(lines)
     added, removed = diff_changes(base, path)
-    old = base_lines(base, path)
-    # Right after a release the base has no Unreleased heading: every base line is released,
-    # and the heading itself is one of the added lines
-    has_unreleased = any(line.rstrip() == UNRELEASED for line in old)
+    has_unreleased, edited = released_removals(base, path, removed)
     first = start + 1 if has_unreleased else start
     outside = [n for n in added if not first <= n < end]
-    old_start, old_end = unreleased_range(old) if has_unreleased else (0, 0)
-    edited = [] if allow_released_edits else [n for n in removed if not old_start < n < old_end]
+    if allow_released_edits:
+        edited = []
     for n in outside:
         print(f"added outside Unreleased, line {n}: {lines[n - 1].rstrip()}")
     for n in edited:
         print(f"removed from a released section, {base} line {n}")
-    if outside or edited:
+    shape = heading_problems(lines, start, end)
+    for problem in shape:
+        print(problem)
+    if outside or edited or shape:
         return 1
     print(f"ok: {len(added)} added line(s), all under Unreleased (lines {start}-{end - 1})")
     return 0
@@ -95,11 +132,113 @@ def cmd_check(path: Path, base: str, allow_released_edits: bool) -> int:
 def cmd_move(path: Path, base: str) -> int:
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
     start, end = unreleased_range(lines)
-    added, _ = diff_changes(base, path)
+    added, removed = diff_changes(base, path)
     outside = [n for n in added if not start < n < end]
     if not outside:
         print("nothing to move: every added line is under Unreleased")
         return 1
+    _, edited = released_removals(base, path, removed)
+    if edited:
+        fail(f"lines removed from a released section since {base} (base lines {edited}); fix them by hand")
+    entries, involved, stray = misplaced_entries(lines, outside)
+    if not involved:
+        return move_block(path, lines, start, outside)
+    if start in outside:
+        fail(f"the '{UNRELEASED}' heading itself is new since {base}; move the entries by hand")
+    if stray:
+        fail(f"added lines outside Unreleased that are not whole entries ({stray}); move them by hand")
+    headless = [n for n, heading, _ in entries if heading is None]
+    if headless:
+        fail(f"added entries outside Unreleased with no ### heading above them ({headless}); move them by hand")
+    categories: dict[str, list[str]] = {}
+    for _, heading, body in entries:
+        assert heading is not None
+        categories.setdefault(heading, []).extend(body)
+    removed = set(outside)
+    rest = [line for n, line in enumerate(lines, 1) if n not in removed]
+    for name, body in categories.items():
+        insert_entries(rest, name, [line if line.endswith("\n") else line + "\n" for line in body])
+    path.write_text("".join(rest), encoding="utf-8")
+    counts = ", ".join(f"{name} ({sum(1 for _, h, _ in entries if h == name)})" for name in categories)
+    print(f"moved {len(entries)} entr{'y' if len(entries) == 1 else 'ies'} under Unreleased: {counts}")
+    return 0
+
+
+def misplaced_entries(
+    lines: list[str], outside: list[int]
+) -> tuple[list[tuple[int, str | None, list[str]]], bool, list[int]]:
+    """The entries made of added lines outside Unreleased, as (line, the ### heading they sat
+    under or None, their lines), whether any added line sits under a ### heading, and the added lines
+    that belong to no added entry (text, a continuation of a released entry, a ## heading)"""
+    added = set(outside)
+    entries: list[tuple[int, str | None, list[str]]] = []
+    stray: list[int] = []
+    involved = False
+    heading: str | None = None
+    current: list[str] | None = None
+    blanks: list[str] = []
+    for n, line in enumerate(lines, 1):
+        new = n in added
+        if line.startswith(CATEGORY):
+            heading, current, blanks = line[len(CATEGORY) :].strip(), None, []
+        elif line.startswith("#"):
+            heading, current, blanks = None, None, []
+            if new:
+                stray.append(n)
+        elif line.startswith(BULLET):
+            current, blanks = ([line], []) if new else (None, [])
+            if current is not None:
+                entries.append((n, heading, current))
+        elif not line.strip():
+            if new and current is not None:
+                blanks.append(line)
+        elif line[0].isspace() and current is not None:
+            if new:
+                current.extend(blanks)
+                current.append(line)
+                blanks = []
+            else:
+                stray.append(n)  # a released line continues an added entry
+                current = None
+        else:
+            if new:
+                stray.append(n)
+            current, blanks = None, []
+        involved = involved or (new and heading is not None)
+    return entries, involved, stray
+
+
+def insert_entries(lines: list[str], name: str, body: list[str]) -> None:
+    """Append body under '### name' in Unreleased, creating the heading in Keep a Changelog order"""
+    start, end = unreleased_range(lines)
+    top, bottom = start - 1, end - 1  # 0-based: the Unreleased heading, the next ## heading (or EOF)
+    found = [(i, lines[i][len(CATEGORY) :].strip()) for i in range(top + 1, bottom) if lines[i].startswith(CATEGORY)]
+
+    def last_text(lo: int, hi: int) -> int:
+        return next(i for i in range(hi - 1, lo - 1, -1) if lines[i].strip())
+
+    def place(at: int, block: list[str]) -> None:
+        if at < len(lines) and lines[at].strip():
+            block = block + ["\n"]
+        lines[at:at] = block
+
+    existing = [k for k, (_, heading) in enumerate(found) if heading == name]
+    if existing:
+        k = existing[0]
+        stop = found[k + 1][0] if k + 1 < len(found) else bottom
+        last = last_text(found[k][0], stop)
+        place(last + 1, (["\n"] if last == found[k][0] else []) + body)
+        return
+    rank = ORDER.index(name) if name in ORDER else len(ORDER)
+    later = [i for i, heading in found if (ORDER.index(heading) if heading in ORDER else len(ORDER)) > rank]
+    if later:
+        place(later[0], [f"{CATEGORY}{name}\n", "\n", *body])
+    else:
+        place(last_text(top, bottom) + 1, ["\n", f"{CATEGORY}{name}\n", "\n", *body])
+
+
+def move_block(path: Path, lines: list[str], start: int, outside: list[int]) -> int:
+    """No ### heading involved: move the added lines as one block to the top of Unreleased"""
     if outside != list(range(outside[0], outside[-1] + 1)):
         fail(f"added lines outside Unreleased are not one block ({outside}); move them by hand")
     block = lines[outside[0] - 1 : outside[-1]]
@@ -116,6 +255,10 @@ def cmd_move(path: Path, base: str) -> int:
     path.write_text("".join(rest[:insert_at] + moved + rest[insert_at:]), encoding="utf-8")
     print(f"moved {len(block)} line(s) under Unreleased")
     return 0
+
+
+def is_heading(line: str) -> bool:
+    return line.startswith("#")
 
 
 def cmd_union(path: Path) -> int:
@@ -147,7 +290,16 @@ def cmd_union(path: Path) -> int:
             j += 1
         if j == len(lines):
             fail(f"unterminated conflict block starting at line {i + 1}")
-        out.extend(ours + theirs)
+        out.extend(ours)
+        if (
+            ours
+            and theirs
+            and ours[-1].strip()
+            and theirs[0].strip()
+            and (is_heading(ours[-1]) or is_heading(theirs[0]))
+        ):
+            out.append("\n")  # "## [0.5.2]" then "### Added" would read as one section
+        out.extend(theirs)
         blocks += 1
         i = j + 1
     if not blocks:
