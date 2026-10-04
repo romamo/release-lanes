@@ -71,7 +71,6 @@ SKIP_CATEGORIES = ("Announcements",)
 CLOSING_VERDICTS = ("implement", "feature", "duplicate", "won't fix", "won’t fix", "wont fix")
 OWN_VERDICT = "opportunity"  # intake's triage comment on an opportunity it opens
 REASON_WINDOW = dt.timedelta(hours=1)  # "close with comment" posts the comment just before the close
-COMMENTS = 50  # comments(last: 50); an issue with more is paged back only while no triage comment shows
 ACTION = {"NEW_FEEDBACK", "ACCEPTED", "NO_REASON", "OVERLAP"}
 ORDER = (
     "OVERLAP",
