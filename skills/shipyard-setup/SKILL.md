@@ -168,6 +168,16 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ inputs.tag }}
+  operate: # with from or health: the first health check, right after the deploy
+    needs: deploy
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh workflow run operate.yml -f dry-run=false
 ```
 
 Turn an existing deploy workflow into this shape rather than writing a second one, and
@@ -175,7 +185,12 @@ remove its own trigger on tags or pushes, so one release deploys once. shipyard 
 the tag, so the deployment GitHub records names the tag as its ref. Keep the `ref` job: GitHub
 records the run's ref, not the checked-out tag, so a run started by hand without `--ref <tag>`
 would record a branch, and the job fails it first with the command to run instead (`doctor`
-warns when a deploy workflow lacks it).
+warns when a deploy workflow lacks it). The `operate` job matters once an environment has
+`health` or `from` (and `init --operate` has written `operate.yml`): it starts operate as
+soon as the deploy succeeds, so a bad deploy gets its first health check right away instead
+of at the next 10-minute run. Keep it a separate job that needs the deploy job, so a failure
+to start operate doesn't mark the deployment failed; drop it for an environment without
+either.
 
 If the environment already exists on GitHub with deployment protection, it must also allow
 the release tags, since `land` starts the workflow on the tag (enabling GitHub Pages creates

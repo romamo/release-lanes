@@ -58,6 +58,12 @@ bot.
   "approve" comment. Its `scripts/roadmap_state.py` reports MILESTONE, OVERDUE, WIP_OVER,
   UNPLANNED, PROPOSAL_OPEN, APPROVED, UNREADABLE, and NEXT. `doctor` validates
   `[roadmap]` and prints it when present (#70)
+- A deploy gets its first health check right after it succeeds, not at the next scheduled
+  `shipyard operate` run up to 10 minutes later: the deploy workflow in the README and the
+  shipyard-setup skill ends with an `operate` job that runs `gh workflow run operate.yml -f
+  dry-run=false` with `actions: write`, and the 10-minute schedule stays the backstop.
+  `doctor` notes when an environment's deploy workflow starts the operate caller, and warns
+  when it doesn't for an environment with `from` or `health` (#84)
 
 ### Changed
 
