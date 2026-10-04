@@ -31,6 +31,12 @@ bot.
   when; a hold alone doesn't make the watch exit 1. Incidents and holds lead the report,
   and the watch never deploys or rolls back itself (#33)
 
+### Fixed
+
+- The triage skills keep an implementer's or reviewer's worktree until its PR merges, not
+  just until it's pushed: a revision goes back to the same agent through SendMessage, and
+  an agent whose worktree was removed can't be resumed
+
 ## [0.9.0] - 2026-10-04
 
 ### Added
