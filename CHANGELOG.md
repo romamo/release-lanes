@@ -22,6 +22,10 @@ bot.
   re-decision changes NEEDS_PR and clears REVISIT. It compares comment and tag times as
   instants, so a tag date with a UTC offset no longer misorders against a comment's `Z`
   time
+- The triage skills record a pass's decisions in one docs PR opened before dispatch, not
+  in each implementing PR: decision ids are sequential, so two PRs that each added an
+  entry both took the same `D-n`. github-pr-triage renumbers a colliding entry when it
+  lands a batch
 
 ## [0.5.0] - 2026-10-03
 

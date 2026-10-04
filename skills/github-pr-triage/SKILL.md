@@ -69,7 +69,7 @@ A reviewer's report is a claim. For each fix commit, read the diff yourself (`gi
 - Does it change behavior beyond that? Name any change in the PR body (for example, a retry window going from 1 s to 2 s).
 - Is it a cleanup rather than a fix? Offer it as optional.
 
-A PR that departs from a settled decision (`D-n`) without a superseding entry the user approved is held, not merged: the departure is the user's call (hard rule 3). When the user answers a held PR's question in a way that sets a rule for later work, record it with `decisions.py add` (see github-issue-triage's [design-gate.md](../github-issue-triage/references/design-gate.md#recording-a-decision)) in that PR, as a review fix commit.
+A PR that departs from a settled decision (`D-n`) without a superseding entry the user approved is held, not merged: the departure is the user's call (hard rule 3). When the user answers a held PR's question in a way that sets a rule for later work, record it with `decisions.py add` in a docs PR, or in an open one that already edits the log (see github-issue-triage's [design-gate.md](../github-issue-triage/references/design-gate.md#recording-a-decision)). When two PRs in a landing batch both add an entry, the second's ids collide: renumber it after the first merges and rerun `decisions.py check`.
 
 Verdicts: **MERGE**, **MERGE AFTER SMALL FIX**, or **REFUSE** (with the reason, and what would change the verdict). Security findings, such as secrets reaching envelopes, logs, or another caller's output, rank first in the report.
 
