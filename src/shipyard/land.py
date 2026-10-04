@@ -5,6 +5,7 @@ import datetime as dt
 import time
 from dataclasses import dataclass
 
+from shipyard.environments import deployed_from
 from shipyard.errors import ReleaseError
 from shipyard.github import GitHub
 from shipyard.gitrepo import Git
@@ -139,6 +140,9 @@ def land(
     for workflow in rule.dispatch:
         github.dispatch(workflow, policy.branch, version.tag)
         published.append(workflow)
+    for env in deployed_from(policy.environments, lane):
+        github.dispatch(env.workflow, policy.branch, version.tag, env.inputs)
+        published.append(f"{env.workflow}@{env.name}")
     return Landed(version.tag, placed, synced, tuple(published))
 
 

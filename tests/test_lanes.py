@@ -144,7 +144,7 @@ def test_stable_promotes_a_soaked_rc_and_syncs_main(repo: Repo) -> None:
     assert "[Unreleased]: https://github.com/o/demo/compare/v1.1.0...HEAD" in main
     assert repo.github.releases[-1][:2] == ("v1.1.0", "demo 1.1.0")
     assert repo.github.releases[-1][3] is False
-    assert repo.github.dispatched == [("publish.yml", "main", "v1.1.0")]
+    assert repo.github.dispatched == [("publish.yml", "main", "v1.1.0", {})]
 
     # the next rc counts from 1.1.0: Fix B alone is a patch
     assert str(plan(repo, at_day(5)).version) == "1.1.1rc1"
@@ -311,3 +311,45 @@ def test_a_refused_tag_push_reports_gits_error(repo: Repo) -> None:
     _reject_tags(repo, times=None)
     with pytest.raises(ReleaseError, match="rejected 2 times: .*tags are refused for now"):
         _land_rc(repo, waits=(0, 0))
+
+
+ENVIRONMENTS = """
+[environments.staging]
+lane = "rc"
+workflow = "deploy.yml"
+health = "https://staging.example.com/health"
+
+[environments.production]
+from = "staging"
+workflow = "deploy.yml"
+bake_minutes = 60
+
+[environments.preview]
+lane = "rc"
+workflow = "preview.yml"
+
+[environments.nightly]
+lane = "dev"
+workflow = "deploy.yml"
+"""
+
+
+def test_land_deploys_each_environment_that_takes_the_lane(repo: Repo) -> None:
+    repo.write(repo.policy_file, repo.read(repo.policy_file) + ENVIRONMENTS)
+    repo.git.run("commit", "-qam", "Deploy to environments")
+    repo.git.run("push", "-q", "origin", "main")
+    repo.merge(1, "Added", "Feature A")
+    decision = plan(repo, at_day(1))
+    assert decision.version is not None and decision.lane is Lane.RC
+    day = at_day(1).date()
+    prepared = prepare(
+        repo.git, repo.policy, decision.lane, decision.version, decision.base, day, commit=True, push=True
+    )
+    landed = land(repo.git, repo.policy, repo.github, decision.lane, decision.version, prepared.sha, decision.base, day)
+    # each environment that takes the lane, once; production is promoted from staging, and
+    # nightly takes the dev lane
+    assert repo.github.dispatched == [
+        ("deploy.yml", "main", "v1.1.0rc1", {"environment": "staging"}),
+        ("preview.yml", "main", "v1.1.0rc1", {"environment": "preview"}),
+    ]
+    assert landed.published == ("github-release", "deploy.yml@staging", "preview.yml@preview")

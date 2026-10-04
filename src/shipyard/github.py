@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -28,7 +29,9 @@ class GitHub(Protocol):
 
     def create_release(self, tag: str, title: str, notes: str, prerelease: bool) -> None: ...
 
-    def dispatch(self, workflow: str, ref: str, tag: str) -> None: ...
+    def dispatch(self, workflow: str, ref: str, tag: str, inputs: Mapping[str, str] | None = None) -> None:
+        """Start the workflow on ref with -f tag=<tag>, and -f name=value for each of inputs"""
+        ...
 
 
 class GhCli:
@@ -79,5 +82,6 @@ class GhCli:
             args.append("--prerelease")
         self._gh(*args)
 
-    def dispatch(self, workflow: str, ref: str, tag: str) -> None:
-        self._gh("workflow", "run", workflow, "--ref", ref, "-f", f"tag={tag}")
+    def dispatch(self, workflow: str, ref: str, tag: str, inputs: Mapping[str, str] | None = None) -> None:
+        fields = [f"tag={tag}", *(f"{k}={v}" for k, v in (inputs or {}).items())]
+        self._gh("workflow", "run", workflow, "--ref", ref, *(a for f in fields for a in ("-f", f)))

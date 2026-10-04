@@ -1,6 +1,6 @@
 import datetime as dt
 import subprocess
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -93,7 +93,7 @@ class FakeGitHub:
     milestones: dict[str, Milestone] = field(default_factory=dict)
     merges: dict[int, str] = field(default_factory=dict)
     releases: list[tuple[str, str, str, bool]] = field(default_factory=list)
-    dispatched: list[tuple[str, str, str]] = field(default_factory=list)
+    dispatched: list[tuple[str, str, str, dict[str, str]]] = field(default_factory=list)
 
     def open_issues(self, label: str) -> list[str]:
         return list(self.blockers)
@@ -107,8 +107,8 @@ class FakeGitHub:
     def create_release(self, tag: str, title: str, notes: str, prerelease: bool) -> None:
         self.releases.append((tag, title, notes, prerelease))
 
-    def dispatch(self, workflow: str, ref: str, tag: str) -> None:
-        self.dispatched.append((workflow, ref, tag))
+    def dispatch(self, workflow: str, ref: str, tag: str, inputs: Mapping[str, str] | None = None) -> None:
+        self.dispatched.append((workflow, ref, tag, dict(inputs or {})))
 
 
 @dataclass
