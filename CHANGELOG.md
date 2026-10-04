@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-04
+
 ### Added
 
 - `shipyard operate` rolls back an environment that fails `[operate] rollback_after`
@@ -314,7 +316,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/romamo/shipyard/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/romamo/shipyard/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/romamo/shipyard/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/romamo/shipyard/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/romamo/shipyard/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/romamo/shipyard/compare/v0.6.0...v0.7.0
