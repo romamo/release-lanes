@@ -77,7 +77,16 @@ SKILLS = Path(__file__).resolve().parents[2]
 SHIPPED = SKILLS / "github-pr-triage" / "scripts" / "shipped.py"
 TRIAGE_STATE = SKILLS / "github-issue-triage" / "scripts" / "triage_state.py"
 # triage_state.py's ACTION: the issue states that make it exit 1
-TRIAGE_ACTION = {"NEW", "NEEDS_PR", "UNBLOCKED", "SPEC_REFUSED", "REVISIT", "DONE_NOT_CLOSED", "SUSPECT_CLOSE"}
+TRIAGE_ACTION = {
+    "NEW",
+    "NEEDS_PR",
+    "UNBLOCKED",
+    "UNFILLED",
+    "SPEC_REFUSED",
+    "REVISIT",
+    "DONE_NOT_CLOSED",
+    "SUSPECT_CLOSE",
+}
 POLICIES = (Path(".github/shipyard.toml"), Path(".github/release-policy.toml"))  # the config, then its alias
 VERSION_TAG = re.compile(r"^v\d+\.\d+")  # skips moving major tags such as v0
 ACTION = {

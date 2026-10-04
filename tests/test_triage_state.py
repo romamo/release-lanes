@@ -516,6 +516,28 @@ def test_a_body_dependency_reads_a_plain_number_anywhere_on_its_line(ts: ModuleT
     assert ts.upstream_refs(comment, ("o", "r")) == []
 
 
+def test_an_unfilled_dependency_is_reported_not_ignored(ts: ModuleType) -> None:
+    # specs.py split names a dependency #{B1} until it is filed: left in, it holds nothing
+    # known, so the issue must not read NEEDS_PR (ready to start) or plain BLOCKED
+    triaged = ("2026-09-01T10:00:00Z", "Triage: implement, a build issue of S-007")
+    item = issue(triaged, body="Depends on o/r#{B1}\nDepends on #3, #{B2}\n")
+    assert ts.unfilled_dependencies(item) == ["B1", "B2"]
+    states = {("o", "r", 3): "CLOSED"}
+    assert ts.classify_open(item, "Triage:", "postponed", states, None, ("o", "r")) == (
+        "UNFILLED",
+        "unfilled dependency {B1} unfilled dependency {B2} o/r#3:closed",
+    )
+    assert "UNFILLED" in ts.ACTION
+    alone = issue(triaged, body="- Depends on: #{B1}\n")
+    assert ts.classify_open(alone, "Triage:", "postponed", {}, None, ("o", "r")) == (
+        "UNFILLED",
+        "unfilled dependency {B1}",
+    )
+    # A placeholder mid-sentence is not a "Depends on" line
+    prose = issue(triaged, body="Split names each one #{Bk} until filed\n")
+    assert ts.classify_open(prose, "Triage:", "postponed", {}, None, ("o", "r"))[0] == "NEEDS_PR"
+
+
 def test_a_build_issue_is_blocked_until_its_dependency_closes(ts: ModuleType) -> None:
     item = issue(("2026-09-01T10:00:00Z", "Triage: implement, a build issue of S-007"), body="Depends on #3\n")
     for state, expected in (("OPEN", "BLOCKED"), ("CLOSED", "UNBLOCKED")):

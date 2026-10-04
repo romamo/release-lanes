@@ -18,9 +18,11 @@ bot.
   `- owner/repo#N: S-NNN-1, S-NNN-2` and holds every criterion of an approved or built
   spec to exactly one build issue there. `triage_state.py` reads a `Depends on
   owner/repo#N` (or same-repo `#N`) line in an issue's body as a hold: BLOCKED while the
-  dependency is open, UNBLOCKED once it closes; `--wip N` reports the room left under a
-  WIP limit. The triage skill files the build issues as sub-issues of the feature issue,
-  dispatches them in dependency order within `[roadmap] wip` when set, stacks a
+  dependency is open, UNBLOCKED once it closes, and UNFILLED (an action state) while a
+  `#{Bk}` placeholder from `split` is left unfilled; `--wip N` reports the room left
+  under a WIP limit. The triage skill files the build issues as sub-issues of the
+  feature issue, dispatches them in dependency order within `[roadmap] wip` once the
+  config has it (#70), stacks a
   dependent PR on its dependency's open one, and verifies the whole spec when the last
   build issue closes (#71)
 

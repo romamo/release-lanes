@@ -46,7 +46,7 @@ The issue reads UNBLOCKED. Edit its body to link the merged spec, then split the
 A build issue is sized for one PR. Group the criteria that change the same code into one issue, and give a criterion that needs another's code its own issue that depends on the earlier one. A small spec is one build issue.
 
 1. **Propose the graph.** `specs.py split NNN --repo <owner/repo> --group 1,2 --group 3 --after 2:1` prints one build issue per `--group` of criterion numbers, in the order given, with its title, its body naming its `S-NNN-k` criteria, and a `Depends on <owner/repo>#{Bk}` line for each `--after B:A` (B depends on A, and A comes first). With no `--group`, every criterion goes into one issue. It splits only an `approved` spec that passes `check`, and only the criteria no build issue has yet, so a spec that gained criteria later splits again for just those. `--json` prints the same as one object
-2. **File them in order.** `gh issue create --body-file` for each, replacing every `{Bk}` with the number the earlier issue got. `triage_state.py` reads each `Depends on` line as a hold: the issue reads BLOCKED while its dependency is open, UNBLOCKED once it closes
+2. **File them in order.** `gh issue create --body-file` for each, replacing every `{Bk}` with the number the earlier issue got. `triage_state.py` reads each `Depends on` line as a hold: the issue reads BLOCKED while its dependency is open, UNBLOCKED once it closes, and UNFILLED while a `{Bk}` is left in
 3. **Link each as a sub-issue** of the feature issue, where the repo allows it (GitHub's GraphQL `addSubIssue`; a repo without sub-issues skips this step):
 
    ```bash
@@ -64,7 +64,7 @@ A build issue is sized for one PR. Group the criteria that change the same code 
 
 - **Ready:** a build issue whose dependencies are all closed reads NEEDS_PR (or UNBLOCKED, once its last dependency closes). Dispatch it as usual
 - **Ready to stack:** a build issue whose only open dependencies have an open PR may start before that PR merges. Its implementer branches from the dependency's PR branch and opens its PR with that branch as the base, saying "Stacked on #PR" in the body; github-pr-triage lands the stack in order. Don't stack on a dependency with no PR yet
-- **WIP limit:** when `.github/shipyard.toml` has a `[roadmap]` table with `wip = N`, at most N issues are in progress (an open PR or a running implementer) at once. `triage_state.py --wip N` reports the room left and the ready issues, oldest first; build issues are filed in build order, so the oldest go first. With no `[roadmap] wip`, there is no limit
+- **WIP limit:** when the config has `[roadmap] wip = N` (#70 adds it to the config schema; until it lands the config refuses an unknown `[roadmap]` table, so don't add one), at most N issues are in progress (an open PR or a running implementer) at once. `triage_state.py --wip N` reports the room left and the ready issues, oldest first; build issues are filed in build order, so the oldest go first. With no `[roadmap] wip`, there is no limit
 - Each implementer brief carries the criteria its build issue delivers, from the issue body or `specs.py criteria NNN` (see [implementer-brief.md](implementer-brief.md)). A departure from a criterion is a "decision for you", never a quiet deviation
 - **The last build issue:** the brief for the one whose PR closes the last open build issue also carries "Verify the whole spec" below, and its PR body says `Fixes #<feature>` too, so the feature issue closes with it
 

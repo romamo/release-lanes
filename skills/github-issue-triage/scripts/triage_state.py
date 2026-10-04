@@ -22,6 +22,8 @@ For each open issue:
                    body has a "Depends on owner/repo#N" line (or "#N" anywhere on
                    that line, the same repo: a build issue split from a spec)
                    naming an issue still open
+  UNFILLED         a "Depends on" line of its body still names a placeholder such
+                   as #{B1} from specs.py split: put in the dependency's number
   SPEC_REFUSED     a pull request it waits on (such as its spec PR) closed without
                    merging, and no triage comment came after the hold: decide again
                    (revise the spec in a new PR, postpone, or won't fix). A newer
@@ -39,11 +41,11 @@ For the N most recently closed issues (default 20):
                    trailer, or closed as COMPLETED with no closer at all, unless it
                    carries --hold-label (a release hold is meant to close by hand)
 
-With --wip N (a work-in-progress limit, such as [roadmap] wip), a last line says how many
-issues are IN_PROGRESS, the room left under N, and the issues ready to start (NEEDS_PR or
-UNBLOCKED), oldest first; with --json, as one JSON object.
+With --wip N (a work-in-progress limit, such as [roadmap] wip once the config has it), a
+last line says how many issues are IN_PROGRESS, the room left under N, and the issues
+ready to start (NEEDS_PR or UNBLOCKED), oldest first; with --json, as one JSON object.
 
-Exit 0 when nothing needs action, 1 when any issue is NEW, NEEDS_PR, UNBLOCKED,
+Exit 0 when nothing needs action, 1 when any issue is NEW, NEEDS_PR, UNBLOCKED, UNFILLED,
 SPEC_REFUSED, REVISIT, DONE_NOT_CLOSED, or SUSPECT_CLOSE, 2 on bad input (an issue with more than 100
 labels) or a gh failure. It pages past 100 open issues and an issue's 50 comments or 50
 cross-references, and back through tags to the newest stable one, with one query when
@@ -237,7 +239,7 @@ def resource_limited(response: dict[str, Any]) -> bool:
     return bool(errors) and all(isinstance(e, dict) and e.get("type") == RESOURCE_LIMITS for e in errors)
 
 
-ACTION = {"NEW", "NEEDS_PR", "UNBLOCKED", "SPEC_REFUSED", "REVISIT", "DONE_NOT_CLOSED", "SUSPECT_CLOSE"}
+ACTION = {"NEW", "NEEDS_PR", "UNBLOCKED", "UNFILLED", "SPEC_REFUSED", "REVISIT", "DONE_NOT_CLOSED", "SUSPECT_CLOSE"}
 HOLD = re.compile(r"\b(?:on hold|blocked|waits? on|waiting on|pending|depends on)\b", re.IGNORECASE)
 UPSTREAM = re.compile(r"(?:https://github\.com/)?(?P<owner>[\w.-]+)/(?P<name>[\w.-]+)(?:#|/issues/|/pull/)(?P<num>\d+)")
 # A plain #N right after a hold phrase names the issue or pull request of the repo itself
@@ -253,6 +255,8 @@ DEPENDS = re.compile(r"^[ \t]*(?:[-*][ \t]+)?depends on\b:?(?P<refs>.*)$", re.IG
 DEPENDENCY = re.compile(
     r"(?:(?:https://github\.com/)?(?P<owner>[\w.-]+)/(?P<name>[\w.-]+)(?:#|/issues/|/pull/)|(?<![\w/])#)(?P<num>\d+)\b"
 )
+# A dependency specs.py split names by key until the issue is filed: #{B1}, o/r#{B1}
+PLACEHOLDER = re.compile(r"#\{(?P<key>[^{}\s]*)\}")
 STABLE = re.compile(r"^v?\d+\.\d+\.\d+$")
 KEYWORDS = r"(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)"
 
@@ -472,6 +476,13 @@ def dependency_refs(issue: dict[str, Any], repo: tuple[str, str]) -> list[tuple[
     return sorted(found)
 
 
+def unfilled_dependencies(issue: dict[str, Any]) -> list[str]:
+    """The placeholders ({B1}) a "Depends on" line of the issue's body still names instead
+    of an issue number: specs.py split's keys, never filled in"""
+    keys = (m["key"] for line in DEPENDS.finditer(issue["body"]) for m in PLACEHOLDER.finditer(line["refs"]))
+    return list(dict.fromkeys(keys))
+
+
 def upstream_states(refs: set[tuple[str, str, int]]) -> dict[tuple[str, str, int], str]:
     if not refs:
         return {}
@@ -550,8 +561,12 @@ def classify_open(
     verdict = max((i for i, c in enumerate(comments) if c["body"].lstrip().startswith(marker)), default=-1)
     # A refused PR named before the newest triage comment was decided again: it holds nothing
     waits = sorted(r for r, i in named.items() if states.get(r) != "CLOSED_UNMERGED" or i >= verdict)
+    shown = " ".join(f"{o}/{n}#{k}:{states.get((o, n, k), '?').lower()}" for o, n, k in waits)
+    unfilled = unfilled_dependencies(issue)
+    if unfilled:
+        # Which issue it waits on is unknown, so neither BLOCKED nor ready: someone fills it in
+        return "UNFILLED", " ".join([*(f"unfilled dependency {{{k}}}" for k in unfilled), shown]).strip()
     if waits or "blocked" in labels:
-        shown = " ".join(f"{o}/{n}#{k}:{states.get((o, n, k), '?').lower()}" for o, n, k in waits)
         if any(states.get(r) == "CLOSED_UNMERGED" for r in waits):
             return "SPEC_REFUSED", shown
         still = [r for r in waits if states.get(r) != "CLOSED" and states.get(r) != "MERGED"]
@@ -643,6 +658,7 @@ def main() -> int:
         "SUSPECT_CLOSE",
         "DONE_NOT_CLOSED",
         "UNBLOCKED",
+        "UNFILLED",
         "SPEC_REFUSED",
         "REVISIT",
         "NEW",
