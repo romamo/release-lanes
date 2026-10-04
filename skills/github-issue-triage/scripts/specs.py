@@ -38,7 +38,8 @@ coverage  for every built spec (or each --spec, whatever its status), list each 
           after "proves:" (several ids may follow, comma-separated). Test files are read
           as text: Python test_*.py and *_test.py; JS/TS *.test.* and *.spec.* and files
           under __tests__; Go *_test.go; every Rust .rs file. Hidden folders and
-          node_modules, target, vendor, venv, dist, build are skipped
+          node_modules, target, vendor, venv, dist, build are skipped, and so are the
+          lines inside a Python multi-line string (a fixture, not a test)
 
 Exit 0 on success (find: at least one match), 1 when check (or criteria, for its spec)
 finds a problem, find matches nothing, or coverage finds a criterion with no test (or a
@@ -53,8 +54,10 @@ import fnmatch
 import os
 import re
 import sys
+import tokenize
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from io import StringIO
 from pathlib import Path
 
 from decisions import CANDIDATES as DECISION_LOGS
@@ -386,6 +389,24 @@ def test_files(root: Path) -> list[tuple[Path, list[re.Pattern[str]]]]:
     return found
 
 
+def string_lines(path: Path, text: str) -> set[int]:
+    """The lines of a Python file that sit inside a multi-line string, past its first"""
+    inside: set[int] = set()
+    opened: list[int] = []
+    try:
+        for token in tokenize.generate_tokens(StringIO(text).readline):
+            kind = tokenize.tok_name[token.type]
+            if token.type == tokenize.STRING:
+                inside.update(range(token.start[0] + 1, token.end[0] + 1))
+            elif kind.endswith("STRING_START"):  # an f-string (3.12+) or t-string (3.14+)
+                opened.append(token.start[0])
+            elif kind.endswith("STRING_END") and opened:
+                inside.update(range(opened.pop() + 1, token.end[0] + 1))
+    except (tokenize.TokenError, SyntaxError) as exc:
+        raise SpecError(f"{path}: not valid Python, so its tests can't be read: {exc}") from exc
+    return inside
+
+
 def proofs(root: Path) -> dict[tuple[int, int], list[str]]:
     """(spec, criterion) to the places that prove it: "path:line test_name" for a named
     test, "path:line" for a comment"""
@@ -393,9 +414,12 @@ def proofs(root: Path) -> dict[tuple[int, int], list[str]]:
     for path, patterns in test_files(root):
         text = path.read_text(encoding="utf-8", errors="replace")
         where = path.relative_to(root).as_posix()
+        quoted = string_lines(path, text) if path.suffix == ".py" else set()
         for pattern in patterns:
             for match in pattern.finditer(text):
                 line = text.count("\n", 0, match.start()) + 1
+                if line in quoted:
+                    continue  # a fixture inside a multi-line string, not a test
                 groups = [g for g in match.groups() if g is not None]
                 if pattern in (HASH_PROVES, SLASH_PROVES):
                     ids = [(int(m.group(1)), int(m.group(2))) for m in PROVEN_ID.finditer(groups[0])]

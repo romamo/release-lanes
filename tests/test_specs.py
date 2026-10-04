@@ -235,6 +235,16 @@ def test_coverage_reports_a_criterion_with_no_test(tmp_path: Path) -> None:
     assert "S-007-9: no such criterion, yet named by tests/test_old.py:1 test_s007_9_renamed" in out.stdout
 
 
+def test_coverage_skips_a_python_fixture_inside_a_string(tmp_path: Path) -> None:
+    root = repo(tmp_path, **{"007-dry-run.md": built("007")})
+    fixture = ('FIXTURE = """', "# proves: S-007-2", "def test_s007_2_in_a_string():", '"""')
+    write(root, "tests/test_run.py", *fixture, "", "# proves: S-007-1", "def test_exits():", "    pass")
+    out = specs(root, "coverage")
+    assert out.returncode == 1
+    assert "    tests/test_run.py:6\n" in out.stdout
+    assert "  S-007-2: tool run --dry-run writes nothing\n    no test proves it\n" in out.stdout
+
+
 def test_coverage_ignores_specs_not_yet_built_unless_named(tmp_path: Path) -> None:
     root = repo(tmp_path, **{"007-dry-run.md": spec("007"), "008-draft.md": spec("008", status="draft")})
     out = specs(root, "coverage")
