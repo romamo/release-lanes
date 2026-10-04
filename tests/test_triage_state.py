@@ -585,3 +585,29 @@ def test_the_wip_limit_leaves_room_for_the_oldest_ready_issues(ts: ModuleType) -
     assert ts.wip_room(rows, 3) == {"wip": 3, "in_progress": 2, "room": 1, "ready": [4, 9]}
     assert ts.wip_room(rows, 2)["room"] == 0
     assert ts.wip_room(rows, 1)["room"] == 0
+
+
+COMMENTS = SCRIPT.parents[1] / "references" / "comments.md"
+
+
+def template(section: str, index: int = 0) -> str:
+    """The ``index``-th markdown template under a ``## section`` heading of comments.md,
+    with its placeholders filled in as an agent would"""
+    text = COMMENTS.read_text(encoding="utf-8").split(f"\n## {section}\n", 1)[1].split("\n## ", 1)[0]
+    body = text.split("```markdown\n")[index + 1].split("\n```", 1)[0]
+    filled = body.replace("{owner/repo}", "o/r").replace("{opportunity}", "40").replace("{spec PR}", "41")
+    return filled.replace("{open opportunity}", "40")
+
+
+def test_a_request_handed_to_intake_reads_triaged(ts: ModuleType) -> None:
+    item = issue(("2026-09-01T10:00:00Z", template("Opportunity")))
+    assert ts.upstream_refs(item, REPO) == []
+    assert classify(ts, item) == "TRIAGED"
+
+
+def test_a_request_an_accepted_opportunity_covers_holds_on_it(ts: ModuleType) -> None:
+    item = issue(("2026-09-01T10:00:00Z", template("Feature", 1)))
+    ref = ("o", "r", 40)
+    assert ts.upstream_refs(item, REPO) == [ref]
+    for state, expected in (("OPEN", "BLOCKED"), ("CLOSED", "UNBLOCKED")):
+        assert ts.classify_open(item, "Triage:", "postponed", {ref: state}, None, REPO)[0] == expected

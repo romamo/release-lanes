@@ -1,6 +1,6 @@
 ---
 name: github-issue-triage
-description: Triage a GitHub repo's open-issue backlog, or just the issues filed since the last pass, into implement, postpone, or clarify. Verify each claim against the current default branch, comment and label every verdict, group issues that share one design, and dispatch parallel implementer agents (one branch and PR per issue, each following github-issue-resolve). Then link the PRs and hand landing to github-pr-triage. Catches issues fixed but left open and issues closed by a commit that only quoted "Fixes #N". Use when the user asks to "triage issues", "triage the new issues", "review and triage https://github.com/<o>/<r>/issues", "decide implement, postpone or clarify", or to work a backlog. Not for one named issue (use github-issue-resolve) or for reviewing and merging PRs (use github-pr-triage).
+description: Triage a GitHub repo's open-issue backlog, or just the issues filed since the last pass, into implement, feature, postpone, or clarify, and hand users' requests for new capabilities to product intake. Verify each claim against the current default branch, comment and label every verdict, group issues that share one design, and dispatch parallel implementer agents (one branch and PR per issue, each following github-issue-resolve). Then link the PRs and hand landing to github-pr-triage. Catches issues fixed but left open and issues closed by a commit that only quoted "Fixes #N". Use when the user asks to "triage issues", "triage the new issues", "review and triage https://github.com/<o>/<r>/issues", "decide implement, postpone or clarify", or to work a backlog. Not for one named issue (use github-issue-resolve) or for reviewing and merging PRs (use github-pr-triage).
 ---
 
 # GitHub Issue Triage
@@ -27,6 +27,7 @@ Turn a backlog into a decision on every issue, a comment that records it, and a 
 7. **A handed-over PR's branch belongs to github-pr-triage.** Until step 6, you and your implementers change the branch. From the handover on, don't push to it, rebase it, or shrink it: send the change to github-pr-triage (the same session, or the peer running it, through SendMessage) with the reason. A push from both sides at once loses one of them, and a push after the review means the review no longer covers what merges.
 8. **A contract change is designed before it's dispatched.** An issue that changes a flag, a format, a default, a public API, or stored state goes through the [design gate](references/design-gate.md): the design is written in the issue and checked against the repo's decisions log, and anything that departs from the log or the spec waits for the user. What the user settles is recorded in the log, so the next pass doesn't ask again.
 9. **A feature is specified before it's dispatched.** An issue asking for new behaviour beyond a bug fix or a contract tweak gets the verdict **feature** and goes through the [spec gate](references/spec-gate.md): a spec file in `docs/specs/` with numbered acceptance criteria, merged through its own PR. No implementer starts before that PR merges; merging it is the approval.
+10. **A user's new request goes to product intake first.** A request for a new capability that no accepted opportunity covers gets the verdict **opportunity**, not **feature**: product intake groups it with the requests for the same outcome, and only the maintainer accepts or declines the group (D-10). Triage writes a spec only for an accepted opportunity, a request an accepted one covers, or an issue the maintainer filed ([triage-rubric.md](references/triage-rubric.md), A new capability).
 
 ## Judgment versus scripts
 
@@ -57,17 +58,19 @@ Also check:
 
 Read every flagged issue in full, comments included: `gh issue view <n> --json title,body,comments,labels,state`.
 
+When the repo runs product intake (it has an `opportunity` label), also run `uv run --no-project python <product-intake>/scripts/intake_state.py <owner/repo>` from the checkout. It lists the opportunities a new request may fall under, and its ACCEPTED rows are features waiting for the spec gate: under "intake and triage" or when the user asks, take them into this pass.
+
 ### 2. Decide
 
 Apply [references/triage-rubric.md](references/triage-rubric.md) to each issue. For each one:
 - Reproduce the claim on the current default branch, and grep for work already there
-- Pick a verdict: **implement**, **feature**, **postpone**, **clarify**, **duplicate**, or **won't fix**. A **feature** is new behaviour beyond a bug fix or a contract tweak; it waits for a merged spec (step 2b)
+- Pick a verdict: **implement**, **feature**, **opportunity**, **postpone**, **clarify**, **duplicate**, or **won't fix**. A **feature** is new behaviour beyond a bug fix or a contract tweak that the maintainer already wants; it waits for a merged spec (step 2b). A user's request for a new capability that no accepted opportunity covers is an **opportunity**: comment the hand-off and leave the grouping to product intake, which never builds anything itself
 - Group issues that are one mechanism, such as two env-alias issues, or a producer, a transport, and a consumer of one pipeline. Comment the shared plan on each
 - Split an issue when one part is a small fix and the rest is a feature. Ship the part and postpone the rest, saying so on the issue
 
 ### 2b. Design gate and spec gate
 
-For each **feature**, run the [spec gate](references/spec-gate.md): `specs.py find` for a spec that already covers it, then `specs.py new`, the criteria from the issue and the code, `specs.py check`, and a spec PR whose body says "Spec for #N". The verdict comment links the spec PR on a hold line, so `triage_state.py` reads the issue BLOCKED until the spec merges and UNBLOCKED after. No implementer starts on it in this pass.
+For each **feature**, run the [spec gate](references/spec-gate.md) (an **opportunity** skips it: no spec until the maintainer accepts): `specs.py find` for a spec that already covers it, then `specs.py new`, the criteria from the issue and the code, `specs.py check`, and a spec PR whose body says "Spec for #N". The verdict comment links the spec PR on a hold line, so `triage_state.py` reads the issue BLOCKED until the spec merges and UNBLOCKED after. No implementer starts on it in this pass.
 
 For each **implement** that changes a contract (see [references/design-gate.md](references/design-gate.md) for the list), run `decisions.py find` on the areas it touches, write the design into the triage comment, and ask the user before dispatch when it departs from a `D-n` entry or the spec, or when two designs would look different to users. Batch these questions into one AskUserQuestion call per pass. Record every answer of the pass with `decisions.py add` in one docs PR, opened before dispatch, so parallel PRs don't each claim the next `D-n` (design-gate.md, Recording a decision).
 
@@ -106,6 +109,7 @@ Re-run `triage_state.py`. New issues arrive during a pass: 16 did in one session
 - **SUSPECT_CLOSE:** reopen it if the fix hasn't landed, and explain why. For example, a commit message quoting `--body="Fixes #12"` closed #12 before its rule existed
 - **UNBLOCKED:** the upstream decision landed. Read it, update the plan on the issue, and resume or re-dispatch the held PR. When it waited on a spec PR, follow spec-gate.md, When the spec merges: link the spec in the issue body, split the spec into build issues with `specs.py split`, file them in order, link them as sub-issues of the feature issue, and record them in the spec's Issues section. A build issue reads UNBLOCKED when its last dependency closes: comment **implement** and dispatch it. A feature issue reads UNBLOCKED when its last build issue closes: confirm the spec says `status: built` with every criterion verified (spec-gate.md, Verify the whole spec), doing that in a docs PR if the last build PR didn't, then close the feature issue
 - **UNFILLED:** a build issue's body still says `Depends on #{Bk}`, a `specs.py split` key never replaced. Edit the body to name the number of the issue filed for that key
+- **UNBLOCKED, on an accepted opportunity:** a request triage held on the opportunity it falls under (comments.md, Feature) unblocks when that opportunity closes. Close the request, citing the opportunity and the PR that built it
 - **SPEC_REFUSED:** the spec PR closed without merging. Decide again in a new triage comment: revise the spec in a new PR with a new hold line, postpone, or won't fix (spec-gate.md, step 6)
 - **REVISIT:** a stable release shipped after the issue was postponed. Decide again under the new release phase, and drop the `postponed` label if it's now **implement**
 - **NEW:** start another pass if the user asked for continuous triage; otherwise list them in the report
@@ -123,7 +127,7 @@ Clean up only the worktrees your agents created, and only once their PRs have me
 
 ## Report
 
-Lead with a table: issue, verdict, and PR or plan. Then list the decisions the user must make, each with a recommendation. Give each bug as its concrete failing input and what happened. Say what's unverified, for example a Windows-only fix tested only in CI. Mention newly filed issues you haven't triaged yet.
+Lead with a table: issue, verdict, and PR or plan. List the requests handed to product intake together, so the next intake pass can be started from the report. Then list the decisions the user must make, each with a recommendation. Give each bug as its concrete failing input and what happened. Say what's unverified, for example a Windows-only fix tested only in CI. Mention newly filed issues you haven't triaged yet.
 
 ## Improve the skill
 

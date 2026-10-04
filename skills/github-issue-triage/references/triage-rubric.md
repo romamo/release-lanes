@@ -5,13 +5,24 @@
 | Verdict | When | Comment says |
 |---|---|---|
 | **implement** | A confirmed bug; or behaviour the docs already promise but the code breaks; or a small additive feature that fits the release phase | The plan in 2 to 4 bullets; "I'll link the PR here" |
-| **feature** | New behaviour beyond a bug fix or a contract tweak (a new command, layer, or workflow) that fits the release phase. A small additive feature such as a new flag stays **implement**, through the design gate | The spec PR's link and a hold line naming it; implementers start once it merges ([spec-gate.md](spec-gate.md)) |
+| **opportunity** | A user's request for a new capability (a new command, layer, or workflow) that no accepted opportunity covers yet. Product intake groups it with the requests for the same outcome, and the maintainer accepts or declines the group (D-10); triage doesn't group or write a spec for it | That it goes to product intake, and what happens there ([comments.md](comments.md), Opportunity) |
+| **feature** | New behaviour beyond a bug fix or a contract tweak (a new command, layer, or workflow) that fits the release phase, and that the maintainer already wants: an accepted opportunity (labelled `planned`), a request an accepted opportunity covers, or an issue the maintainer filed. A small additive feature such as a new flag stays **implement**, through the design gate | The spec PR's link and a hold line naming it; implementers start once it merges ([spec-gate.md](spec-gate.md)) |
 | **postpone** | A new capability, a new wire contract, or a design that must land with sibling issues | Why now is the wrong time, the plan, and what it waits on. Add the `postponed` label |
 | **clarify** | You can't reproduce it, or it needs a product or spec decision | The exact question, with options and your recommendation |
 | **duplicate** | Same root cause as another issue | A link; close it |
 | **won't fix** | It works as intended, or it conflicts with the project's principles | Evidence from the code or docs; close it |
 
 A reporter's open questions get answers in the comment. If the code can settle one, investigate: "does a library WARNING bypass redaction via `logging.lastResort`?" was answerable with a probe, and the answer was yes.
+
+## A new capability: opportunity or feature
+
+Bugs, contract tweaks, and small additive features keep their verdicts. For a request for a new capability, read who wants it before writing a spec:
+
+1. **An accepted opportunity covers it** (an issue labelled `opportunity` and `planned` whose outcome is the request's): the verdict is **feature**. The spec is the opportunity's: run the spec gate on the opportunity issue if triage hasn't yet, add the request to the opportunity's Evidence section, and hold the request on the opportunity issue ([comments.md](comments.md), Feature, covered by an opportunity)
+2. **The issue is an accepted opportunity**, or the maintainer filed it (`gh api repos/<owner>/<repo>/issues/<n> -q .author_association` says OWNER, MEMBER, or COLLABORATOR): **feature**, through the spec gate. The maintainer's own issue is already their decision
+3. **Anything else**, an open or declined opportunity's outcome included: **opportunity**. Intake adds it to the matching opportunity or opens a new one, and records a decline's reason on it; the maintainer's accept is what makes it a feature
+
+`intake_state.py <owner/repo>` (product-intake's script) lists the opportunities and which are ACCEPTED; read the open and planned ones before deciding.
 
 ## The release phase sets the bar
 

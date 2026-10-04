@@ -8,9 +8,20 @@ A feature is designed once, in a spec file the maintainers review line by line, 
 |---|---|---|
 | A bug fix that restores documented behaviour, or an internal refactor | **implement** | None |
 | A change to a contract (a flag, a format, a default, a public API, stored state) that stays within today's behaviour | **implement** | The [design gate](design-gate.md) |
-| New behaviour beyond a bug fix or a contract tweak: a new command, a new layer, a workflow users haven't had | **feature** | This gate: a merged spec first, then **implement** |
+| A user's request for new behaviour (a new command, a new layer, a workflow users haven't had) that no accepted opportunity covers | **opportunity** | Product intake: grouped into an opportunity the maintainer accepts or declines; no spec yet |
+| New behaviour beyond a bug fix or a contract tweak that the maintainer already wants (below) | **feature** | This gate: a merged spec first, then **implement** |
 
-When in doubt between a contract tweak and a feature, ask whether a reviewer would want to approve the acceptance criteria before the code exists. If yes, it's a feature.
+When in doubt between a contract tweak and a feature, ask whether a reviewer would want to approve the acceptance criteria before the code exists. If yes, it's a feature, or an opportunity while the maintainer hasn't wanted it yet.
+
+## Where features come from
+
+A spec is written only for work the maintainer has chosen, so a review of the spec is a review of how, never of whether:
+
+- **An accepted opportunity:** an issue labelled `opportunity` and `planned`. Product intake grouped the users' requests into it and the maintainer accepted it (D-10); `intake_state.py` reads it ACCEPTED until triage's **feature** comment, then HANDED_OFF. The opportunity issue is the feature issue, and the spec's Problem starts from its Problem and Evidence
+- **A request an accepted opportunity covers:** the spec is the opportunity's. Run this gate on the opportunity issue, or extend its spec when it has one; the request holds on the opportunity (comments.md, Feature)
+- **An issue the maintainer filed** (author association owner, member, or collaborator): the filing is the decision
+
+Any other request for new behaviour is an **opportunity**: triage comments the hand-off (comments.md, Opportunity) and leaves the grouping to product intake. A request whose outcome was declined goes there too, where intake records it against the decline.
 
 ## The gate
 
