@@ -90,6 +90,7 @@ uvx --from git+https://github.com/romamo/shipyard@v0 shipyard doctor
 - A CI workflow that runs on `workflow_call` with a `ref` input and checks that ref out
 - A workflow for each `dispatch` entry that runs on `workflow_dispatch` with a `tag` input
 - No `[tool.uv.sources]` entry taken from a local path, which CI and users don't have
+- No branch named `shipyard` on origin, which would block the `shipyard/<tag>` work branches
 
 Merge it, run the Release workflow by hand with dry-run on, read the release commit in the
 run summary, then set `mode = "release"`.
