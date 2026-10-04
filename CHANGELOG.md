@@ -87,6 +87,11 @@ bot.
 - A config error for an unknown key in `[lanes]`, `[bump]` or `[autonomy]` lists the allowed
   keys as the values the file accepts (`'dev', 'hotfix', 'rc', 'stable'`), not as enum
   reprs like `<Lane.DEV: 'dev'>` (#59)
+- Proposal follow-ups: `land` leaves open a release proposal for a later version than the
+  one it released, as `operate` does for a deploy proposal; github-ship-watch always runs
+  its title search beside the label lookup, so an unlabelled deploy proposal shows while a
+  labelled one exists; and a `shipyard-proposal` label another run created meanwhile no
+  longer fails the run (#65)
 
 ## [0.9.0] - 2026-10-04
 

@@ -192,16 +192,13 @@ def test_an_open_proposal_is_due_with_its_approve_command(ws: ModuleType) -> Non
     assert held[0].detail.startswith("#9 v1.2.0: close the shipyard-hold issues, then gh workflow run")
 
 
-def test_proposals_are_found_by_their_label_and_by_title_only_before_it(ws: ModuleType) -> None:
+def test_proposals_are_found_by_their_label_and_by_title(ws: ModuleType) -> None:
     labelled = [issue(ws, 9, labels=("shipyard-proposal",), body=PROPOSAL_BODY)]
-    searched: list[bool] = []
+    old = issue(ws, 4, body=PROPOSAL_BODY.replace("production", "staging"))  # opened before the label
 
-    def search() -> list[Any]:
-        searched.append(True)
-        return [issue(ws, 4, body=PROPOSAL_BODY)]
-
-    assert ws.proposal_issues(labelled, search) == labelled and searched == []
-    assert [i.number for i in ws.proposal_issues([], search)] == [4] and searched == [True]
+    # an unlabelled proposal shows beside a labelled one; one found both ways shows once
+    assert [i.number for i in ws.proposal_issues(labelled, lambda: [labelled[0], old])] == [9, 4]
+    assert [i.number for i in ws.proposal_issues([], lambda: [old])] == [4]
 
 
 def baked_source(ws: ModuleType, minutes_ago: int, *health: object) -> Any:

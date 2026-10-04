@@ -144,11 +144,15 @@ def _time(text: str) -> dt.datetime:
 class GhCli:
     """GitHub through the gh CLI, authenticated by GH_TOKEN in Actions"""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, gh: str = "gh") -> None:
         self.root = root
+        self.gh = gh
+
+    def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run([self.gh, *args], capture_output=True, text=True, cwd=self.root)
 
     def _gh(self, *args: str) -> str:
-        proc = subprocess.run(["gh", *args], capture_output=True, text=True, cwd=self.root)
+        proc = self._run(*args)
         if proc.returncode != 0:
             raise ReleaseError(f"gh {' '.join(args[:3])} failed: {proc.stderr.strip()}")
         return proc.stdout
@@ -203,7 +207,8 @@ class GhCli:
         return min(hits, key=lambda i: i.number) if hits else None
 
     def _create_labels(self, labels: Sequence[str]) -> None:
-        """Create each label the repository lacks, as `gh issue create --label` won't"""
+        """Create each label the repository lacks, as `gh issue create --label` won't. One
+        another run created meanwhile (GitHub's 422, "already exists") is there: success"""
         if not labels:
             return
         have = {
@@ -212,7 +217,9 @@ class GhCli:
         for label in labels:
             if label not in have:
                 described = _LABEL_DESCRIPTIONS.get(label, "Opened by shipyard; holds releases while open")
-                self._gh("label", "create", label, "--description", described)
+                proc = self._run("label", "create", label, "--description", described)
+                if proc.returncode != 0 and "already exists" not in proc.stderr:
+                    raise ReleaseError(f"gh label create {label} failed: {proc.stderr.strip()}")
 
     def create_issue(self, title: str, body: str, labels: Sequence[str] = ()) -> int:
         self._create_labels(labels)

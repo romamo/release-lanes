@@ -557,9 +557,10 @@ def unhealthy_row(env: str, current: Current | None, now: dt.datetime) -> Row | 
 
 
 def proposal_issues(labelled: list[Issue], search: Callable[[], list[Issue]]) -> list[Issue]:
-    """The open proposals: by their label; when none has it, once more by the title search,
-    for proposals opened before the label (shipyard labels each on its next update)"""
-    return labelled if labelled else search()
+    """The open proposals: by their label, and always by the title search too, for one opened
+    before the label (shipyard labels each on its next update), one issue once by number"""
+    seen = {i.number for i in labelled}
+    return labelled + [i for i in search() if i.number not in seen]
 
 
 def proposal_rows(issues: list[Issue], caller: str, held: bool) -> list[Row]:

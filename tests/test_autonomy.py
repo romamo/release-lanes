@@ -424,6 +424,15 @@ def test_closing_says_when_the_lane_released_another_version(repo: Repo) -> None
     )
 
 
+def test_closing_leaves_a_proposal_for_a_later_version_open(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A")
+    set_autonomy(repo, 'release = "propose"\n')
+    rc, _ = propose(repo.git, repo.policy, repo.github, proposed(repo, at_day(1)).proposals)
+    done = close_released(repo.policy, repo.github, Lane.RC, Version.parse("1.0.1"), None)
+    assert done == f"proposal #{rc.issue} names v1.1.0rc1, later than v1.0.1: left open"
+    assert rc.issue in repo.github.issues and repo.github.closed == {}
+
+
 def test_closing_reads_no_issue_unless_release_proposes(repo: Repo) -> None:
     repo.merge(1, "Added", "Feature A")
     repo.github.holds = ["#7 Investigating"]

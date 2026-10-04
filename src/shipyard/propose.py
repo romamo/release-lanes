@@ -101,6 +101,7 @@ def _find(github: GitHub, mark: str) -> tuple[Issue, bool] | None:
     labelled = [i for i in proposals if mark in i.body]
     if labelled:
         return min(labelled, key=lambda i: i.number), True
+    # scan on every miss, not once: a repo that upgraded mid-proposal still has unlabelled ones (#65)
     found = github.find_issue(mark)
     return None if found is None else (found, False)
 
@@ -135,7 +136,8 @@ def run_url(env: Mapping[str, str]) -> str | None:
 
 def close_released(policy: Policy, github: GitHub, lane: Lane, version: Version, run: str | None) -> str:
     """Close the lane's open proposal issue once land tagged its release, saying so; only
-    under release = "propose", the one setup whose callers grant the land job `issues: write`"""
+    under release = "propose", the one setup whose callers grant the land job `issues: write`.
+    A proposal for a later version than the one released stays open, as operate leaves one"""
     if policy.autonomy.release is not Autonomy.PROPOSE:
         return f"release autonomy is {policy.autonomy.release}: no proposal to close"
     fix = f"grant `issues: write` to the land job in {CALLER}"
@@ -143,8 +145,10 @@ def close_released(policy: Policy, github: GitHub, lane: Lane, version: Version,
         found = find_proposal(github, marker(lane))
         if found is None:
             return f"no open proposal for the {lane} lane"
-        text = f"Released {version.tag} on the {lane} lane" + (f" in {run}" if run else "") + "."
         named = re.search(r"would release \*\*(\S+)\*\*", found.body)
+        if named is not None and Version.of_tag(named[1]) > version:
+            return f"proposal #{found.number} names {named[1]}, later than {version.tag}: left open"
+        text = f"Released {version.tag} on the {lane} lane" + (f" in {run}" if run else "") + "."
         if named is None or named[1] != version.tag:
             proposed = named[1] if named else "another version"
             text += f" This issue proposed {proposed}; the lane released {version.tag}, so it is closed too."
