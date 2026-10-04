@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from shipyard.agents import AgentsConfig
+from shipyard.autonomy import Hold
 from shipyard.errors import ReleaseError
 from shipyard.gate import (
     RECORD,
@@ -155,7 +156,9 @@ def test_the_watch_script_is_found() -> None:
 
 def test_a_launch_is_recorded_and_not_repeated(checkout: Git) -> None:
     claude = FakeClaude([bg("old", "idle", "done")])
-    decision, launched = gate(checkout, "romamo/demo", lambda: cfg("/triage {repo}"), claude, lambda: [ISSUES], NOW)
+    decision, launched = gate(
+        checkout, "romamo/demo", lambda: cfg("/triage {repo}"), claude, lambda: [ISSUES], NOW, Hold
+    )
     assert (decision.action, launched, claude.stopped) == (Action.LAUNCH, "s1", ["old"])
     name, text = claude.launched[0]
     assert name == "shipyard romamo/demo 2026-10-04 12:00" and text.startswith("/triage romamo/demo")
@@ -163,7 +166,9 @@ def test_a_launch_is_recorded_and_not_repeated(checkout: Git) -> None:
 
     later = NOW + dt.timedelta(minutes=15)
     claude.listed = [bg("s1", "idle", "done")]
-    decision, launched = gate(checkout, "romamo/demo", lambda: cfg("/triage {repo}"), claude, lambda: [ISSUES], later)
+    decision, launched = gate(
+        checkout, "romamo/demo", lambda: cfg("/triage {repo}"), claude, lambda: [ISSUES], later, Hold
+    )
     assert (decision.action, launched, len(claude.launched)) == (Action.UNCHANGED, None, 1)
 
 
@@ -172,20 +177,22 @@ def test_a_busy_session_skips_the_state_read(checkout: Git) -> None:
         raise AssertionError("the state read should not run")
 
     claude = FakeClaude([bg("a", "busy", "working")])
-    decision, _ = gate(checkout, "romamo/demo", lambda: cfg("/triage {repo}"), claude, unread, NOW)
+    decision, _ = gate(checkout, "romamo/demo", lambda: cfg("/triage {repo}"), claude, unread, NOW, Hold)
     assert decision.action is Action.RUNNING
 
 
 def test_a_dry_run_launches_nothing(checkout: Git) -> None:
     claude = FakeClaude([bg("old", "idle", "done")])
-    decision, launched = gate(checkout, "romamo/demo", lambda: cfg("/t"), claude, lambda: [ISSUES], NOW, dry_run=True)
+    decision, launched = gate(
+        checkout, "romamo/demo", lambda: cfg("/t"), claude, lambda: [ISSUES], NOW, Hold, dry_run=True
+    )
     assert (decision.action, launched, claude.launched, claude.stopped) == (Action.LAUNCH, None, [], [])
     assert not (state_dir(checkout) / RECORD).exists()
 
 
 def test_a_checkout_of_another_repo_is_refused(checkout: Git) -> None:
     with pytest.raises(ReleaseError, match="not romamo/other"):
-        gate(checkout, "romamo/other", lambda: cfg("/t"), FakeClaude(), lambda: [], NOW)
+        gate(checkout, "romamo/other", lambda: cfg("/t"), FakeClaude(), lambda: [], NOW, Hold)
 
 
 def test_a_malformed_record_fails(checkout: Git) -> None:
@@ -193,14 +200,16 @@ def test_a_malformed_record_fails(checkout: Git) -> None:
     record.parent.mkdir(parents=True)
     record.write_text("{}", encoding="utf-8")
     with pytest.raises(ReleaseError, match="malformed"):
-        gate(checkout, "romamo/demo", lambda: cfg("/t"), FakeClaude(), lambda: [ISSUES], NOW)
+        gate(checkout, "romamo/demo", lambda: cfg("/t"), FakeClaude(), lambda: [ISSUES], NOW, Hold)
 
 
 def test_prs_in_the_config_make_open_prs_work(checkout: Git) -> None:
     rows = [Finding("PRS_OPEN", "romamo/demo", "#3")]
-    decision, _ = gate(checkout, "romamo/demo", lambda: cfg(), FakeClaude(), lambda: rows, NOW, dry_run=True)
+    decision, _ = gate(checkout, "romamo/demo", lambda: cfg(), FakeClaude(), lambda: rows, NOW, Hold, dry_run=True)
     assert decision.action is Action.QUIET
-    decision, _ = gate(checkout, "romamo/demo", lambda: cfg(prs=True), FakeClaude(), lambda: rows, NOW, dry_run=True)
+    decision, _ = gate(
+        checkout, "romamo/demo", lambda: cfg(prs=True), FakeClaude(), lambda: rows, NOW, Hold, dry_run=True
+    )
     assert decision.action is Action.LAUNCH
 
 
@@ -295,5 +304,26 @@ def test_a_busy_session_reads_no_config(checkout: Git) -> None:
         raise AssertionError("the config should not be read")
 
     claude = FakeClaude([bg("a", "idle", "blocked")])
-    decision, _ = gate(checkout, "romamo/demo", unread, claude, lambda: [], NOW, refresh_checkout=True)
+    decision, _ = gate(checkout, "romamo/demo", unread, claude, lambda: [], NOW, Hold, refresh_checkout=True)
     assert decision.action is Action.WAITING
+
+
+def on_hold() -> Hold:
+    return Hold(("#50 Payments are down",))
+
+
+def test_a_hold_starts_nothing(checkout: Git) -> None:
+    def unread() -> list[Finding]:
+        raise AssertionError("a hold should stop before the state read")
+
+    claude = FakeClaude([bg("old", "idle", "done")])
+    decision, launched = gate(checkout, "romamo/demo", lambda: cfg(), claude, unread, NOW, on_hold)
+    assert (decision.action, launched, claude.launched, claude.stopped) == (Action.HELD, None, [], [])
+    assert decision.reason == "held by shipyard-hold #50: no session starts"
+
+
+def test_a_hold_names_the_sessions_still_open(checkout: Git) -> None:
+    claude = FakeClaude([bg("a", "busy", "working"), bg("b", "idle", "blocked"), bg("c", "idle", "done")])
+    decision, _ = gate(checkout, "romamo/demo", lambda: cfg(), claude, lambda: [ISSUES], NOW, on_hold)
+    assert decision.action is Action.HELD
+    assert decision.reason.endswith("still open: claude stop a, claude stop b")

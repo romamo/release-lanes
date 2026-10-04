@@ -26,6 +26,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from shipyard.agents import AgentsConfig
+from shipyard.autonomy import Hold
 from shipyard.doctor import CALLER, OPERATE_CALLER, doctor
 from shipyard.errors import ReleaseError
 from shipyard.gate import ClaudeCli, check_checkout, gate, refresh, watch
@@ -292,6 +293,7 @@ def _gate(root: Path, args: argparse.Namespace) -> int:
         ClaudeCli(args.claude_arg),
         lambda: watch(args.slug, root),
         dt.datetime.now(dt.UTC),
+        lambda: Hold.read(GhCli(root)),
         args.refresh,
         args.dry_run,
     )

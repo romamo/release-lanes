@@ -41,18 +41,20 @@ The gate runs in a dedicated checkout: a detached worktree inside the trusted re
 the user's working copy, where the session would branch and commit. Each run:
 
 1. Checks that the checkout's `origin` is the repo
-2. Lists this repo's gate sessions with `claude agents --json`. A session whose state is
-   `blocked` waits on you: **WAITING**, stop. One that is `working` or busy: **RUNNING**,
-   stop. Both stop before anything else is read or moved
-3. With `--refresh`, moves the detached, clean checkout to the head of origin's default
+2. Lists this repo's gate sessions with `claude agents --json`, then the open issues
+   labelled `shipyard-hold`. Any: **HELD**, stop (D-10). A session already running
+   finishes; the reason names it with `claude stop <id>`
+3. A session whose state is `blocked` waits on you: **WAITING**, stop. One that is
+   `working` or busy: **RUNNING**, stop. Both stop before anything else is read or moved
+4. With `--refresh`, moves the detached, clean checkout to the head of origin's default
    branch, so the session reads the current config, `CLAUDE.md`, and skills
-4. Reads `[agents]`, then the state with github-ship-watch's `watch_state.py` (bundled in
+5. Reads `[agents]`, then the state with github-ship-watch's `watch_state.py` (bundled in
    the wheel). The rows that need an agent are its action states, plus open PRs when
    `prs = true`. None: **QUIET**, stop. No model call has happened
-5. Compares the rows with the last launch's fingerprint. The same rows within
+6. Compares the rows with the last launch's fingerprint. The same rows within
    `retry_hours`: **UNCHANGED**, stop. A session that left an item alone on purpose
    doesn't wake a new one every tick
-6. **LAUNCH**: stops this repo's finished sessions (`claude stop` keeps their
+7. **LAUNCH**: stops this repo's finished sessions (`claude stop` keeps their
    conversation), starts `claude --bg -n "shipyard <repo> <time>" "<prompt>"` in the
    checkout with the rows appended to the prompt, and records the launch
 
@@ -97,8 +99,6 @@ Everything else comes from GitHub and from `claude agents`.
    leave the rest for an interactive session. An unattended session reads their text with
    the whole workspace in reach
 3. **Mode 2:** the `needs-decision` protocol in the skills, then `--mode headless`
-4. **The stop switch:** whether an open `shipyard-hold` issue (D-8) should also stop
-   launches, or only the merges a session would make
-5. **Your own sessions:** the gate counts only the sessions it started. If you are
+4. **Your own sessions:** the gate counts only the sessions it started. If you are
    triaging the same repo by hand, the launched session finds you through `ListAgents`, as
    the skills already require

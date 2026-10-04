@@ -35,6 +35,8 @@ bot.
   --approve <environment>` deploys once, observe reports. `land` now starts environment
   workflows on the tag, so each deployment's ref names it. `doctor` checks the operate
   caller and its permissions once an environment uses `from` or `health` (#30)
+- `shipyard gate` starts no session while an issue labelled `shipyard-hold` is open, and
+  reports HELD with any session still open (D-10)
 
 ## [0.8.0] - 2026-10-04
 
