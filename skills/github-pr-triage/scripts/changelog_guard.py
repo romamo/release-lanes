@@ -97,18 +97,25 @@ def heading_problems(lines: list[str], start: int, end: int) -> list[str]:
     return problems
 
 
+def released_removals(base: str, path: Path, removed: list[int]) -> tuple[bool, list[int]]:
+    """Whether the base has an Unreleased heading, and the removed base lines outside it.
+    Right after a release the base has no Unreleased heading: every base line is released,
+    and the heading itself is one of the added lines"""
+    old = base_lines(base, path)
+    has_unreleased = any(line.rstrip() == UNRELEASED for line in old)
+    old_start, old_end = unreleased_range(old) if has_unreleased else (0, 0)
+    return has_unreleased, [n for n in removed if not old_start < n < old_end]
+
+
 def cmd_check(path: Path, base: str, allow_released_edits: bool) -> int:
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
     start, end = unreleased_range(lines)
     added, removed = diff_changes(base, path)
-    old = base_lines(base, path)
-    # Right after a release the base has no Unreleased heading: every base line is released,
-    # and the heading itself is one of the added lines
-    has_unreleased = any(line.rstrip() == UNRELEASED for line in old)
+    has_unreleased, edited = released_removals(base, path, removed)
     first = start + 1 if has_unreleased else start
     outside = [n for n in added if not first <= n < end]
-    old_start, old_end = unreleased_range(old) if has_unreleased else (0, 0)
-    edited = [] if allow_released_edits else [n for n in removed if not old_start < n < old_end]
+    if allow_released_edits:
+        edited = []
     for n in outside:
         print(f"added outside Unreleased, line {n}: {lines[n - 1].rstrip()}")
     for n in edited:
@@ -125,11 +132,14 @@ def cmd_check(path: Path, base: str, allow_released_edits: bool) -> int:
 def cmd_move(path: Path, base: str) -> int:
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
     start, end = unreleased_range(lines)
-    added, _ = diff_changes(base, path)
+    added, removed = diff_changes(base, path)
     outside = [n for n in added if not start < n < end]
     if not outside:
         print("nothing to move: every added line is under Unreleased")
         return 1
+    _, edited = released_removals(base, path, removed)
+    if edited:
+        fail(f"lines removed from a released section since {base} (base lines {edited}); fix them by hand")
     entries, involved, stray = misplaced_entries(lines, outside)
     if not involved:
         return move_block(path, lines, start, outside)

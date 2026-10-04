@@ -139,6 +139,20 @@ def test_move_refuses_a_line_that_continues_a_released_entry(tmp_path: Path) -> 
     assert "not whole entries" in move.stderr
 
 
+def test_move_refuses_when_a_released_line_was_removed(tmp_path: Path) -> None:
+    # With no newline at the end of the base, git reports its last released entry as removed and
+    # re-added; moving the "added" copy would take that released entry out of its section
+    base = TOP + "## [0.5.2] - 2026-10-04\n\n### Fixed\n\n- A"
+    root = scratch(tmp_path, base)
+    edited = base + "\n- B\n"
+    (root / "CHANGELOG.md").write_text(edited)
+
+    move = guard(root, "move", "--base", "HEAD")
+    assert move.returncode == 2
+    assert "removed from a released section" in move.stderr
+    assert (root / "CHANGELOG.md").read_text() == edited
+
+
 def test_check_fails_on_a_headless_bullet_under_unreleased(tmp_path: Path) -> None:
     base = TOP + "## [0.5.2] - 2026-10-04\n\n### Fixed\n\n- A\n"
     root = scratch(tmp_path, base)
