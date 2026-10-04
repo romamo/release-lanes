@@ -12,7 +12,7 @@ from shipyard.errors import ReleaseError
 from shipyard.github import GitHub
 from shipyard.gitrepo import REMOTE, Git
 from shipyard.land import BLOCKING_BRANCH, WORK_PREFIX, blocked
-from shipyard.policy import ALIAS_PATH, CONFIG_PATH, BumpFrom, Policy, VersionFiles, config_path
+from shipyard.policy import ALIAS_PATH, CONFIG_PATH, BumpFrom, Lane, Policy, VersionFiles, config_path
 from shipyard.stamp import project_version
 
 CALLER = Path(".github") / "workflows" / "release.yml"
@@ -214,9 +214,7 @@ def _autonomy(policy: Policy, github: GitHub | None, caller: Path) -> tuple[list
     detail = ", ".join(levels) + f"; {other} deploy environment {default}"
     if hold.on:
         detail += f" ({hold.reason})"
-    checks.append(
-        Check("PASS", "autonomy", detail + "; deploy acts in shipyard operate, rollback once shipyard rolls back")
-    )
+    checks.append(Check("PASS", "autonomy", detail + "; deploy and rollback act in shipyard operate"))
     proposes = any(policy.autonomy.configured(stage) is Autonomy.PROPOSE for stage in policy.autonomy.stages())
     if (
         (proposes or hold.on)
@@ -247,14 +245,23 @@ def _operate(policy: Policy, hold: Hold, caller: Path) -> Check | None:
         return Check("WARN", "operate", f"{why}, but no job in {OPERATE_CALLER} calls shipyard's operate.yml")
     needed = ["deployments", "actions"]
     proposes = any(policy.autonomy.configured(s) is Autonomy.PROPOSE for s in policy.autonomy.stages())
-    if proposes or hold.on:
-        needed.append("issues")  # the proposal issue a deploy under propose or the hold opens
+    if proposes or hold.on or policy.incident_label:
+        # the proposal issue a deploy under propose or the hold opens, and the incident a
+        # failing environment with a health URL opens
+        needed.append("issues")
     missing = [f"{name}: write" for name in needed if not _job_grants(text, "operate.yml", name)]
     if missing:
         return Check(
             "WARN", "operate", f"the job in {OPERATE_CALLER} that calls operate.yml lacks {', '.join(missing)}"
         )
-    return Check("PASS", "operate", f"{OPERATE_CALLER} runs shipyard operate with {', '.join(needed)}: write")
+    detail = f"{OPERATE_CALLER} runs shipyard operate with {', '.join(needed)}: write"
+    if policy.incident_label:
+        held = ", ".join(lane for lane in Lane if lane in policy.blocker_lanes)
+        detail += (
+            f"; rolls back after {policy.operate.rollback_after} failed checks in a row and opens an"
+            f" incident labelled {policy.incident_label!r}, which holds {held}"
+        )
+    return Check("PASS", "operate", detail)
 
 
 _JOB = re.compile(r"^  (?P<name>[\w-]+):[ \t]*(?:#.*)?$", re.MULTILINE)

@@ -267,10 +267,12 @@ class Planner:
             for freeze in self.policy.freezes:
                 if freeze.holds(self.now):
                     return f"frozen {freeze.first}..{freeze.last}"
-        if self.policy.blocker_label and lane in self.policy.blocker_lanes:
-            blockers = self.github.open_issues(self.policy.blocker_label)
-            if blockers:
-                return f"open '{self.policy.blocker_label}' issues: {', '.join(blockers)}"
+        if lane in self.policy.blocker_lanes:
+            # an open incident (shipyard operate opens one when it rolls back) holds the same
+            # lanes the blocker label does, until a person or a hotfix's "Fixes #N" closes it
+            for label in (self.policy.blocker_label, self.policy.incident_label):
+                if label and (blockers := self.github.open_issues(label)):
+                    return f"open '{label}' issues: {', '.join(blockers)}"
         return None
 
     # -- the decision --------------------------------------------------------------------------

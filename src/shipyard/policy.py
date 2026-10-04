@@ -18,7 +18,7 @@ from shipyard.version import Part
 
 if TYPE_CHECKING:
     from shipyard.agents import AgentsConfig
-    from shipyard.environments import Environment
+    from shipyard.environments import Environment, OperateConfig
 
 CONFIG_PATH = Path(".github") / "shipyard.toml"
 ALIAS_PATH = Path(".github") / "release-policy.toml"  # the policy's first name; the same keys
@@ -115,8 +115,17 @@ class Policy:
     bot_name: str
     bot_email: str
     environments: Mapping[str, Environment]
+    operate: OperateConfig  # the [operate] section, or its defaults
     autonomy: AutonomyPolicy = AutonomyPolicy()
     agents: AgentsConfig | None = None  # the gate's [agents] section; validated here, read by the gate
+
+    @property
+    def incident_label(self) -> str | None:
+        """The label of the incident issues shipyard operate opens; None when no environment
+        has a health URL, so no incident can open"""
+        if not any(e.health for e in self.environments.values()):
+            return None
+        return self.operate.incident_label
 
     @classmethod
     def load(cls, path: Path) -> Policy:
@@ -147,6 +156,7 @@ class Policy:
             "environments",
             "autonomy",
             "agents",
+            "operate",
         )
         changelog = top.table("changelog")
         changelog.allow("path", "style")
@@ -184,6 +194,7 @@ class Policy:
         from shipyard import environments  # it reads tables as this module does, so it imports from here
 
         declared = environments.parse(top.table("environments", optional=True), lanes)
+        operate = environments.OperateConfig.parse(top.table("operate", optional=True))
         autonomy = AutonomyPolicy.parse(top.table("autonomy", optional=True).raw, f"{where} [autonomy]")
         autonomy.require_environments(declared.keys(), f"{where} [autonomy]")
         from shipyard.agents import AgentsConfig  # it reads tables as this module does, so it imports from here
@@ -213,6 +224,7 @@ class Policy:
             environments=declared,
             autonomy=autonomy,
             agents=agents,
+            operate=operate,
         )
 
     def rule(self, lane: Lane) -> LaneRule:

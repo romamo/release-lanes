@@ -1,7 +1,7 @@
 import datetime as dt
 import subprocess
-from collections.abc import Iterator, Mapping
-from dataclasses import dataclass, field
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import pytest
@@ -94,12 +94,15 @@ class FakeGitHub:
     holds: list[str] = field(default_factory=list)  # open shipyard-hold issues, '#N title'
     issues: dict[int, Issue] = field(default_factory=dict)  # issues shipyard opened, by number
     edits: int = 0  # update_issue calls
+    labels: dict[int, tuple[str, ...]] = field(default_factory=dict)  # the labels of issues shipyard opened
+    comments: dict[int, list[str]] = field(default_factory=dict)  # by issue, oldest first
     labels_read: list[str] = field(default_factory=list)
     milestones: dict[str, Milestone] = field(default_factory=dict)
     merges: dict[int, str] = field(default_factory=dict)
     releases: list[tuple[str, str, str, bool]] = field(default_factory=list)
     dispatched: list[tuple[str, str, str, dict[str, str]]] = field(default_factory=list)
     closed: dict[int, str] = field(default_factory=dict)  # issues closed, with their comment
+    closed_issues: dict[int, Issue] = field(default_factory=dict)
     now: dt.datetime = T0  # when a status written now is created
     envs: dict[str, list[Deployment]] = field(default_factory=dict)  # deployments by environment, newest first
     statuses: dict[int, list[DeploymentStatus]] = field(default_factory=dict)  # by deployment, oldest first
@@ -121,7 +124,11 @@ class FakeGitHub:
 
     def open_issues(self, label: str) -> list[str]:
         self.labels_read.append(label)
-        return list(self.holds if label == HOLD_LABEL else self.blockers)
+        if label == HOLD_LABEL:
+            return list(self.holds)
+        if label == "release-blocker":
+            return list(self.blockers)
+        return [f"#{n} {i.title}" for n, i in sorted(self.issues.items()) if label in self.labels.get(n, ())]
 
     def milestone(self, title: str) -> Milestone | None:
         return self.milestones.get(title)
@@ -132,9 +139,10 @@ class FakeGitHub:
     def create_release(self, tag: str, title: str, notes: str, prerelease: bool) -> None:
         self.releases.append((tag, title, notes, prerelease))
 
-    def dispatch(self, workflow: str, ref: str, tag: str, inputs: Mapping[str, str] | None = None) -> None:
+    def dispatch(self, workflow: str, ref: str, tag: str, inputs: Mapping[str, str] | None = None) -> str | None:
         self.dispatched.append((workflow, ref, tag, dict(inputs or {})))
         self.runs.append((workflow, ref, WorkflowRun(len(self.runs) + 1, "queued", self.now)))
+        return f"https://github.com/o/demo/actions/runs/{len(self.runs)}"
 
     def workflow_runs(self, workflow: str, ref: str) -> list[WorkflowRun]:
         return [run for w, r, run in reversed(self.runs) if (w, r) == (workflow, ref)]
@@ -143,17 +151,28 @@ class FakeGitHub:
         hits = [i for i in self.issues.values() if marker in i.body]
         return min(hits, key=lambda i: i.number) if hits else None
 
-    def create_issue(self, title: str, body: str) -> int:
-        number = 100 + len(self.issues)
+    def create_issue(self, title: str, body: str, labels: Sequence[str] = ()) -> int:
+        number = 100 + len(self.issues) + len(self.closed)
         self.issues[number] = Issue(number, title, body)
+        self.labels[number] = tuple(labels)
         return number
+
+    def comment_issue(self, number: int, body: str) -> None:
+        assert number in self.issues, f"#{number} is not open"
+        self.comments.setdefault(number, []).append(body)
+
+    def labelled_issues(self, label: str) -> list[Issue]:
+        found = [replace(i, closed=False) for i in self.issues.values()] + [
+            replace(i, closed=True) for i in self.closed_issues.values()
+        ]
+        return sorted((i for i in found if label in self.labels.get(i.number, ())), key=lambda i: -i.number)
 
     def update_issue(self, number: int, title: str, body: str) -> None:
         self.issues[number] = Issue(number, title, body)
         self.edits += 1
 
     def close_issue(self, number: int, comment: str) -> None:
-        del self.issues[number]
+        self.closed_issues[number] = self.issues.pop(number)
         self.closed[number] = comment
 
     def deployments(self, environment: str) -> list[Deployment]:

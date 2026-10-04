@@ -93,7 +93,10 @@ uvx --from git+https://github.com/romamo/shipyard@v0 shipyard doctor
 - For each environment, a workflow that runs on `workflow_dispatch` with `tag` and
   `environment` inputs, and a job that sets `environment:`
 - When an environment uses `from` or `health`, `.github/workflows/operate.yml` (from
-  `shipyard init --operate`) granting `deployments: write` and `actions: write`
+  `shipyard init --operate`) granting `deployments: write` and `actions: write`, and
+  `issues: write` once an environment has `health` (for incidents) or a stage proposes
+- An `[operate]` section with known keys only, `rollback_after` in 1..20 and a non-empty
+  `incident_label`
 - No `[tool.uv.sources]` entry taken from a local path, which CI and users don't have
 - No branch named `shipyard` on origin, which would block the `shipyard/<tag>` work branches
 
@@ -211,7 +214,7 @@ The workflow's job sets `environment: ${{ inputs.environment }}`, so GitHub reco
 deployment for each run, whose ref is the tag: those deployments, not shipyard, say what
 runs where.
 
-#### Operate: health, bake, and promotion
+#### Operate: health, bake, promotion, and rollback
 
 With `from` or `health` in use, run `shipyard init --operate`. It writes
 `.github/workflows/operate.yml`, which runs `shipyard operate` every 10 minutes, one run at
@@ -224,8 +227,10 @@ a time. Each run, for every environment:
   so a stale instance answering 200 isn't counted healthy; any other body isn't read. An
   environment without `health` is reported as such and bakes on time alone
 - **Health history**: recorded as statuses on that deployment, written only when the state
-  changes: `in_progress` while it bakes, `success` once baked, `failure` on a failed check.
-  Nothing is kept outside GitHub
+  changes: `in_progress` while it bakes, `success` once baked. A failed check writes
+  `failure` each time until `rollback_after` stand in a row, so those statuses are the
+  count of checks failed in a row and a failing stretch writes at most that many. Nothing
+  is kept outside GitHub
 - **Bake and promotion**: an environment with `from` gets the source's tag once the source
   has been healthy on it for `bake_minutes`, counted from the source deployment's success,
   every check since passing. A failed check restarts the bake from the next passing one
@@ -245,9 +250,40 @@ issue, under `propose` or `observe`, but not while a hold is open. The run summa
 each environment's tag, health, and what the run did; `shipyard operate --dry-run` shows the
 same and changes nothing.
 
+**Rollback and incidents.** An environment that fails `rollback_after` health checks in a
+row (3 by default; at the 10-minute schedule, 20 to 30 minutes) is rolled back to the
+previous tag that reached `success` there, skipping one whose last check failed:
+
+```toml
+[operate]
+rollback_after = 3                # failed health checks in a row before a rollback
+incident_label = "incident"       # the label of the incident issue, which holds releases
+```
+
+- **The rollback** follows `rollback` in `[autonomy]` under the hold: `act` (the default)
+  starts the environment's workflow on that tag; `propose`, or `act` while a
+  `shipyard-hold` issue is open, has the incident say which rollback it would start, and
+  `gh workflow run operate.yml -f approve-rollback=<environment> -f dry-run=false` starts
+  it once (not while a hold is open); `observe` only says so. A rollback is the one deploy
+  exempt from "at most once per tag": its tag ran there before by definition. It is still
+  started once: a deployment of that tag after the bad one, or a run of the workflow on it
+  since the checks began failing (still queued, say), means it was
+- **The incident** is one issue per environment and bad tag, labelled `incident_label`: the
+  environment, the tag, the failing check's status, the start of its body (capped, on one
+  line), the health URL without its query string or credentials, and the rollback's run or
+  why there was none. It opens under every autonomy level and under the hold. Later runs
+  don't open another: they comment when the environment is healthy again, and when the
+  rollback's tag fails its checks too, where shipyard stops instead of rolling back a
+  second time. A closed incident isn't opened again for the same tag
+- **An open incident holds releases**: the planner treats `incident_label` like
+  `blocker_label`, for the lanes in `[gates] blocker_lanes`. Close it by hand, or let a
+  hotfix pull request's "Fixes #N" close it, and releases flow again. A repository with no
+  `health` URL can't open one, so its plan doesn't read the label
+
 The operate job needs `deployments: write` (statuses) and `actions: write` (deploys), and
-`issues: write` to open a proposal; `init --operate` grants them, and `doctor` warns when
-one is missing, only once an environment uses `from` or `health`.
+`issues: write` to open a proposal or an incident; `init --operate` grants them, and
+`doctor` warns when one is missing, only once an environment uses `from` or `health`
+(`issues: write` once one has `health` or a stage proposes).
 
 ### Autonomy and the stop switch
 
@@ -280,9 +316,8 @@ Opening the proposal issue needs `issues: write` on the prepare job in your
 grants `issues: read`, which is enough until a stage is set to `propose` or a hold is
 opened; from then on `doctor` warns until the prepare job grants `issues: write`. `doctor`
 prints the effective autonomy per stage and warns while a hold is open. Each `deploy.<name>`
-must name an environment in `[environments]`. `deploy` takes effect in `shipyard operate`
-(see Operate above); `rollback` is read and checked now, and takes effect once shipyard
-rolls back.
+must name an environment in `[environments]`. `deploy` and `rollback` take effect in
+`shipyard operate` (see Operate above).
 
 ### Versions
 
@@ -301,7 +336,7 @@ The workflows call these; you can run them locally too.
 | Command | What it does |
 |---|---|
 | `init` | Write the policy and the calling workflow; `--operate` writes the operate one |
-| `operate` | Check environment health, promote after the bake; `--approve <env>`, `--dry-run` |
+| `operate` | Check environment health, promote after the bake, roll back; `--approve <env>`, `--approve-rollback <env>`, `--dry-run` |
 | `doctor` | Check the repository is ready; exit 1 on a failure |
 | `plan` | Decide whether a lane releases now; JSON on stdout |
 | `propose` | Open or update the issue for each release a plan proposed |

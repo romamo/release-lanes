@@ -2,8 +2,9 @@
 
 import datetime as dt
 import json
+import re
 import subprocess
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -23,6 +24,7 @@ class Issue:
     number: int
     title: str
     body: str
+    closed: bool = False
 
 
 class DeploymentState(StrEnum):
@@ -78,17 +80,26 @@ class GitHub(Protocol):
 
     def create_release(self, tag: str, title: str, notes: str, prerelease: bool) -> None: ...
 
-    def dispatch(self, workflow: str, ref: str, tag: str, inputs: Mapping[str, str] | None = None) -> None:
-        """Start the workflow on ref with -f tag=<tag>, and -f name=value for each of inputs"""
+    def dispatch(self, workflow: str, ref: str, tag: str, inputs: Mapping[str, str] | None = None) -> str | None:
+        """Start the workflow on ref with -f tag=<tag>, and -f name=value for each of inputs;
+        the run's URL when GitHub tells it"""
         ...
 
     def find_issue(self, marker: str) -> Issue | None:
         """The open issue whose body holds the marker"""
         ...
 
-    def create_issue(self, title: str, body: str) -> int: ...
+    def create_issue(self, title: str, body: str, labels: Sequence[str] = ()) -> int:
+        """Open an issue; a label the repository lacks is created first"""
+        ...
 
     def update_issue(self, number: int, title: str, body: str) -> None: ...
+
+    def comment_issue(self, number: int, body: str) -> None: ...
+
+    def labelled_issues(self, label: str) -> list[Issue]:
+        """The issues with the label, open and closed, newest first (the newest 100)"""
+        ...
 
     def close_issue(self, number: int, comment: str) -> None: ...
 
@@ -164,9 +175,11 @@ class GhCli:
             args.append("--prerelease")
         self._gh(*args)
 
-    def dispatch(self, workflow: str, ref: str, tag: str, inputs: Mapping[str, str] | None = None) -> None:
+    def dispatch(self, workflow: str, ref: str, tag: str, inputs: Mapping[str, str] | None = None) -> str | None:
         fields = [f"tag={tag}", *(f"{k}={v}" for k, v in (inputs or {}).items())]
-        self._gh("workflow", "run", workflow, "--ref", ref, *(a for f in fields for a in ("-f", f)))
+        out = self._gh("workflow", "run", workflow, "--ref", ref, *(a for f in fields for a in ("-f", f)))
+        found = re.search(r"https://\S+/actions/runs/\d+", out)  # gh prints the run's URL when GitHub returns it
+        return found[0] if found else None
 
     def find_issue(self, marker: str) -> Issue | None:
         found = json.loads(
@@ -175,8 +188,17 @@ class GhCli:
         hits = [Issue(int(i["number"]), i["title"], i["body"]) for i in found if marker in i["body"]]
         return min(hits, key=lambda i: i.number) if hits else None
 
-    def create_issue(self, title: str, body: str) -> int:
-        url = self._gh("issue", "create", "--title", title, "--body", body).strip()
+    def create_issue(self, title: str, body: str, labels: Sequence[str] = ()) -> int:
+        if labels:
+            have = {
+                str(label["name"])
+                for label in json.loads(self._gh("label", "list", "--json", "name", "--limit", "1000"))
+            }
+            for label in labels:
+                if label not in have:
+                    self._gh("label", "create", label, "--description", "Opened by shipyard; holds releases while open")
+        args = [a for label in labels for a in ("--label", label)]
+        url = self._gh("issue", "create", "--title", title, "--body", body, *args).strip()
         number = url.rsplit("/", 1)[-1]
         if not number.isdigit():
             raise ReleaseError(f"gh issue create printed {url!r}, not an issue URL")
@@ -187,6 +209,19 @@ class GhCli:
 
     def close_issue(self, number: int, comment: str) -> None:
         self._gh("issue", "close", str(number), "--comment", comment)
+
+    def comment_issue(self, number: int, body: str) -> None:
+        self._gh("issue", "comment", str(number), "--body", body)
+
+    def labelled_issues(self, label: str) -> list[Issue]:
+        found = json.loads(
+            self._gh(
+                "issue", "list", "--label", label, "--state", "all", "--json", "number,title,body,state",
+                "--limit", "100",
+            )
+        )  # fmt: skip
+        issues = [Issue(int(i["number"]), i["title"], i["body"], i["state"] != "OPEN") for i in found]
+        return sorted(issues, key=lambda i: i.number, reverse=True)
 
     def _api(self, *args: str) -> Any:
         return json.loads(self._gh("api", *args))

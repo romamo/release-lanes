@@ -12,6 +12,9 @@ from shipyard.policy import Lane, _Table
 
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _MAX_BAKE = 7 * 24 * 60  # a week
+_ROLLBACK_AFTER = 3  # the default
+_INCIDENT_LABEL = "incident"  # the default
+_MAX_ROLLBACK_AFTER = 20  # failed checks in a row; at the 10-minute schedule, over three hours
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +30,25 @@ class Environment:
     def inputs(self) -> Mapping[str, str]:
         """The dispatch inputs besides the tag"""
         return {"environment": self.name}
+
+
+@dataclass(frozen=True, slots=True)
+class OperateConfig:
+    """The [operate] section: when shipyard operate rolls an environment back, and the label
+    of the incident issue it opens, which holds releases like the blocker label"""
+
+    rollback_after: int  # failed health checks in a row
+    incident_label: str
+
+    @classmethod
+    def parse(cls, t: _Table) -> OperateConfig:
+        t.allow("rollback_after", "incident_label")
+        after = t.integer("rollback_after", default=_ROLLBACK_AFTER, low=1, high=_MAX_ROLLBACK_AFTER)
+        assert after is not None  # a default was given
+        label = t.string("incident_label", default=_INCIDENT_LABEL).strip()
+        if not label:
+            raise ReleaseError(f"{t.where}: incident_label must not be empty")
+        return cls(after, label)
 
 
 def parse(t: _Table, lanes: Mapping[Lane, object]) -> Mapping[str, Environment]:
