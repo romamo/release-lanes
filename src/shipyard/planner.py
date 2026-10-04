@@ -306,9 +306,14 @@ class Planner:
             if held is not None:
                 skipped.append(f"{current}: {candidate.version} held, {held}")
                 continue
-            if lane is not None:  # a person started the lane: autonomy is the bot's, the hold is everyone's
-                if self.hold().on:
-                    skipped.append(f"{current}: {candidate.version} {self.hold().reason}; close it to release by hand")
+            if lane is not None:
+                # a person started the lane: autonomy is the bot's, but the hold stops people
+                # too, except for a hotfix, the usual cure for the incident behind a hold
+                if self.hold().on and lane is not Lane.HOTFIX:
+                    skipped.append(
+                        f"{current}: {candidate.version} {self.hold().reason}; close it to release by hand"
+                        " (a hotfix can still be started by hand)"
+                    )
                     continue
             elif (level := self.policy.autonomy.effective(Stage.release(), self.hold())) is not Autonomy.ACT:
                 cause = self.policy.autonomy.cause(Stage.release(), self.hold())

@@ -184,7 +184,7 @@ def _sets_environment(path: Path, seen: set[Path]) -> bool:
 
 def _autonomy(policy: Policy, github: GitHub | None, caller: Path) -> list[Check]:
     """The effective autonomy per stage, and the stop switch: an open hold is a WARN, and so
-    is a caller that can't open the issue a hold or propose leads to"""
+    is a caller that can't open the issue a hold or propose leads to, when one can"""
     checks = []
     if github is None:
         hold = Hold()
@@ -197,7 +197,10 @@ def _autonomy(policy: Policy, github: GitHub | None, caller: Path) -> list[Check
             checks.append(Check("WARN", "hold", f"can't read issues for {HOLD_LABEL}: {exc}"))
         else:
             if hold.on:
-                detail = f"{hold.reason}: no release, deploy, or rollback acts by itself; close it to resume"
+                detail = (
+                    f"{hold.reason}: no release, deploy, or rollback acts by itself, and only a hotfix can be"
+                    " started by hand; close it to resume"
+                )
                 checks.append(Check("WARN", "hold", detail))
             else:
                 checks.append(Check("PASS", "hold", f"no open {HOLD_LABEL} issue"))
@@ -208,13 +211,29 @@ def _autonomy(policy: Policy, github: GitHub | None, caller: Path) -> list[Check
     if hold.on:
         detail += f" ({hold.reason})"
     checks.append(Check("PASS", "autonomy", detail + "; deploy and rollback take effect once shipyard deploys"))
-    if caller.is_file() and not re.search(r"^\s*issues:\s*write\b", caller.read_text(encoding="utf-8"), re.MULTILINE):
+    proposes = any(policy.autonomy.configured(stage) is Autonomy.PROPOSE for stage in policy.autonomy.stages())
+    if (proposes or hold.on) and caller.is_file() and _prepare_job_writes_issues(caller.read_text("utf-8")) is False:
+        why = hold.reason if hold.on else "the config sets a stage to propose"
         detail = (
-            f"{CALLER} grants no `issues: write`: under a {HOLD_LABEL} or release = 'propose' the run fails"
-            " opening its proposal issue; grant it to the prepare job"
+            f"{why}, so a run opens a proposal issue, but the prepare job in {CALLER} grants no"
+            " `issues: write`: change its `issues: read` to `issues: write`"
         )
         checks.append(Check("WARN", "permissions", detail))
     return checks
+
+
+_JOB = re.compile(r"^  (?P<name>[\w-]+):[ \t]*(?:#.*)?$", re.MULTILINE)
+
+
+def _prepare_job_writes_issues(text: str) -> bool | None:
+    """Whether the caller's job that calls prepare.yml grants `issues: write`; None when no
+    job calls it. A text check, not a YAML parse: a job runs to the next two-space key"""
+    starts = [m.start() for m in _JOB.finditer(text)] + [len(text)]
+    for start, end in zip(starts, starts[1:], strict=False):
+        job = text[start:end]
+        if re.search(r"^\s+uses:\s*\S*\.github/workflows/prepare\.yml\b", job, re.MULTILINE):
+            return re.search(r"^\s+(?:issues:\s*write|permissions:\s*write-all)\b", job, re.MULTILINE) is not None
+    return None
 
 
 def _work_branch(git: Git) -> Check:

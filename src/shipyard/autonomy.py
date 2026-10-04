@@ -34,7 +34,7 @@ class StageKind(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class Environment:
+class EnvironmentName:
     """A deploy environment's name, as a key under [autonomy.deploy]"""
 
     name: str
@@ -50,7 +50,7 @@ class Environment:
 @dataclass(frozen=True, slots=True)
 class Stage:
     kind: StageKind
-    environment: Environment | None = None
+    environment: EnvironmentName | None = None
 
     def __post_init__(self) -> None:
         if (self.kind is StageKind.DEPLOY) != (self.environment is not None):
@@ -65,7 +65,7 @@ class Stage:
         return cls(StageKind.ROLLBACK)
 
     @classmethod
-    def deploy(cls, environment: Environment) -> Stage:
+    def deploy(cls, environment: EnvironmentName) -> Stage:
         return cls(StageKind.DEPLOY, environment)
 
     def __str__(self) -> str:
@@ -102,7 +102,7 @@ class AutonomyPolicy:
 
     release: Autonomy = Autonomy.ACT
     rollback: Autonomy = Autonomy.ACT
-    deploy: Mapping[Environment, Autonomy] = field(default_factory=dict)
+    deploy: Mapping[EnvironmentName, Autonomy] = field(default_factory=dict)
 
     @classmethod
     def parse(cls, raw: Mapping[str, Any], where: str) -> AutonomyPolicy:
@@ -114,7 +114,7 @@ class AutonomyPolicy:
         return cls(
             release=_level(raw, "release", where),
             rollback=_level(raw, "rollback", where),
-            deploy={Environment(name): _level(deploy, name, f"{where} [deploy]") for name in deploy},
+            deploy={EnvironmentName(name): _level(deploy, name, f"{where} [deploy]") for name in deploy},
         )
 
     def configured(self, stage: Stage) -> Autonomy:

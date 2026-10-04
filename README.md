@@ -232,12 +232,14 @@ rollback = "act"
 - **The stop switch**: any open issue labelled `shipyard-hold` turns every `act` into
   `propose` for the repository. One label, no commit, so it works from a phone. While it is
   open no release happens by itself, the run summary names the hold, and a lane started by
-  hand is refused too: close the hold to release
+  hand is refused too: close the hold to release. The one exception is a hotfix started by
+  hand, since a hold usually means an incident and a hotfix is its cure
 
 Opening the proposal issue needs `issues: write` on the prepare job in your
-`.github/workflows/release.yml` (`shipyard init` writes it; a repository set up earlier
-grants `issues: read` and gets a doctor warning). `doctor` prints the effective autonomy per
-stage and warns while a hold is open. `deploy` and `rollback` are read and checked now, and
+`.github/workflows/release.yml`; `shipyard init` writes it. A repository set up earlier
+grants `issues: read`, which is enough until a stage is set to `propose` or a hold is
+opened; from then on `doctor` warns until the prepare job grants `issues: write`. `doctor`
+prints the effective autonomy per stage and warns while a hold is open. `deploy` and `rollback` are read and checked now, and
 take effect once shipyard deploys and rolls back.
 
 ### Versions

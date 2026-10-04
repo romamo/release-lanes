@@ -89,6 +89,7 @@ def propose(git: Git, policy: Policy, github: GitHub, proposals: tuple[Proposal,
                 github.update_issue(found.number, *wanted)
                 done.append(Proposed(proposal, found.number, Outcome.UPDATED))
         except ReleaseError as exc:
-            hint = f"if GitHub refused it, grant the prepare job `issues: write` in {CALLER}"
+            fix = f"change `issues: read` to `issues: write` on the prepare job in {CALLER}"
+            hint = f"if GitHub refused it (403): {fix}"
             raise ReleaseError(f"{exc}; {hint}") from exc
     return done

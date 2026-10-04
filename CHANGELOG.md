@@ -23,10 +23,11 @@ bot.
   "observe"` a due lane is only reported; under `"propose"`, or while a hold is open, the
   new `propose` job of `prepare.yml` opens or updates one "Ready to release vX on <lane>"
   issue per due lane instead of releasing. A lane started by hand still releases under
-  propose but not under a hold. `doctor` prints the effective autonomy per stage and warns
-  on an open hold. Proposing needs `issues: write` on the prepare job of the calling
-  workflow, which `shipyard init` now writes; deploy and rollback autonomy take effect once
-  shipyard deploys (#32)
+  propose; under a hold only a hotfix started by hand does. `doctor` prints the effective
+  autonomy per stage and warns on an open hold. Proposing needs `issues: write` on the
+  prepare job of the calling workflow, which `shipyard init` now writes; `doctor` warns
+  about it only once a stage is set to propose or a hold is open. Deploy and rollback
+  autonomy take effect once shipyard deploys (#32)
 
 ## [0.7.0] - 2026-10-04
 

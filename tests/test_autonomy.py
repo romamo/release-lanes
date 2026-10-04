@@ -9,11 +9,11 @@ from pathlib import Path
 
 import pytest
 
-from shipyard.autonomy import HOLD_LABEL, Autonomy, AutonomyPolicy, Environment, Hold, Stage
+from shipyard.autonomy import HOLD_LABEL, Autonomy, AutonomyPolicy, EnvironmentName, Hold, Stage
 from shipyard.cli import main
 from shipyard.doctor import doctor
 from shipyard.errors import ReleaseError
-from shipyard.planner import Decision, Event, Proposal
+from shipyard.planner import Decision, Event, Hotfix, Proposal
 from shipyard.policy import Lane, Policy
 from shipyard.propose import Outcome, marker, propose
 
@@ -21,7 +21,7 @@ from .conftest import POLICY, Repo, at_day
 from .test_lanes import plan
 
 HELD = Hold(("#7 Investigating the 1.1 regression",))
-PRODUCTION = Stage.deploy(Environment("production"))
+PRODUCTION = Stage.deploy(EnvironmentName("production"))
 
 
 def autonomy(text: str) -> AutonomyPolicy:
@@ -49,8 +49,8 @@ def test_autonomy_parses_each_stage() -> None:
     assert parsed.configured(Stage.release()) is Autonomy.PROPOSE
     assert parsed.configured(Stage.rollback()) is Autonomy.OBSERVE
     assert parsed.configured(PRODUCTION) is Autonomy.PROPOSE
-    assert parsed.configured(Stage.deploy(Environment("staging"))) is Autonomy.ACT
-    assert parsed.configured(Stage.deploy(Environment("qa"))) is Autonomy.ACT  # unlisted: act (D-7)
+    assert parsed.configured(Stage.deploy(EnvironmentName("staging"))) is Autonomy.ACT
+    assert parsed.configured(Stage.deploy(EnvironmentName("qa"))) is Autonomy.ACT  # unlisted: act (D-7)
     assert [str(s) for s in parsed.stages()] == ["release", "deploy.production", "deploy.staging", "rollback"]
 
 
@@ -72,7 +72,7 @@ def test_autonomy_refuses_what_it_does_not_know(text: str, error: str) -> None:
 
 def test_a_deploy_stage_names_its_environment() -> None:
     with pytest.raises(ReleaseError, match="a deploy stage names its environment"):
-        Stage(Stage.release().kind, Environment("production"))
+        Stage(Stage.release().kind, EnvironmentName("production"))
 
 
 # -- the hold --------------------------------------------------------------------------------
@@ -82,7 +82,7 @@ def test_the_hold_turns_every_act_into_propose() -> None:
     parsed = autonomy('rollback = "observe"\ndeploy.staging = "propose"\n')
     assert parsed.effective(Stage.release(), HELD) is Autonomy.PROPOSE
     assert parsed.effective(PRODUCTION, HELD) is Autonomy.PROPOSE
-    assert parsed.effective(Stage.deploy(Environment("staging")), HELD) is Autonomy.PROPOSE
+    assert parsed.effective(Stage.deploy(EnvironmentName("staging")), HELD) is Autonomy.PROPOSE
     assert parsed.effective(Stage.rollback(), HELD) is Autonomy.OBSERVE  # the hold never raises a level
     assert parsed.cause(Stage.release(), HELD) == f"held by {HOLD_LABEL} #7"
     assert parsed.cause(Stage.rollback(), HELD) == "rollback autonomy is observe"
@@ -152,9 +152,21 @@ def test_the_hold_stops_a_hand_started_lane_until_closed(repo: Repo) -> None:
     repo.github.holds = ["#7 Investigating"]
     decision = plan(repo, at_day(1), event=Event.MANUAL, lane=Lane.RC)
     assert decision.action == "skip"
-    assert decision.reason == f"rc: 1.1.0rc1 held by {HOLD_LABEL} #7; close it to release by hand"
+    assert decision.reason == (
+        f"rc: 1.1.0rc1 held by {HOLD_LABEL} #7; close it to release by hand (a hotfix can still be started by hand)"
+    )
     repo.github.holds = []
     assert plan(repo, at_day(1), event=Event.MANUAL, lane=Lane.RC).action == "release"
+
+
+def test_a_hand_started_hotfix_releases_under_the_hold(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A, not ready", "src/a.py", "A = 1\n")
+    repo.merge(2, "Fixed", "Urgent fix", "src/app.py", "VALUE = 2\n")
+    repo.github.holds = ["#7 Investigating"]
+    set_autonomy(repo, 'release = "propose"\n')
+    decision = plan(repo, at_day(1), event=Event.MANUAL, lane=Lane.HOTFIX, hotfix=Hotfix((2,)))
+    assert (decision.action, str(decision.version), decision.prs) == ("release", "1.0.1", (2,))
+    assert plan(repo, at_day(1), event=Event.MANUAL, lane=Lane.RC).action == "skip"
 
 
 def test_observe_stays_observe_under_the_hold(repo: Repo) -> None:
@@ -250,11 +262,32 @@ def test_doctor_warns_when_it_cannot_read_issues(repo: Repo) -> None:
     assert checks(repo, None)["hold"] == ("WARN", f"can't read issues for {HOLD_LABEL}: gh isn't installed")
 
 
-def test_doctor_warns_on_a_caller_that_cannot_open_the_proposal(repo: Repo) -> None:
-    caller = Path(".github/workflows/release.yml")
-    repo.write(str(caller), "jobs:\n  prepare:\n    permissions:\n      issues: read\n")
-    assert checks(repo, repo.github)["permissions"][0] == "WARN"
-    repo.write(str(caller), "jobs:\n  prepare:\n    permissions:\n      issues: write\n")
+CALLER_TEXT = """\
+jobs:
+  prepare:
+    uses: romamo/shipyard/.github/workflows/prepare.yml@v0
+    permissions:
+      contents: write
+      issues: {prepare}
+  other:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: {other}
+"""
+
+
+def test_doctor_warns_on_a_caller_that_cannot_open_the_proposal_only_when_needed(repo: Repo) -> None:
+    caller = ".github/workflows/release.yml"
+    repo.write(caller, CALLER_TEXT.format(prepare="read", other="write"))
+    assert "permissions" not in checks(repo, repo.github)  # no propose, no hold: nothing opens an issue
+    set_autonomy(repo, 'rollback = "propose"\n')
+    status, detail = checks(repo, repo.github)["permissions"]
+    assert status == "WARN" and detail.startswith("the config sets a stage to propose")
+    assert detail.endswith("change its `issues: read` to `issues: write`")  # another job's write doesn't count
+    set_autonomy(repo, "")
+    repo.github.holds = ["#7 Investigating"]
+    assert checks(repo, repo.github)["permissions"][1].startswith(f"held by {HOLD_LABEL} #7")
+    repo.write(caller, CALLER_TEXT.format(prepare="write", other="read"))
     assert "permissions" not in checks(repo, repo.github)
 
 
