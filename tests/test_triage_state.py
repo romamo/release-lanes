@@ -316,6 +316,30 @@ def test_a_merged_pr_past_50_references_clears_a_hand_close(ts: ModuleType) -> N
     assert ts.classify_closed(item, "release-blocker") is None
 
 
+def hand_closed(*labels: str, reason: str = "COMPLETED") -> dict[str, Any]:
+    """A closed issue with no closer and no merged PR mentioning it, like #81's rollback drill"""
+    return {
+        "number": 81,
+        "title": "Rollback drill",
+        "stateReason": reason,
+        "labels": {"pageInfo": {"hasNextPage": False}, "nodes": [{"name": n} for n in labels]},
+        "refs": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": []},
+        "timelineItems": {"nodes": [{"closer": None}]},
+    }
+
+
+def test_an_incident_closed_by_hand_is_not_a_suspect_close(ts: ModuleType) -> None:
+    assert ts.classify_closed(hand_closed("incident"), "release-blocker") is None
+    assert ts.classify_closed(hand_closed("bug", "incident"), "release-blocker", "incident") is None
+    verdict = ts.classify_closed(hand_closed("bug"), "release-blocker")
+    assert verdict == ("SUSPECT_CLOSE", "closed as completed by hand, and no merged PR mentions it")
+
+
+def test_the_incident_label_comes_from_the_flag(ts: ModuleType) -> None:
+    assert ts.classify_closed(hand_closed("outage"), "release-blocker", "outage") is None
+    assert ts.classify_closed(hand_closed("incident"), "release-blocker", "outage")[0] == "SUSPECT_CLOSE"
+
+
 def test_more_than_100_labels_is_bad_input(ts: ModuleType, capsys: pytest.CaptureFixture[str]) -> None:
     gh = FakeGitHub(ts, {("QUERY", None, None): first_page([open_issue(7, more_labels=True)])})
     with pytest.raises(SystemExit) as exc:

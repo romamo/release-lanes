@@ -3,7 +3,7 @@
 
 Usage: triage_state.py <owner/repo> [--marker "Triage:"] [--postponed-label postponed]
                        [--stable-tag-regex REGEX] [--hold-label release-blocker]
-                       [--closed N] [--json] [--wip N]
+                       [--incident-label incident] [--closed N] [--json] [--wip N]
 
 For each open issue:
   NEW              no comment starts with the triage marker
@@ -42,7 +42,12 @@ For the N most recently closed issues (default 20):
   SUSPECT_CLOSE    closed by a commit whose message names "#N" after a closing
                    keyword only mid-line (a quote, a test string), not as a
                    trailer, or closed as COMPLETED with no closer at all, unless it
-                   carries --hold-label (a release hold is meant to close by hand)
+                   carries --hold-label (a release hold is meant to close by hand).
+                   An issue with --incident-label closed as COMPLETED with no closer
+                   isn't one either: an incident closes by hand once the environment
+                   is healthy, and ship-watch's POSTMORTEM_DUE follows it up. The
+                   script can't read the shipyard config: pass [operate]
+                   incident_label here when it isn't "incident"
 
 With --wip N (a work-in-progress limit, such as [roadmap] wip once the config has it), a
 last line says how many issues are IN_PROGRESS, the room left under N, and the issues
@@ -242,6 +247,7 @@ def resource_limited(response: dict[str, Any]) -> bool:
     return bool(errors) and all(isinstance(e, dict) and e.get("type") == RESOURCE_LIMITS for e in errors)
 
 
+INCIDENT_LABEL = "incident"  # the default of [operate] incident_label
 ACTION = {"NEW", "NEEDS_PR", "UNBLOCKED", "UNFILLED", "SPEC_REFUSED", "REVISIT", "DONE_NOT_CLOSED", "SUSPECT_CLOSE"}
 HOLD = re.compile(r"\b(?:on hold|blocked|waits? on|waiting on|pending|depends on)\b", re.IGNORECASE)
 UPSTREAM = re.compile(r"(?:https://github\.com/)?(?P<owner>[\w.-]+)/(?P<name>[\w.-]+)(?:#|/issues/|/pull/)(?P<num>\d+)")
@@ -593,14 +599,17 @@ def classify_open(
     return "TRIAGED", note
 
 
-def classify_closed(issue: dict[str, Any], hold: str) -> tuple[str, str] | None:
-    if hold in {n["name"] for n in issue["labels"]["nodes"]}:
+def classify_closed(issue: dict[str, Any], hold: str, incident: str = INCIDENT_LABEL) -> tuple[str, str] | None:
+    labels = {n["name"] for n in issue["labels"]["nodes"]}
+    if hold in labels:
         return None
     events = issue["timelineItems"]["nodes"]
     closer = events[0].get("closer") if events else None
     number = issue["number"]
     if closer is None:
-        if issue["stateReason"] == "COMPLETED" and not merged_mentions(issue):
+        # an incident closes by hand once the environment is healthy again; its follow-up is
+        # ship-watch's POSTMORTEM_DUE, not triage
+        if issue["stateReason"] == "COMPLETED" and incident not in labels and not merged_mentions(issue):
             return "SUSPECT_CLOSE", "closed as completed by hand, and no merged PR mentions it"
         return None
     if closer["__typename"] == "PullRequest":
@@ -634,6 +643,11 @@ def main() -> int:
     parser.add_argument(
         "--hold-label", default="release-blocker", help="closed issues with this label were closed by hand on purpose"
     )
+    parser.add_argument(
+        "--incident-label",
+        default=INCIDENT_LABEL,
+        help="the repo's [operate] incident_label: an incident closed by hand is not SUSPECT_CLOSE",
+    )
     parser.add_argument("--closed", type=int, default=20, help="recently closed issues to check")
     parser.add_argument("--json", action="store_true", help="JSON lines instead of a table")
     parser.add_argument("--wip", type=int, help="at most N issues in progress at once: report the room left")
@@ -658,7 +672,7 @@ def main() -> int:
         state, note = classify_open(issue, args.marker, args.postponed_label, states, stable, (owner, name))
         rows.append({"number": issue["number"], "state": state, "title": issue["title"], "note": note})
     for issue in data["closed"]["nodes"][: args.closed]:
-        verdict = classify_closed(issue, args.hold_label)
+        verdict = classify_closed(issue, args.hold_label, args.incident_label)
         if verdict is not None:
             rows.append({"number": issue["number"], "state": verdict[0], "title": issue["title"], "note": verdict[1]})
 
