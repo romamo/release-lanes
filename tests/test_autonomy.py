@@ -13,6 +13,7 @@ from shipyard.autonomy import HOLD_LABEL, Autonomy, AutonomyPolicy, EnvironmentN
 from shipyard.cli import main
 from shipyard.doctor import doctor
 from shipyard.errors import ReleaseError
+from shipyard.github import PROPOSAL_LABEL
 from shipyard.planner import Decision, Event, Hotfix, Proposal
 from shipyard.policy import Lane, Policy
 from shipyard.propose import Outcome, close_released, marker, propose, run_url
@@ -260,6 +261,34 @@ def test_cli_propose(repo: Repo, capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(ReleaseError, match="a proposal's lane is one of"):
         bad = json.dumps([{"lane": "beta", "version": "1.0.0", "base": "abc", "cause": "x"}])
         main(["--repo", str(repo.root), "propose", "--proposals", bad], repo.github)
+
+
+def test_a_proposal_is_labelled_and_found_by_its_label_past_the_scan(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A")
+    set_autonomy(repo, 'release = "propose"\n')
+    rc, _ = propose(repo.git, repo.policy, repo.github, proposed(repo, at_day(1)).proposals)
+    assert repo.github.labels[rc.issue] == (PROPOSAL_LABEL,)
+    for n in range(3):  # newer issues push the proposal off the page find_issue reads
+        repo.github.create_issue(f"Bug {n}", "something broke")
+    repo.github.scan_limit = 2
+    assert repo.github.find_issue(marker(Lane.RC)) is None
+    again = propose(repo.git, repo.policy, repo.github, proposed(repo, at_day(1)).proposals)
+    assert [(d.issue, d.outcome) for d in again][0] == (rc.issue, Outcome.UNCHANGED)
+    assert len(repo.github.issues) == 5  # two proposals and three bugs: no duplicate
+
+
+def test_a_proposal_opened_before_the_label_is_found_once_and_labelled(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A")
+    set_autonomy(repo, 'release = "propose"\n')
+    decision = proposed(repo, at_day(1))
+    first = propose(repo.git, repo.policy, repo.github, decision.proposals)
+    old = first[0].issue
+    repo.github.labels[old] = ()  # as an earlier shipyard opened it
+    again = propose(repo.git, repo.policy, repo.github, decision.proposals)
+    assert [(d.issue, d.outcome) for d in again][0] == (old, Outcome.UPDATED)  # labelled, though unchanged
+    assert repo.github.labels[old] == (PROPOSAL_LABEL,)
+    assert {d.outcome for d in propose(repo.git, repo.policy, repo.github, decision.proposals)} == {Outcome.UNCHANGED}
+    assert len(repo.github.issues) == 2
 
 
 # -- doctor ----------------------------------------------------------------------------------

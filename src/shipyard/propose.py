@@ -10,7 +10,7 @@ from shipyard.autonomy import HOLD_LABEL, Autonomy
 from shipyard.changelog import Changelog, Entry
 from shipyard.doctor import CALLER
 from shipyard.errors import ReleaseError
-from shipyard.github import GitHub
+from shipyard.github import PROPOSAL_LABEL, GitHub, Issue
 from shipyard.gitrepo import Git
 from shipyard.planner import Proposal
 from shipyard.policy import Lane, Policy
@@ -88,17 +88,35 @@ def propose(git: Git, policy: Policy, github: GitHub, proposals: tuple[Proposal,
     return done
 
 
+def _find(github: GitHub, mark: str) -> tuple[Issue, bool] | None:
+    """The open proposal whose body holds the marker, and whether it has PROPOSAL_LABEL: by
+    the label, whatever the repository's size; else by scanning the newest open issues, for
+    a proposal opened before the label, which its next update labels"""
+    labelled = [i for i in github.labelled_issues(PROPOSAL_LABEL) if not i.closed and mark in i.body]
+    if labelled:
+        return min(labelled, key=lambda i: i.number), True
+    found = github.find_issue(mark)
+    return None if found is None else (found, False)
+
+
+def find_proposal(github: GitHub, mark: str) -> Issue | None:
+    """The open proposal whose body holds the marker"""
+    found = _find(github, mark)
+    return None if found is None else found[0]
+
+
 def upsert(github: GitHub, mark: str, title: str, body: str, fix: str) -> tuple[int, Outcome]:
     """Open the issue whose body holds the marker, or bring it up to date; fix says how to
     grant `issues: write` when GitHub refuses"""
     try:
-        found = github.find_issue(mark)
+        found = _find(github, mark)
         if found is None:
-            return github.create_issue(title, body), Outcome.OPENED
-        if (found.title, found.body.replace("\r\n", "\n").strip()) == (title, body.strip()):
-            return found.number, Outcome.UNCHANGED
-        github.update_issue(found.number, title, body)
-        return found.number, Outcome.UPDATED
+            return github.create_issue(title, body, (PROPOSAL_LABEL,)), Outcome.OPENED
+        issue, labelled = found
+        if labelled and (issue.title, issue.body.replace("\r\n", "\n").strip()) == (title, body.strip()):
+            return issue.number, Outcome.UNCHANGED
+        github.update_issue(issue.number, title, body, () if labelled else (PROPOSAL_LABEL,))
+        return issue.number, Outcome.UPDATED
     except ReleaseError as exc:
         raise ReleaseError(f"{exc}; if GitHub refused it (403): {fix}") from exc
 

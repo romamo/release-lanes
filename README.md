@@ -322,6 +322,11 @@ rollback = "act"
   hand is refused too: close the hold to release. The one exception is a hotfix started by
   hand, since a hold usually means an incident and a hotfix is its cure
 
+Every proposal issue, for a release or a deploy, carries the `shipyard-proposal` label
+(created on first use), and shipyard finds it again by that label, however many issues the
+repository has. A proposal opened before the label is found once by scanning the newest
+500 open issues and gets the label on that update.
+
 Opening the proposal issue needs `issues: write` on the prepare job in your
 `.github/workflows/release.yml`; `shipyard init` writes it. A repository set up earlier
 grants `issues: read`, which is enough until a stage is set to `propose` or a hold is
