@@ -12,6 +12,10 @@ from typing import Any, Protocol
 
 from shipyard.errors import ReleaseError
 
+PROPOSAL_LABEL = "shipyard-proposal"  # on every issue proposing a release or a deploy
+OPEN_LIMIT = 100  # open issues read per label: proposals are one per lane and per environment
+_LABEL_DESCRIPTIONS = {PROPOSAL_LABEL: "Opened by shipyard: a release or deploy waiting for a person"}
+
 
 @dataclass(frozen=True, slots=True)
 class Milestone:
@@ -90,19 +94,25 @@ class GitHub(Protocol):
         ...
 
     def find_issue(self, marker: str) -> Issue | None:
-        """The open issue whose body holds the marker"""
+        """The open issue whose body holds the marker, among the newest 500"""
         ...
 
     def create_issue(self, title: str, body: str, labels: Sequence[str] = ()) -> int:
         """Open an issue; a label the repository lacks is created first"""
         ...
 
-    def update_issue(self, number: int, title: str, body: str) -> None: ...
+    def update_issue(self, number: int, title: str, body: str, labels: Sequence[str] = ()) -> None:
+        """Rewrite an issue and add the labels; a label the repository lacks is created first"""
+        ...
 
     def comment_issue(self, number: int, body: str) -> None: ...
 
     def labelled_issues(self, label: str) -> list[Issue]:
         """The issues with the label, open and closed, newest first (the newest 100)"""
+        ...
+
+    def open_labelled_issues(self, label: str) -> list[Issue]:
+        """The open issues with the label, newest first (the newest OPEN_LIMIT)"""
         ...
 
     def close_issue(self, number: int, comment: str) -> None: ...
@@ -192,15 +202,20 @@ class GhCli:
         hits = [Issue(int(i["number"]), i["title"], i["body"]) for i in found if marker in i["body"]]
         return min(hits, key=lambda i: i.number) if hits else None
 
+    def _create_labels(self, labels: Sequence[str]) -> None:
+        """Create each label the repository lacks, as `gh issue create --label` won't"""
+        if not labels:
+            return
+        have = {
+            str(label["name"]) for label in json.loads(self._gh("label", "list", "--json", "name", "--limit", "1000"))
+        }
+        for label in labels:
+            if label not in have:
+                described = _LABEL_DESCRIPTIONS.get(label, "Opened by shipyard; holds releases while open")
+                self._gh("label", "create", label, "--description", described)
+
     def create_issue(self, title: str, body: str, labels: Sequence[str] = ()) -> int:
-        if labels:
-            have = {
-                str(label["name"])
-                for label in json.loads(self._gh("label", "list", "--json", "name", "--limit", "1000"))
-            }
-            for label in labels:
-                if label not in have:
-                    self._gh("label", "create", label, "--description", "Opened by shipyard; holds releases while open")
+        self._create_labels(labels)
         args = [a for label in labels for a in ("--label", label)]
         url = self._gh("issue", "create", "--title", title, "--body", body, *args).strip()
         number = url.rsplit("/", 1)[-1]
@@ -208,8 +223,10 @@ class GhCli:
             raise ReleaseError(f"gh issue create printed {url!r}, not an issue URL")
         return int(number)
 
-    def update_issue(self, number: int, title: str, body: str) -> None:
-        self._gh("issue", "edit", str(number), "--title", title, "--body", body)
+    def update_issue(self, number: int, title: str, body: str, labels: Sequence[str] = ()) -> None:
+        self._create_labels(labels)
+        args = [a for label in labels for a in ("--add-label", label)]
+        self._gh("issue", "edit", str(number), "--title", title, "--body", body, *args)
 
     def close_issue(self, number: int, comment: str) -> None:
         self._gh("issue", "close", str(number), "--comment", comment)
@@ -228,6 +245,16 @@ class GhCli:
             Issue(int(i["number"]), i["title"], i["body"], None if i["state"] == "OPEN" else _time(i["closedAt"]))
             for i in found
         ]
+        return sorted(issues, key=lambda i: i.number, reverse=True)
+
+    def open_labelled_issues(self, label: str) -> list[Issue]:
+        found = json.loads(
+            self._gh(
+                "issue", "list", "--label", label, "--state", "open", "--json", "number,title,body",
+                "--limit", str(OPEN_LIMIT),
+            )
+        )  # fmt: skip
+        issues = [Issue(int(i["number"]), i["title"], i["body"]) for i in found]
         return sorted(issues, key=lambda i: i.number, reverse=True)
 
     def _api(self, *args: str) -> Any:

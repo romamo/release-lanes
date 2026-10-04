@@ -57,7 +57,7 @@ from shipyard.errors import ReleaseError
 from shipyard.github import Deployment, DeploymentState, DeploymentStatus, GitHub, Issue, WorkflowRun
 from shipyard.gitrepo import Tag
 from shipyard.policy import Lane, Policy
-from shipyard.propose import upsert
+from shipyard.propose import find_proposal, upsert
 from shipyard.version import PATTERN, TAG_PREFIX, Version
 
 HEALTH_TIMEOUT = 10.0  # seconds
@@ -671,7 +671,7 @@ def _close_deployed(github: GitHub, seen: Observed, dry_run: bool) -> str | None
     later one, whoever deployed it; what it did"""
     if seen.current is None or seen.tag is None:
         return None
-    issue = github.find_issue(deploy_marker(seen.env.name))
+    issue = find_proposal(github, deploy_marker(seen.env.name))
     if issue is None:
         return None
     found = _TAG_LINE.search(issue.body)
@@ -774,7 +774,7 @@ def approve(policy: Policy, github: GitHub, name: str, dry_run: bool) -> str:
     hold = Hold.read(github)
     if hold.on:
         raise ReleaseError(f"{hold.reason}; close it to approve a deploy")
-    issue = github.find_issue(deploy_marker(name))
+    issue = find_proposal(github, deploy_marker(name))
     if issue is None:
         raise ReleaseError(f"no open proposal to deploy to {name}; operate opens one when a deploy waits on approval")
     found = _TAG_LINE.search(issue.body)

@@ -99,7 +99,8 @@ AUTONOMY = ("observe", "propose", "act")
 RELEASE_TAG = re.compile(r"v(\d+)\.(\d+)\.(\d+)(?:(a|b|rc)(\d+))?(?:\.dev(\d+))?")  # shipyard's version.PATTERN
 PRE_RANK = {"a": 1, "b": 2, "rc": 3}
 ISSUE_LIMIT = 1000  # per label or search; no repo has that many holds, incidents, or proposals
-PROPOSAL_SEARCH = 'in:title "Ready to"'  # shipyard's operate.proposal_title; the marker in the body decides
+PROPOSAL_LABEL = "shipyard-proposal"  # shipyard's github.PROPOSAL_LABEL
+PROPOSAL_SEARCH = 'in:title "Ready to"'  # proposals opened before the label; the marker in the body decides
 PROPOSAL = re.compile(r"<!-- shipyard:propose deploy=(?P<env>\S+) -->")  # shipyard's operate.deploy_marker
 PROPOSED_TAG = re.compile(r"<!-- shipyard:tag=(?P<tag>\S+) -->")
 OPERATE_USES = re.compile(
@@ -553,6 +554,12 @@ def unhealthy_row(env: str, current: Current | None, now: dt.datetime) -> Row | 
     return Row("UNHEALTHY", env, f"{current.tag}: {why}, since {ago(now - ours[-1].created)} ago")
 
 
+def proposal_issues(labelled: list[Issue], search: Callable[[], list[Issue]]) -> list[Issue]:
+    """The open proposals: by their label; when none has it, once more by the title search,
+    for proposals opened before the label (shipyard labels each on its next update)"""
+    return labelled if labelled else search()
+
+
 def proposal_rows(issues: list[Issue], caller: str, held: bool) -> list[Row]:
     """The open proposal issues shipyard operate opens for a deploy that waits on approval"""
     rows = []
@@ -709,9 +716,10 @@ def operations_rows(
         row = unhealthy_row(env.name, current[env.name], now)
         if row is not None:
             rows.append(row)
-    proposals = proposal_rows(
-        fetch_issues(repo, "--search", PROPOSAL_SEARCH), caller[0] if caller else "operate.yml", held
+    issues = proposal_issues(
+        fetch_issues(repo, "--label", PROPOSAL_LABEL), lambda: fetch_issues(repo, "--search", PROPOSAL_SEARCH)
     )
+    proposals = proposal_rows(issues, caller[0] if caller else "operate.yml", held)
     rows += proposals
     idle = operate_idle(caller, runs, now)
     if caller:

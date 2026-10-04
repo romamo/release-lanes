@@ -14,7 +14,7 @@ from shipyard.autonomy import HOLD_LABEL
 from shipyard.cli import main
 from shipyard.doctor import OPERATE_CALLER, doctor
 from shipyard.errors import ReleaseError
-from shipyard.github import Deployment, DeploymentState, Issue
+from shipyard.github import PROPOSAL_LABEL, Deployment, DeploymentState, Issue
 from shipyard.init import BOT_REF, BOT_REPO, init_operate, operate_caller_text
 from shipyard.operate import (
     STATUS_PREFIX,
@@ -814,3 +814,28 @@ def test_cli_approve_rollback(failing: tuple[Repo, FakeHttp], tmp_path: Path) ->
     assert main(argv, repo.github, http) == 0
     assert summary.read_text().startswith("dispatched deploy.yml with v1.0.0 to production")
     assert repo.github.dispatched == [ROLLBACK]
+
+
+def test_a_deploy_proposal_is_labelled_and_approved_by_its_label(setup: tuple[Repo, FakeHttp]) -> None:
+    repo, http = setup
+    configure(repo, 'deploy.production = "propose"\n')
+    run(repo, http, minutes(61))
+    [number] = repo.github.issues
+    assert repo.github.labels[number] == (PROPOSAL_LABEL,)
+    repo.github.create_issue("Bug", "something broke")
+    repo.github.scan_limit = 1  # the proposal is past the page find_issue reads
+    run(repo, http, minutes(71))
+    assert list(repo.github.issues) == [number, number + 1]  # no duplicate
+    assert approve(repo.policy, repo.github, "production", dry_run=False).endswith(f"closed #{number}")
+
+
+def test_a_deployed_proposal_is_closed_when_found_by_its_label_past_the_scan(setup: tuple[Repo, FakeHttp]) -> None:
+    repo, http = setup
+    configure(repo, 'deploy.production = "propose"\n')
+    run(repo, http, minutes(61))
+    [number] = repo.github.issues
+    repo.github.create_issue("Bug", "something broke")
+    repo.github.scan_limit = 1
+    repo.github.deploy("production", "v1.1.0rc1", minutes(62), S.IN_PROGRESS, S.SUCCESS)
+    http.answer(PRODUCTION, '{"version": "v1.1.0rc1"}')
+    assert run(repo, http, minutes(70))["production"].action.endswith(f"closed proposal #{number}: v1.1.0rc1 deployed")

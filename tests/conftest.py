@@ -109,6 +109,7 @@ class FakeGitHub:
     statuses: dict[int, list[DeploymentStatus]] = field(default_factory=dict)  # by deployment, oldest first
     status_writes: list[tuple[int, DeploymentState, str]] = field(default_factory=list)
     runs: list[tuple[str, str, WorkflowRun]] = field(default_factory=list)  # (workflow, ref, run), as dispatched
+    scan_limit: int = 500  # the newest open issues find_issue reads, as gh lists them
 
     def deploy(self, environment: str, ref: str, at: dt.datetime, *states: DeploymentState) -> int:
         """Record a deployment of ref, with its statuses one minute apart from at; its id"""
@@ -149,7 +150,8 @@ class FakeGitHub:
         return [run for w, r, run in reversed(self.runs) if (w, r) == (workflow, ref)]
 
     def find_issue(self, marker: str) -> Issue | None:
-        hits = [i for i in self.issues.values() if marker in i.body]
+        newest = sorted(self.issues.values(), key=lambda i: -i.number)[: self.scan_limit]
+        hits = [i for i in newest if marker in i.body]
         return min(hits, key=lambda i: i.number) if hits else None
 
     def create_issue(self, title: str, body: str, labels: Sequence[str] = ()) -> int:
@@ -166,8 +168,15 @@ class FakeGitHub:
         found = [*self.issues.values(), *self.closed_issues.values()]
         return sorted((i for i in found if label in self.labels.get(i.number, ())), key=lambda i: -i.number)
 
-    def update_issue(self, number: int, title: str, body: str) -> None:
+    def open_labelled_issues(self, label: str) -> list[Issue]:
+        return sorted(
+            (i for i in self.issues.values() if label in self.labels.get(i.number, ())), key=lambda i: -i.number
+        )
+
+    def update_issue(self, number: int, title: str, body: str, labels: Sequence[str] = ()) -> None:
         self.issues[number] = Issue(number, title, body)
+        have = self.labels.get(number, ())
+        self.labels[number] = (*have, *(label for label in labels if label not in have))
         self.edits += 1
 
     def close_issue(self, number: int, comment: str) -> None:

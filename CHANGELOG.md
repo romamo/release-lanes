@@ -47,6 +47,13 @@ bot.
   there `.github/workflows/operate.yml` is the reusable workflow, so the operate check
   reads the workflow that `uses: ./.github/workflows/operate.yml` instead. A blank line no
   longer hides what follows it: a later job's `environment:`, or a workflow input (#53)
+- `shipyard propose` and `shipyard operate` no longer open a duplicate proposal issue in
+  a repo with more than 500 open issues: every release or deploy proposal carries a
+  `shipyard-proposal` label, created on first use, and is found among the open issues with
+  it (refusing, rather than guessing, at 100 of them). A proposal opened before the label
+  is found once by the old scan and labelled on that update.
+  github-ship-watch finds proposals by the label too, falling back to its title search
+  while none has it (#41)
 
 ## [0.9.0] - 2026-10-04
 
