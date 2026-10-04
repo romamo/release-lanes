@@ -203,6 +203,37 @@ def test_time_to_restore_takes_the_healthy_comment_or_the_close_whichever_is_fir
     assert m.extra == {"count": 2, "open": 1}
 
 
+def test_an_earlier_window_counts_what_was_open_at_its_end(mx: ModuleType) -> None:
+    incidents = [
+        issue(1, day(12), day(9)),  # restored in the earlier window: 3 days
+        issue(2, day(9), day(3)),  # restored after it: open at its end
+        issue(3, day(2)),  # opened after it
+    ]
+    earlier = mx.Window(END - dt.timedelta(days=14), END - dt.timedelta(days=7))
+    m = mx.time_to_restore(data(mx, incidents=incidents), earlier)
+    assert m.value == pytest.approx(72.0)
+    assert m.extra == {"count": 1, "open": 1}
+
+
+def test_until_reads_a_date_or_a_time_with_its_offset(mx: ModuleType) -> None:
+    assert mx.until("2026-09-24", END) == dt.datetime(2026, 9, 24, tzinfo=dt.timezone.utc)  # noqa: UP017
+    assert mx.until("2026-09-24T12:00:00+02:00", END) == dt.datetime(2026, 9, 24, 10, tzinfo=dt.timezone.utc)  # noqa: UP017
+    assert mx.until("2026-09-24T10:00:00Z", END) == dt.datetime(2026, 9, 24, 10, tzinfo=dt.timezone.utc)  # noqa: UP017
+
+
+@pytest.mark.parametrize(
+    ("text", "error"),
+    [("2026-09-24T10:00:00", "needs a time's offset"), ("last week", "must be a date"), ("2026-10-02", "future")],
+)
+def test_until_refuses_a_naive_malformed_or_future_time(
+    mx: ModuleType, capsys: pytest.CaptureFixture[str], text: str, error: str
+) -> None:
+    with pytest.raises(SystemExit) as refused:
+        mx.until(text, END)
+    assert refused.value.code == 2
+    assert error in capsys.readouterr().err
+
+
 def test_issue_to_release_runs_to_the_first_released_in_notice(mx: ModuleType) -> None:
     notices = [
         issue(1, day(10), day(8), (day(7), "Released in v1.0.0rc1."), (day(2), "Released in v1.0.0.")),  # 3 days

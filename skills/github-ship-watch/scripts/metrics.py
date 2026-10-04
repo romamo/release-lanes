@@ -2,10 +2,13 @@
 """Measure a repo's issue-to-release line over a window: the four DORA measures and the
 factory's own, from what GitHub already holds.
 
-Usage: metrics.py <owner/repo> [--days 30] [--environment NAME ...] [--incident-label incident]
-                  [--blocker-label release-blocker] [--bot LOGIN ...] [--json | --markdown]
+Usage: metrics.py <owner/repo> [--days 30] [--until TIME] [--environment NAME ...]
+                  [--incident-label incident] [--blocker-label release-blocker]
+                  [--bot LOGIN ...] [--json | --markdown]
 
-Measures, each over the --days before now:
+Measures, each over the --days before --until (default now; a date is its 00:00 UTC, and a
+time needs its offset, such as the "start" a --json run prints, which gives the window
+before it):
   Deploy frequency   deployments that reached success, by environment (created in the
                      window); for a repo that has never deployed, stable GitHub releases
                      (not a draft or a pre-release) published in the window
@@ -27,7 +30,8 @@ Measures, each over the --days before now:
                      lane puts it
   Time to restore    issues labelled --incident-label restored in the window: opened to the
                      first "<env> is healthy again on" comment shipyard operate posts, or to
-                     closed, whichever is first (median); still open ones are counted aside
+                     closed, whichever is first (median); ones still open at the window's
+                     end are counted aside
   Issue to release   issues whose first "Released in <tag>" notice (github-pr-triage's
                      shipped.py) was posted in the window: opened to that notice (median, p90)
   Human touch        PRs merged in the window that a person merged or approved / all merged
@@ -663,8 +667,10 @@ def restored_at(issue: Node) -> dt.datetime | None:
 def time_to_restore(data: Data, window: Window) -> Measure:
     values, still = [], 0
     for issue in data.incidents:
+        if timestamp(issue["createdAt"]) > window.end:
+            continue
         done = restored_at(issue)
-        if done is None:
+        if done is None or done > window.end:
             still += 1
         elif done in window:
             values.append(hours(timestamp(issue["createdAt"]), done))
@@ -781,10 +787,26 @@ def render(repo: str, days: int, window: Window, found: list[Measure], form: str
     return "\n".join([head, *(f"{m.name:<22} {m.text:<32} {m.detail}" for m in found)])
 
 
+def until(text: str, now: dt.datetime) -> dt.datetime:
+    """--until: a date (its 00:00 UTC) or a time with its offset, no later than now"""
+    try:
+        moment = dt.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        fail(f"--until must be a date or a time with its offset, got {text!r}")
+    if len(text) == len("YYYY-MM-DD"):
+        moment = moment.replace(tzinfo=dt.timezone.utc)  # noqa: UP017 (3.10 has no dt.UTC)
+    if moment.tzinfo is None:
+        fail(f"--until needs a time's offset, such as Z or +00:00, got {text!r}")
+    if moment > now:
+        fail(f"--until is in the future: {text}")
+    return moment.astimezone(dt.timezone.utc)  # noqa: UP017
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("repo", help="owner/name")
-    parser.add_argument("--days", type=int, default=30, help="the window, in days before now")
+    parser.add_argument("--days", type=int, default=30, help="the window, in days before --until")
+    parser.add_argument("--until", help="the window's end: a date or a time with its offset (default now)")
     parser.add_argument("--environment", action="append", default=[], help="count only these environments")
     parser.add_argument("--incident-label", default="incident", help="[operate] incident_label")
     parser.add_argument("--blocker-label", default="release-blocker")
@@ -795,7 +817,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.days < 1:
         parser.error("--days must be at least 1")
-    end = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)  # noqa: UP017 (3.10 has no dt.UTC)
+    now = dt.datetime.now(dt.timezone.utc).replace(microsecond=0)  # noqa: UP017 (3.10 has no dt.UTC)
+    end = now if args.until is None else until(args.until, now)
     window = Window(end - dt.timedelta(days=args.days), end)
     data = fetch(args.repo, window, frozenset(args.environment), args.incident_label, args.blocker_label)
     data.bots = frozenset(args.bot)

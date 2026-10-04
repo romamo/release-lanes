@@ -26,6 +26,21 @@ bot.
 
 ## [0.10.1] - 2026-10-04
 
+- github-ship-watch learns from failures. `watch_state.py` reports POSTMORTEM_DUE (an
+  action) for a closed issue labelled `[operate] incident_label` (default `incident`) that
+  no `docs/postmortems/*.md` on the default branch names in an `Incident: owner/repo#N`
+  line, read through the GitHub contents API. The skill drafts the postmortem from the
+  incident's comments and deployment statuses as a pull request the maintainer merges,
+  from the new `docs/postmortems/TEMPLATE.md` (timeline, cause, what caught it, what would
+  have caught it sooner, actions); after the merge each rule becomes a `D-n` entry through
+  `decisions.py` and each other action an issue. A weekly retro, run only when the user
+  schedules it, compares this week's metrics with last week's, reads the refused and
+  reworked PRs, recurring review findings, and stuck states, and posts a short comment on
+  the roadmap issue with at most three proposals, each opened as an issue. The new
+  `scripts/retro.py` gathers the retro (`gather`) and checks proposal titles against the
+  open issues (`dedupe`), and `metrics.py --until` ends the window at a date or time, so
+  the week before can be measured (#72)
+
 ### Fixed
 
 - Spec and metrics follow-ups: `specs.py check` and `coverage` report "no specs" and
