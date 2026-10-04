@@ -6,8 +6,7 @@ the stop switch: an open issue labelled shipyard-hold.
 - act: do it
 
 The hold turns every act into propose for the whole repository. Release autonomy is read by
-the planner; deploy and rollback autonomy are parsed and exposed here for the deploy and
-rollback stages to call once they exist."""
+the planner; deploy and rollback autonomy by shipyard operate."""
 
 import re
 from collections.abc import Collection, Mapping

@@ -3,14 +3,20 @@ name: shipyard operate
 # Called on a schedule by a repository's operate workflow (see `shipyard init --operate`).
 # It checks the health of each environment in [environments], records it as GitHub
 # deployment statuses, and promotes a release to an environment with `from` once its source
-# baked it (or opens the issue a deploy under propose or a hold waits on). With `approve`,
-# it deploys the tag proposed for that environment, once, instead.
+# baked it (or opens the issue a deploy under propose or a hold waits on). An environment
+# failing [operate] rollback_after checks in a row is rolled back and gets an incident issue.
+# With `approve`, it deploys the tag proposed for that environment, once, instead; with
+# `approve-rollback`, it starts the rollback an incident proposes for it, once.
 
 on:
   workflow_call:
     inputs:
       approve:
         description: "An environment whose proposed deploy to run; empty runs the checks"
+        type: string
+        default: ""
+      approve-rollback:
+        description: "An environment whose proposed rollback to start; empty runs the checks"
         type: string
         default: ""
       dry-run:
@@ -23,7 +29,7 @@ on:
 
 # No permissions here or on the job: it runs with the caller's grant, as a reusable job that
 # asks for more than its caller grants fails to start. It needs contents: read, deployments:
-# write, actions: write, and issues: write to open a proposal issue
+# write, actions: write, and issues: write to open a proposal or an incident issue
 
 jobs:
   operate:
@@ -45,9 +51,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TOOL: ${{ inputs.tool }}
           APPROVE: ${{ inputs.approve }}
+          APPROVE_ROLLBACK: ${{ inputs.approve-rollback }}
           DRY_RUN: ${{ inputs.dry-run && '--dry-run' || '' }}
         run: |
           args=(operate)
           [ -n "$APPROVE" ] && args+=(--approve "$APPROVE")
+          [ -n "$APPROVE_ROLLBACK" ] && args+=(--approve-rollback "$APPROVE_ROLLBACK")
           [ -n "$DRY_RUN" ] && args+=(--dry-run)
           uvx --from "$TOOL" shipyard "${args[@]}"

@@ -8,7 +8,7 @@
   cleanup         delete a release commit's work branch
   sync            bring a stable release made off main into main's CHANGELOG (recovery)
   notes           print a release's notes
-  operate         check environment health, promote after the bake, approve a proposed deploy
+  operate         check environment health, promote after the bake, roll back; approve a proposal
   doctor          check that the repository is ready for the bot
   init            write a starting policy and the calling workflow (--operate: the operate one)
   gate            start a Claude Code session for the repo only when its state needs one
@@ -34,7 +34,7 @@ from shipyard.gitrepo import Git
 from shipyard.init import init, init_operate
 from shipyard.land import cleanup, land, prepare
 from shipyard.launchd import DEFAULT_TOOL, build, install, remove
-from shipyard.operate import Http, UrllibHttp, approve, operate, summary
+from shipyard.operate import Http, UrllibHttp, approve, approve_rollback, operate, summary
 from shipyard.planner import Event, Hotfix, Planner, Proposal
 from shipyard.policy import ALIAS_PATH, CONFIG_PATH, Lane, Policy, config_path
 from shipyard.propose import propose
@@ -127,7 +127,13 @@ def _parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("operate", help="check environment health, promote after the bake")
     p.add_argument("--dry-run", action="store_true", help="report what it would do; write and start nothing")
-    p.add_argument("--approve", metavar="ENVIRONMENT", help="deploy the tag proposed for this environment, once")
+    approving = p.add_mutually_exclusive_group()
+    approving.add_argument(
+        "--approve", metavar="ENVIRONMENT", help="deploy the tag proposed for this environment, once"
+    )
+    approving.add_argument(
+        "--approve-rollback", metavar="ENVIRONMENT", help="start the rollback an incident proposes for it, once"
+    )
     p.add_argument("--now", help="ISO time with offset (default: now)")
     p.add_argument(
         "--step-summary",
@@ -268,6 +274,8 @@ def main(argv: list[str], github: GitHub | None = None, http: Http | None = None
     elif args.command == "operate":
         if args.approve:
             report = approve(policy, hub, args.approve, args.dry_run) + "\n"
+        elif args.approve_rollback:
+            report = approve_rollback(policy, hub, args.approve_rollback, args.dry_run) + "\n"
         else:
             reports = operate(policy, git.tags(), hub, http or UrllibHttp(), _now(args.now), args.dry_run)
             report = summary(reports, args.dry_run)

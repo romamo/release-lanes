@@ -223,9 +223,10 @@ def operate_caller_text() -> str:
 
 # shipyard: https://github.com/{BOT_REPO}. Every 10 minutes shipyard operate checks the
 # health of each environment in .github/shipyard.toml, records it as GitHub deployment
-# statuses, and promotes a release once its source environment baked it. Approve a deploy
-# that waits on a proposal issue with: gh workflow run operate.yml -f approve=<environment>
-# -f dry-run=false
+# statuses, promotes a release once its source environment baked it, and rolls back an
+# environment that fails its checks, opening an incident issue. Approve a deploy that waits
+# on a proposal issue with: gh workflow run operate.yml -f approve=<environment> -f
+# dry-run=false; a proposed rollback with -f approve-rollback=<environment> instead
 
 on:
   schedule:
@@ -234,6 +235,10 @@ on:
     inputs:
       approve:
         description: "Deploy the tag proposed for this environment, once"
+        type: string
+        default: ""
+      approve-rollback:
+        description: "Start the rollback an incident proposes for this environment, once"
         type: string
         default: ""
       dry-run:
@@ -249,12 +254,13 @@ jobs:
     uses: {uses}/operate.yml@{BOT_REF}
     with:
       approve: ${{{{ inputs.approve || '' }}}}
+      approve-rollback: ${{{{ inputs.approve-rollback || '' }}}}
       dry-run: ${{{{ inputs.dry-run || false }}}}
     permissions:
       contents: read # the config and the release tags
       deployments: write # reads deployments and records health as their statuses
       actions: write # starts the deploy workflows
-      issues: write # the hold, and the issue a deploy under propose or the hold opens
+      issues: write # the hold, the issue a deploy under propose or the hold opens, and incidents
 """
 
 

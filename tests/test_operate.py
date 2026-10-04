@@ -1,8 +1,10 @@
 """shipyard operate (#30): health checks recorded as deployment statuses, promotion after an
-unbroken bake, a missed lane deploy, autonomy and the hold, --approve, and the operate caller"""
+unbroken bake, a missed lane deploy, autonomy and the hold, --approve, and the operate caller;
+rollback and incidents (#31)"""
 
 import datetime as dt
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -12,7 +14,7 @@ from shipyard.autonomy import HOLD_LABEL
 from shipyard.cli import main
 from shipyard.doctor import OPERATE_CALLER, doctor
 from shipyard.errors import ReleaseError
-from shipyard.github import Deployment, DeploymentState
+from shipyard.github import Deployment, DeploymentState, Issue
 from shipyard.init import init_operate, operate_caller_text
 from shipyard.operate import (
     STATUS_PREFIX,
@@ -20,14 +22,19 @@ from shipyard.operate import (
     Report,
     Unreachable,
     approve,
+    approve_rollback,
     deploy_marker,
+    excerpt,
     named_version,
     operate,
+    shown_url,
     tag_of,
 )
+from shipyard.planner import Decision, Event, Planner
+from shipyard.policy import Lane
 from shipyard.version import Version
 
-from .conftest import POLICY, T0, Repo
+from .conftest import POLICY, T0, FakeGitHub, Repo
 
 S = DeploymentState
 STAGING = "https://staging.example.com/health"
@@ -178,7 +185,8 @@ def test_a_failed_check_restarts_the_bake(setup: tuple[Repo, FakeHttp]) -> None:
     assert repo.github.dispatched == []
     run(repo, http, minutes(101))
     assert repo.github.dispatched == [TO_PRODUCTION]
-    assert staging_writes(repo) == [S.IN_PROGRESS, S.FAILURE, S.IN_PROGRESS, S.SUCCESS]
+    # a failure per failed check, up to rollback_after (3): they count the checks failed in a row
+    assert staging_writes(repo) == [S.IN_PROGRESS, S.FAILURE, S.FAILURE, S.IN_PROGRESS, S.SUCCESS]
 
 
 def test_a_promotion_is_dispatched_once(setup: tuple[Repo, FakeHttp]) -> None:
@@ -372,16 +380,24 @@ def test_init_operate_writes_the_caller_and_doctor_wants_it_only_when_used(repo:
     status, detail = operate_check() or ("", "")
     assert status == "WARN" and "`shipyard init --operate` writes it" in detail
     init_operate(repo.root, force=False)
-    assert operate_check() == ("PASS", f"{OPERATE_CALLER} runs shipyard operate with deployments, actions: write")
+    assert operate_check() == (
+        "PASS",
+        f"{OPERATE_CALLER} runs shipyard operate with deployments, actions, issues: write; rolls back after 3"
+        " failed checks in a row and opens an incident labelled 'incident', which holds rc, stable",
+    )
     with pytest.raises(ReleaseError, match="exists; pass --force"):
         init_operate(repo.root, force=False)
     caller = operate_caller_text()
     repo.write(str(OPERATE_CALLER), caller.replace("      deployments: write", "      deployments: read"))
     assert operate_check() == ("WARN", f"the job in {OPERATE_CALLER} that calls operate.yml lacks deployments: write")
     repo.write(str(OPERATE_CALLER), caller.replace("      issues: write", "      issues: read"))
-    assert (operate_check() or ("", ""))[0] == "PASS"
-    configure(repo, 'deploy.production = "propose"\n')  # now a deploy opens an issue
-    assert operate_check() == ("WARN", f"the job in {OPERATE_CALLER} that calls operate.yml lacks issues: write")
+    lacks_issues = ("WARN", f"the job in {OPERATE_CALLER} that calls operate.yml lacks issues: write")
+    assert operate_check() == lacks_issues  # a health URL: a failing environment opens an incident
+    unchecked = re.sub(r'health = ".*"\n', "", POLICY + ENVIRONMENTS)
+    repo.write(repo.policy_file, unchecked)  # promoted, but no health URL: no incident can open
+    assert operate_check() == ("PASS", f"{OPERATE_CALLER} runs shipyard operate with deployments, actions: write")
+    repo.write(repo.policy_file, unchecked + '\n[autonomy]\ndeploy.production = "propose"\n')  # a deploy opens one
+    assert operate_check() == lacks_issues
 
 
 def test_operate_yml_runs_one_at_a_time_and_takes_the_callers_grant() -> None:
@@ -389,3 +405,309 @@ def test_operate_yml_runs_one_at_a_time_and_takes_the_callers_grant() -> None:
     assert re.search(r"^    concurrency:\n      group: shipyard-operate\n      cancel-in-progress: false$", text, re.M)
     assert not re.search(r"^\s*permissions:", text, re.MULTILINE)
     assert 'cron: "*/10 * * * *"' in operate_caller_text()
+
+
+# -- rollback and incidents (#31) ------------------------------------------------------------
+
+ROLLBACK = ("deploy.yml", "v1.0.0", "v1.0.0", {"environment": "production"})
+
+
+@pytest.fixture
+def failing(setup: tuple[Repo, FakeHttp]) -> tuple[Repo, FakeHttp]:
+    """production got v1.1.0rc1 (it ran v1.0.0 before), and its health check answers 503"""
+    repo, http = setup
+    repo.github.deploy("production", "v1.1.0rc1", minutes(-2), S.IN_PROGRESS, S.SUCCESS)
+    http.answer(PRODUCTION, "<h1>Service Unavailable</h1>\n  database  is down", status=503)
+    return repo, http
+
+
+def production_writes(repo: Repo) -> list[DeploymentState]:
+    """The statuses written on production's v1.1.0rc1 deployment"""
+    [bad] = [d for d in repo.github.envs["production"] if d.ref == "v1.1.0rc1"]
+    return [state for deployment, state, _ in repo.github.status_writes if deployment == bad.id]
+
+
+def fail_three_times(repo: Repo, http: FakeHttp) -> dict[str, Report]:
+    run(repo, http, minutes(0))
+    run(repo, http, minutes(10))
+    return run(repo, http, minutes(20))
+
+
+def incident(repo: Repo) -> Issue:
+    [found] = [i for n, i in repo.github.issues.items() if "incident" in repo.github.labels[n]]
+    return found
+
+
+def test_three_failed_checks_roll_back_to_the_last_good_tag_and_open_one_incident(
+    failing: tuple[Repo, FakeHttp],
+) -> None:
+    repo, http = failing
+    found = run(repo, http, minutes(0))
+    assert "HTTP 503, failing for 0 min, 1 of 3 failed checks to roll back" in found["production"].health
+    run(repo, http, minutes(10))
+    assert repo.github.dispatched == [] and repo.github.issues == {}
+    found = run(repo, http, minutes(20))
+    # v1.0.0 ran here before: a rollback is the deploy exempt from deploying a tag at most once
+    assert repo.github.dispatched == [ROLLBACK]
+    issue = incident(repo)
+    assert issue.title == "Incident: production fails its health checks on v1.1.0rc1"
+    assert "<!-- shipyard:incident env=production tag=v1.1.0rc1 to=v1.0.0 state=rolled-back -->" in issue.body
+    assert "**production** failed 3 health checks in a row on **v1.1.0rc1**, since 2026-10-05 00:00 UTC" in issue.body
+    assert f"- Health check: `{PRODUCTION}`" in issue.body
+    assert "- Last check: HTTP 503" in issue.body
+    assert "- Body: `<h1>Service Unavailable</h1> database is down`" in issue.body
+    assert "started deploy.yml with v1.0.0: https://github.com/o/demo/actions/runs/1" in issue.body
+    assert "the rc, stable lanes don't release" in issue.body
+    assert found["production"].action.startswith(f"marked failure; opened incident #{issue.number}; rolled back")
+    # three failure statuses count the checks; a fourth run writes none, opens and starts nothing
+    found = run(repo, http, minutes(30))
+    assert production_writes(repo) == [S.FAILURE, S.FAILURE, S.FAILURE]
+    assert repo.github.dispatched == [ROLLBACK] and len(repo.github.issues) == 1
+    assert f"incident #{issue.number} open (rolled-back)" in found["production"].action
+    assert "3 of 3 failed checks" in found["production"].health
+
+
+def test_the_incident_comments_once_when_the_rollback_is_healthy(failing: tuple[Repo, FakeHttp]) -> None:
+    repo, http = failing
+    fail_three_times(repo, http)
+    number = incident(repo).number
+    repo.github.deploy("production", "v1.0.0", minutes(25), S.IN_PROGRESS, S.SUCCESS)  # the rollback ran
+    http.answer(PRODUCTION, '{"version": "1.0.0"}')
+    found = run(repo, http, minutes(30))
+    assert repo.github.comments[number] == ["production is healthy again on v1.0.0 (HTTP 200, version 1.0.0)."]
+    assert "state=healthy" in incident(repo).body
+    assert f"comment on incident #{number}: healthy again" in found["production"].action
+    found = run(repo, http, minutes(200))
+    assert len(repo.github.comments[number]) == 1
+    # staging baked v1.1.0rc1 long ago, but it was deployed here already: no promotion again
+    assert repo.github.dispatched == [ROLLBACK]
+    assert "v1.1.0rc1 was deployed here already (failure)" in found["production"].action
+
+
+def test_a_rollback_that_fails_too_comments_and_stops(failing: tuple[Repo, FakeHttp]) -> None:
+    repo, http = failing
+    fail_three_times(repo, http)
+    number = incident(repo).number
+    repo.github.deploy("production", "v1.0.0", minutes(25), S.IN_PROGRESS, S.SUCCESS)  # the rollback ran
+    for at in (30, 40):
+        assert "fails too" not in run(repo, http, minutes(at))["production"].action
+    found = run(repo, http, minutes(50))
+    [comment] = repo.github.comments[number]
+    assert comment.startswith("v1.0.0, the rollback, fails its health checks too (HTTP 503)")
+    assert "doesn't roll production back a second time" in comment
+    assert "no second rollback" in found["production"].action
+    assert "state=stopped" in incident(repo).body
+    found = run(repo, http, minutes(60))
+    assert repo.github.dispatched == [ROLLBACK] and len(repo.github.comments[number]) == 1
+    assert len(repo.github.issues) == 1
+    assert "waiting for a person" in found["production"].action
+
+
+def test_an_open_incident_holds_the_blocker_lanes(failing: tuple[Repo, FakeHttp]) -> None:
+    repo, http = failing
+    fail_three_times(repo, http)
+    issue = incident(repo)
+    repo.merge(1, "Added", "Feature A")
+    configure(repo)  # the merge reset the checkout to main
+
+    def plan(lane: Lane) -> Decision:
+        repo.git.fetch("+refs/heads/main:refs/remotes/origin/main")
+        repo.git.run("checkout", "-q", "--detach", "origin/main")
+        return Planner(repo.git, repo.policy, repo.github, minutes(40)).plan(Event.MANUAL, lane)
+
+    held = plan(Lane.RC)
+    assert held.action == "skip"
+    assert f"held, open 'incident' issues: #{issue.number} {issue.title}" in held.reason
+    assert plan(Lane.DEV).action == "release"  # dev isn't in blocker_lanes
+    repo.github.close_issue(issue.number, "Fixed by the hotfix")
+    assert plan(Lane.RC).action == "release"
+
+
+def test_the_hold_opens_the_incident_but_rolls_nothing_back(failing: tuple[Repo, FakeHttp]) -> None:
+    repo, http = failing
+    repo.github.holds = ["#7 Investigating"]
+    found = fail_three_times(repo, http)
+    assert repo.github.dispatched == []
+    body = incident(repo).body
+    assert "state=proposed" in body
+    assert f"would roll back to v1.0.0, but held by {HOLD_LABEL} #7." in body
+    assert f"Close the open `{HOLD_LABEL}` issues first; then approve the rollback:" in body
+    assert "would roll back to v1.0.0, but held by" in found["production"].action
+    with pytest.raises(ReleaseError, match=f"held by {HOLD_LABEL} #7; close it to approve a rollback"):
+        approve_rollback(repo.policy, repo.github, "production", dry_run=False)
+    assert repo.github.dispatched == []
+
+
+def test_propose_has_the_incident_propose_and_approve_rolls_back_once(failing: tuple[Repo, FakeHttp]) -> None:
+    repo, http = failing
+    configure(repo, 'rollback = "propose"\n')
+    fail_three_times(repo, http)
+    assert repo.github.dispatched == []
+    issue = incident(repo)
+    assert "would roll back to v1.0.0, but rollback autonomy is propose." in issue.body
+    assert "gh workflow run operate.yml -f approve-rollback=production -f dry-run=false" in issue.body
+    assert approve_rollback(repo.policy, repo.github, "production", dry_run=True).startswith("would dispatch")
+    assert repo.github.dispatched == []
+    done = approve_rollback(repo.policy, repo.github, "production", dry_run=False)
+    assert done == f"dispatched deploy.yml with v1.0.0 to production; rolled back for incident #{issue.number}"
+    assert repo.github.dispatched == [ROLLBACK]
+    assert "state=rolled-back" in incident(repo).body
+    [comment] = repo.github.comments[issue.number]
+    assert comment.startswith("Approved: rolled back, started `deploy.yml` with v1.0.0")
+    with pytest.raises(ReleaseError, match="no open incident proposes a rollback of production"):
+        approve_rollback(repo.policy, repo.github, "production", dry_run=False)
+    run(repo, http, minutes(30))
+    assert repo.github.dispatched == [ROLLBACK]
+
+
+def test_observe_opens_the_incident_and_only_says_what_it_would_roll_back(failing: tuple[Repo, FakeHttp]) -> None:
+    repo, http = failing
+    configure(repo, 'rollback = "observe"\n')
+    fail_three_times(repo, http)
+    assert repo.github.dispatched == []
+    body = incident(repo).body
+    assert "state=failing" in body and "would roll back to v1.0.0, but rollback autonomy is observe." in body
+    assert "approve-rollback" not in body
+
+
+@dataclass
+class RefusingIssues(FakeGitHub):
+    """GitHub refusing the first issue shipyard opens, as for a job without issues: write"""
+
+    refused: bool = False
+
+    def create_issue(self, title: str, body: str, labels: Sequence[str] = ()) -> int:
+        if not self.refused:
+            self.refused = True
+            raise ReleaseError("gh issue create failed: HTTP 403")
+        return super().create_issue(title, body, labels)
+
+
+def test_a_queued_rollback_is_not_dispatched_again(failing: tuple[Repo, FakeHttp]) -> None:
+    repo, http = failing
+    refusing = RefusingIssues(envs=repo.github.envs, statuses=repo.github.statuses)
+    repo.github = refusing
+    run(repo, http, minutes(0))
+    run(repo, http, minutes(10))
+    with pytest.raises(ReleaseError, match="grant `issues: write`"):
+        run(repo, http, minutes(20))
+    assert refusing.dispatched == [ROLLBACK] and refusing.issues == {}
+    assert production_writes(repo) == [S.FAILURE, S.FAILURE]  # the third check isn't recorded: it counts again
+    found = run(repo, http, minutes(30))  # the rollback's run is still queued
+    assert refusing.dispatched == [ROLLBACK]
+    assert "rollback to v1.0.0 started already (run 1, queued)" in found["production"].action
+    assert "rollback to v1.0.0 started already (run 1, queued)" in incident(repo).body
+
+
+def test_no_earlier_good_tag_opens_the_incident_without_a_rollback(setup: tuple[Repo, FakeHttp]) -> None:
+    repo, http = setup
+    http.answer(STAGING, "", status=500)
+    found = fail_three_times(repo, http)
+    assert repo.github.dispatched == []
+    assert "no rollback: no earlier tag reached success here" in found["staging"].action
+    assert "to=- state=failing" in incident(repo).body
+
+
+def test_a_closed_incident_is_not_opened_again(failing: tuple[Repo, FakeHttp]) -> None:
+    repo, http = failing
+    configure(repo, 'rollback = "observe"\n')
+    fail_three_times(repo, http)
+    number = incident(repo).number
+    repo.github.close_issue(number, "Known; fixing it")
+    found = run(repo, http, minutes(30))
+    assert repo.github.issues == {}
+    assert f"incident #{number} for v1.1.0rc1 was closed while it failed" in found["production"].action
+
+
+def test_failing_again_after_the_incident_closed_opens_another(failing: tuple[Repo, FakeHttp]) -> None:
+    repo, http = failing
+    configure(repo, 'rollback = "observe"\n')
+    fail_three_times(repo, http)
+    first = incident(repo).number
+    http.answer(PRODUCTION, "ok")
+    run(repo, http, minutes(30))  # healthy again
+    repo.github.now = minutes(35)
+    repo.github.close_issue(first, "Resolved")
+    http.answer(PRODUCTION, "", status=503)
+    for at in (40, 50):
+        run(repo, http, minutes(at))
+    found = run(repo, http, minutes(60))
+    # a stretch of failed checks begun after the close: the person closed the old one, not this
+    second = incident(repo).number
+    assert second != first and "state=failing" in incident(repo).body
+    assert f"opened incident #{second}" in found["production"].action
+
+
+def test_the_rollback_tag_failing_after_its_incident_closed_opens_another(failing: tuple[Repo, FakeHttp]) -> None:
+    repo, http = failing
+    fail_three_times(repo, http)
+    first = incident(repo).number
+    repo.github.deploy("production", "v1.0.0", minutes(25), S.IN_PROGRESS, S.SUCCESS)  # the rollback ran
+    http.answer(PRODUCTION, '{"version": "1.0.0"}')
+    run(repo, http, minutes(30))
+    repo.github.now = minutes(35)
+    repo.github.close_issue(first, "Resolved")
+    http.answer(PRODUCTION, "", status=503)
+    for at in (40, 50):
+        run(repo, http, minutes(at))
+    found = run(repo, http, minutes(60))
+    issue = incident(repo)
+    assert issue.number != first and "env=production tag=v1.0.0 to=- state=failing" in issue.body
+    assert f"opened incident #{issue.number}; no rollback" in found["production"].action
+    assert repo.github.dispatched == [ROLLBACK]  # never back to v1.1.0rc1, whose checks failed
+
+
+def test_a_dry_run_opens_no_incident(failing: tuple[Repo, FakeHttp]) -> None:
+    repo, http = failing
+    run(repo, http, minutes(0))
+    run(repo, http, minutes(10))
+    found = run(repo, http, minutes(20), dry_run=True)
+    assert "would open an incident; would roll back: start deploy.yml with v1.0.0" in found["production"].action
+    assert repo.github.issues == {} and repo.github.dispatched == []
+
+
+def test_an_incident_shows_no_secret_of_the_health_url_and_caps_the_body() -> None:
+    assert shown_url("https://user:pw@Example.com:8443/health?token=s3cret#x") == "https://example.com:8443/health"
+    quoted = excerpt("`x`" + "a" * 1000)
+    assert len(quoted) == 300 and quoted.startswith("'x'") and quoted.endswith("...")
+
+
+def test_an_incident_quotes_no_token_of_the_health_body() -> None:
+    body = (
+        '{"error": "db down", "password": "hunter2", "api_key":"k-123", "Authorization": "Bearer abc.def"}'
+        " dsn=postgres://app:s3cret@db:5432/x token=ghp_0123456789abcdefABCDEF0123456789abcd"
+    )
+    quoted = excerpt(body)
+    for secret in ("hunter2", "k-123", "abc.def", "s3cret", "ghp_0123456789abcdefABCDEF0123456789abcd"):
+        assert secret not in quoted
+    assert '"error": "db down"' in quoted and "postgres://[redacted]@db:5432/x" in quoted
+    assert excerpt("x " + "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZg") == "x [redacted]"  # a long opaque run
+
+
+def test_the_operate_section_is_read_strictly(repo: Repo) -> None:
+    configure(repo)
+    assert (repo.policy.operate.rollback_after, repo.policy.operate.incident_label) == (3, "incident")
+    base = POLICY + ENVIRONMENTS
+    repo.write(repo.policy_file, base + '\n[operate]\nrollback_after = 5\nincident_label = "sev"\n')
+    assert (repo.policy.operate.rollback_after, repo.policy.incident_label) == (5, "sev")
+    for bad, match in (
+        ("rollback_after = 0", r"rollback_after must be in 1\.\.20"),
+        ('incident_label = " "', "incident_label must not be empty"),
+        ("rollback = 3", r"unknown keys \['rollback'\]"),
+    ):
+        repo.write(repo.policy_file, base + f"\n[operate]\n{bad}\n")
+        with pytest.raises(ReleaseError, match=match):
+            _ = repo.policy
+    repo.write(repo.policy_file, base + "\n[operate]\nrollback_after = 0\n")
+    assert {c.name: c.status for c in doctor(repo.root, repo.github)}["policy"] == "FAIL"
+
+
+def test_cli_approve_rollback(failing: tuple[Repo, FakeHttp], tmp_path: Path) -> None:
+    repo, http = failing
+    configure(repo, 'rollback = "propose"\n')
+    fail_three_times(repo, http)
+    summary = tmp_path / "summary.md"
+    argv = ["--repo", str(repo.root), "operate", "--approve-rollback", "production", "--step-summary", str(summary)]
+    assert main(argv, repo.github, http) == 0
+    assert summary.read_text().startswith("dispatched deploy.yml with v1.0.0 to production")
+    assert repo.github.dispatched == [ROLLBACK]

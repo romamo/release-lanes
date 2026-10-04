@@ -165,10 +165,13 @@ When an environment has `health` or `from`, also run `$CR init --operate` in ste
 writes `.github/workflows/operate.yml`, which runs `shipyard operate` every 10 minutes:
 it checks each `health` URL (2xx within 10 s; a JSON body's `version` must name the
 deployed release), records the result as deployment statuses, and promotes a `from`
-environment once its source stayed healthy for `bake_minutes`. Ask whether production
-should deploy by itself after the bake (the default) or wait for approval
+environment once its source stayed healthy for `bake_minutes`. An environment failing
+`[operate] rollback_after` checks in a row (default 3) is rolled back to its last good tag
+and gets an `incident` issue, which holds the rc and stable lanes until closed. Ask whether
+production should deploy by itself after the bake (the default) or wait for approval
 (`deploy.production = "propose"` in `[autonomy]`, approved with `gh workflow run
-operate.yml -f approve=production -f dry-run=false`). Point the user at
+operate.yml -f approve=production -f dry-run=false`), and the same for rollbacks
+(`rollback = "propose"`, approved with `-f approve-rollback=production`). Point the user at
 `.github/workflows/operate.yml` as an extra scheduled workflow, and skip it for a
 library with no environments.
 
