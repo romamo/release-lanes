@@ -5,7 +5,7 @@
 | Verdict | When | Comment says |
 |---|---|---|
 | **implement** | A confirmed bug; or behaviour the docs already promise but the code breaks; or a small additive feature that fits the release phase | The plan in 2 to 4 bullets; "I'll link the PR here" |
-| **feature** | New behaviour beyond a bug fix or a contract tweak (a new command, layer, or workflow) that fits the release phase | The spec PR's link and a hold line naming it; implementers start once it merges ([spec-gate.md](spec-gate.md)) |
+| **feature** | New behaviour beyond a bug fix or a contract tweak (a new command, layer, or workflow) that fits the release phase. A small additive feature such as a new flag stays **implement**, through the design gate | The spec PR's link and a hold line naming it; implementers start once it merges ([spec-gate.md](spec-gate.md)) |
 | **postpone** | A new capability, a new wire contract, or a design that must land with sibling issues | Why now is the wrong time, the plan, and what it waits on. Add the `postponed` label |
 | **clarify** | You can't reproduce it, or it needs a product or spec decision | The exact question, with options and your recommendation |
 | **duplicate** | Same root cause as another issue | A link; close it |
