@@ -27,7 +27,11 @@ new       write the next spec from D/TEMPLATE.md (or the built-in template), rep
           S-NNN and <title>; prints the new path
 check     every spec is well formed: its file name, title, and sections; criterion ids
           unique and sequential; the decisions it names exist in the log and are active;
-          a built spec lists its issues and names every criterion under Verification
+          a built spec lists its issues and names every criterion under Verification.
+          A draft may keep the template's placeholder text (D/TEMPLATE.md, or the
+          built-in template: each paragraph of a section, word for word, past "- none");
+          an approved spec may not in Problem, Behaviour, Acceptance criteria, or Out of
+          scope, and a built spec in no section. No folder D: "no specs", exit 0
 find      specs whose Behaviour touches a TERM (a path matches a backticked path, glob,
           or directory there; any term matches as a substring of the section).
           `find $(git diff --name-only origin/main...)` lists the specs a diff touches
@@ -39,7 +43,8 @@ coverage  for every built spec (or each --spec, whatever its status), list each 
           as text: Python test_*.py and *_test.py; JS/TS *.test.* and *.spec.* and files
           under __tests__; Go *_test.go; every Rust .rs file. Hidden folders and
           node_modules, target, vendor, venv, dist, build are skipped, and so are the
-          lines inside a Python multi-line string (a fixture, not a test)
+          lines inside a Python multi-line string (a fixture, not a test). No folder
+          D (and no --spec): "no specs", exit 0
 
 Exit 0 on success (find: at least one match), 1 when check (or criteria, for its spec)
 finds a problem, find matches nothing, or coverage finds a criterion with no test (or a
@@ -79,6 +84,9 @@ SECTIONS = (
 )
 STATUS = re.compile(r"^status: (\S+)$")
 STATUSES = ("draft", "approved", "built")
+# The sections an approved spec must have filled in past the template's placeholders; a
+# built spec must have filled in every section (Issues and Verification come last)
+FILLED_WHEN_APPROVED = ("Problem", "Behaviour", "Acceptance criteria", "Out of scope")
 CRITERION = re.compile(r"^- S-(\d{3,})-(\d+): (\S.*)$")
 DECISION_ITEM = re.compile(r"^- D-(\d+)\b")
 ISSUE_ITEM = re.compile(r"^- (?:[\w.-]+/[\w.-]+)?#\d+$")
@@ -293,14 +301,73 @@ def decision_states(given: str | None) -> dict[int, str | None] | None:
     return {e.number: e.fields.get("Superseded by") for e in entries}
 
 
+def template(directory: Path) -> str:
+    """The template `new` writes a spec from: D/TEMPLATE.md, or the built-in one"""
+    path = directory / "TEMPLATE.md"
+    return path.read_text(encoding="utf-8") if path.is_file() else TEMPLATE
+
+
+def placeholders(text: str, spec_id: str) -> dict[str, list[list[str]]]:
+    """Each section's placeholder paragraphs in the template text (runs of non-blank
+    lines, S-NNN read as the spec's id), past a bare "- none", which is a real answer"""
+    found: dict[str, list[list[str]]] = {}
+    current: str | None = None
+    paragraph: list[str] = []
+
+    def close() -> None:
+        if current in SECTIONS and paragraph and paragraph != ["- none"]:
+            found.setdefault(current, []).append(list(paragraph))
+        paragraph.clear()
+
+    for line in text.replace("S-NNN", spec_id).splitlines():
+        if line.startswith("## "):
+            close()
+            current = line[3:].strip()
+        elif line.strip():
+            paragraph.append(line.rstrip())
+        else:
+            close()
+    close()
+    return found
+
+
+def placeholder_problems(spec: Spec, template_text: str) -> list[str]:
+    """A placeholder paragraph of the template left word for word in a section the
+    spec's status says is filled in"""
+    if spec.status == "approved":
+        sections: tuple[str, ...] = FILLED_WHEN_APPROVED
+    elif spec.status == "built":
+        sections = SECTIONS
+    else:
+        return []
+    problems = []
+    for section, paragraphs in placeholders(template_text, spec.id).items():
+        if section not in sections:
+            continue
+        lines = spec.sections.get(section, [])
+        body = [line.rstrip() for _, line in lines]
+        for paragraph in paragraphs:
+            at = next(
+                (i for i in range(len(body) - len(paragraph) + 1) if body[i : i + len(paragraph)] == paragraph), None
+            )
+            if at is not None:
+                problems.append(
+                    f"{spec.path}:{lines[at][0]}: {spec.status}, but '{section}' still holds the template's "
+                    f"placeholder: {paragraph[0]}"
+                )
+    return problems
+
+
 def load(directory: Path) -> tuple[list[Spec], list[str]]:
     specs: list[Spec] = []
     problems: list[str] = []
+    template_text = template(directory)
     for path in spec_files(directory):
         spec, found = parse(path)
         problems += found
         if spec is not None:
             specs.append(spec)
+            problems += placeholder_problems(spec, template_text)
     numbers: dict[int, Path] = {}
     for spec in specs:
         if spec.number in numbers:
@@ -339,13 +406,14 @@ def new(directory: Path, slug: str, title: str | None) -> int:
     clash = next((m.group(0) for m in taken if m.group(2) == slug), None)
     if clash:
         raise SpecError(f"{directory / clash} already has the slug {slug!r}")
-    template_path = directory / "TEMPLATE.md"
-    template = template_path.read_text(encoding="utf-8") if template_path.is_file() else TEMPLATE
+    template_text = template(directory)
     for placeholder in ("S-NNN", "<title>"):
-        if placeholder not in template:
-            raise SpecError(f"{template_path} lacks the placeholder {placeholder!r}")
+        if placeholder not in template_text:
+            raise SpecError(f"{directory / 'TEMPLATE.md'} lacks the placeholder {placeholder!r}")
     number = max((int(m.group(1)) for m in taken), default=0) + 1
-    text = template.replace("S-NNN", f"S-{number:03d}").replace("<title>", title or slug.replace("-", " ").capitalize())
+    text = template_text.replace("S-NNN", f"S-{number:03d}").replace(
+        "<title>", title or slug.replace("-", " ").capitalize()
+    )
     path = directory / f"{number:03d}-{slug}.md"
     directory.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
@@ -362,6 +430,7 @@ def criteria(directory: Path, wanted: str) -> int:
     if spec is None:
         raise SpecError(f"no spec S-{int(match.group(1)):03d} in {directory}")
     _, problems = parse(spec.path)
+    problems += placeholder_problems(spec, template(directory))
     for criterion in spec.criteria:
         print(f"{spec.id}-{criterion.number}: {criterion.text}")
     for problem in problems:
@@ -434,6 +503,9 @@ def proofs(root: Path) -> dict[tuple[int, int], list[str]]:
 def coverage(directory: Path, root: Path, wanted: list[str]) -> int:
     if not root.is_dir():
         raise SpecError(f"no folder {root} to look for tests in")
+    if not wanted and not directory.is_dir():
+        print("no specs")
+        return 0
     specs, problems = load(directory)
     numbers = []
     for name in wanted:
@@ -498,6 +570,9 @@ def main() -> int:
             return criteria(args.dir, args.spec)
         if args.command == "coverage":
             return coverage(args.dir, args.root, args.spec)
+        if args.command == "check" and not args.dir.is_dir():
+            print("no specs")
+            return 0
         specs, problems = load(args.dir)
         if args.command == "check":
             problems += check_decisions(specs, decision_states(args.decisions))

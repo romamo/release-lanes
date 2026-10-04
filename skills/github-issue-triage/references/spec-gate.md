@@ -35,7 +35,7 @@ The line under the title says where a spec stands; `specs.py check` accepts only
 | `approved` | The spec PR merged with it: the build may start | The spec PR, when it's ready for review |
 | `built` | Every build issue is closed or closing, and each criterion was checked on the code | The PR that closes the last build issue |
 
-`specs.py check` refuses a `built` spec that lists no build issues, or whose Verification section leaves out a criterion id. `specs.py coverage` (in CI) refuses a `built` spec with a criterion no test names.
+`specs.py check` refuses a `built` spec that lists no build issues, or whose Verification section leaves out a criterion id. It also refuses the template's placeholder text left word for word: a `draft` may keep it, an `approved` spec may not in Problem, Behaviour, Acceptance criteria, or Out of scope, and a `built` spec in any section. `specs.py coverage` (in CI) refuses a `built` spec with a criterion no test names.
 
 ## When the spec merges
 

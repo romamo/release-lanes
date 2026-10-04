@@ -367,3 +367,47 @@ def test_an_environment_deployed_only_before_the_window_still_counts_as_deployed
     assert d.deployed
     assert d.deployments == []
     assert by_name(mx, d)["Deploy frequency"].value is None  # no data, not the releases
+
+
+def backward(nodes: list[Any], cursor: str | None = None) -> dict[str, Any]:
+    """A comments page read newest first: cursor leads to older comments"""
+    return {"pageInfo": {"hasPreviousPage": cursor is not None, "startCursor": cursor}, "nodes": nodes}
+
+
+def comment(at: str, body: str) -> dict[str, Any]:
+    return {"createdAt": at, "body": body}
+
+
+class NoticedBefore(FakeGitHub):
+    """#1 was told "Released in" before the window and again inside it, its first notice a
+    page older than its newest comments; #2's only notice is in the window, a page back"""
+
+    def __init__(self, mx: ModuleType) -> None:
+        super().__init__(mx)
+        self.answers[mx.NOTICES] = self.notices
+        self.answers[mx.NOTICE_COMMENTS] = self.notice_comments
+
+    def notices(self, v: dict[str, Any]) -> dict[str, Any]:
+        newest = [comment(day(45), "Thanks"), comment(day(3), "Released in v1.1.0.")]
+        told = [comment(day(5), "Released in v2.0.0."), comment(day(4), "Thanks")]
+        nodes = [
+            {"number": 1, "createdAt": day(90), "comments": backward(newest, "c1")},
+            {"number": 2, "createdAt": day(9), "comments": backward(told, "c2")},
+        ]
+        return ok({"issues": page(nodes)})
+
+    def notice_comments(self, v: dict[str, Any]) -> dict[str, Any]:
+        older = {
+            "c1": backward([comment(day(80), "Released in v1.0.0.")], "c0"),
+            "c2": backward([comment(day(8), "Triage: implement")]),
+        }
+        return ok({"issue": {"comments": older[v["cursor"]]}})
+
+
+def test_issue_to_release_fetches_a_notice_older_than_the_window(mx: ModuleType) -> None:
+    gh = NoticedBefore(mx)
+    d = mx.fetch("o/r", window(mx), frozenset(), "incident", "release-blocker", run=gh)
+    paged = [v["cursor"] for name, v in gh.calls if name == "NOTICE_COMMENTS"]
+    assert paged == ["c1", "c2"]  # #1 stops at its notice from before the window, not at its first page
+    m = by_name(mx, d)["Issue to release"]
+    assert (m.value, m.extra["count"]) == (pytest.approx(96.0), 1)  # #2 only: day 9 to day 5
