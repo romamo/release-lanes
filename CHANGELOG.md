@@ -30,6 +30,13 @@ bot.
   config also gets a HOLD row for an open `shipyard-hold` issue, with who opened it and
   when; a hold alone doesn't make the watch exit 1. Incidents and holds lead the report,
   and the watch never deploys or rolls back itself (#33)
+- Under `release = "propose"`, the land workflow closes the lane's "Ready to release"
+  issue once the release is tagged, with a comment naming the tag and the run, and says so
+  when the issue proposed another version. A new `close-proposal` job takes the caller's
+  grant: add `issues: write` to the land job in `.github/workflows/release.yml` (`shipyard
+  init` writes it, and `doctor` warns under `release = "propose"` until it is there).
+  `shipyard operate` closes a "Ready to promote" or "Ready to deploy" issue once the
+  environment runs its tag or a later one, whoever deployed it (#40)
 
 ### Fixed
 

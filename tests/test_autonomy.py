@@ -15,7 +15,8 @@ from shipyard.doctor import doctor
 from shipyard.errors import ReleaseError
 from shipyard.planner import Decision, Event, Hotfix, Proposal
 from shipyard.policy import Lane, Policy
-from shipyard.propose import Outcome, marker, propose
+from shipyard.propose import Outcome, close_released, marker, propose, run_url
+from shipyard.version import Version
 
 from .conftest import POLICY, Repo, at_day
 from .test_lanes import plan
@@ -337,3 +338,94 @@ def test_a_held_proposal_says_to_close_the_hold_under_propose_too(repo: Repo) ->
     repo.github.holds = ["#7 Investigating"]
     [rc, _] = propose(repo.git, repo.policy, repo.github, proposed(repo, at_day(1)).proposals)
     assert f"Close the open `{HOLD_LABEL}` issues first" in repo.github.issues[rc.issue].body
+
+
+# -- closing the proposal once released (#40) ------------------------------------------------
+
+RUN = "https://github.com/o/demo/actions/runs/9"
+
+
+def test_a_release_closes_its_lanes_proposal_only(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A")
+    set_autonomy(repo, 'release = "propose"\n')
+    rc, dev = propose(repo.git, repo.policy, repo.github, proposed(repo, at_day(1)).proposals)
+    done = close_released(repo.policy, repo.github, Lane.RC, Version.parse("1.1.0rc1"), RUN)
+    assert done == f"closed proposal #{rc.issue}: v1.1.0rc1 released"
+    assert repo.github.closed == {rc.issue: f"Released v1.1.0rc1 on the rc lane in {RUN}."}
+    assert dev.issue in repo.github.issues  # another lane's proposal stays open
+    assert close_released(repo.policy, repo.github, Lane.RC, Version.parse("1.1.0rc1"), None) == (
+        "no open proposal for the rc lane"
+    )
+
+
+def test_closing_says_when_the_lane_released_another_version(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A")
+    set_autonomy(repo, 'release = "propose"\n')
+    rc, _ = propose(repo.git, repo.policy, repo.github, proposed(repo, at_day(1)).proposals)
+    close_released(repo.policy, repo.github, Lane.RC, Version.parse("1.1.0rc2"), None)
+    assert repo.github.closed[rc.issue] == (
+        "Released v1.1.0rc2 on the rc lane. This issue proposed v1.1.0rc1; the lane released v1.1.0rc2,"
+        " so it is closed too."
+    )
+
+
+def test_closing_reads_no_issue_unless_release_proposes(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A")
+    repo.github.holds = ["#7 Investigating"]
+    rc, _ = propose(repo.git, repo.policy, repo.github, proposed(repo, at_day(1)).proposals)
+    assert close_released(repo.policy, repo.github, Lane.RC, Version.parse("1.1.0rc1"), RUN) == (
+        "release autonomy is act: no proposal to close"
+    )
+    assert rc.issue in repo.github.issues and repo.github.closed == {}
+
+
+def test_the_run_url_comes_from_the_actions_variables() -> None:
+    env = {"GITHUB_SERVER_URL": "https://github.com", "GITHUB_REPOSITORY": "o/demo", "GITHUB_RUN_ID": "9"}
+    assert run_url(env) == RUN
+    assert run_url({**env, "GITHUB_RUN_ID": ""}) is None
+
+
+def test_cli_close_proposal(repo: Repo, capsys: pytest.CaptureFixture[str]) -> None:
+    repo.merge(1, "Added", "Feature A")
+    set_autonomy(repo, 'release = "propose"\n')
+    rc, _ = propose(repo.git, repo.policy, repo.github, proposed(repo, at_day(1)).proposals)
+    args = ["--repo", str(repo.root), "close-proposal", "--lane", "rc", "--version", "1.1.0rc1"]
+    assert main(args, repo.github) == 0
+    assert capsys.readouterr().out == f"closed proposal #{rc.issue}: v1.1.0rc1 released\n"
+    assert rc.issue in repo.github.closed
+
+
+LAND_CALLER = """\
+jobs:
+  land:
+    uses: romamo/shipyard/.github/workflows/land.yml@v0
+    permissions:
+      contents: write
+      actions: write
+{issues}"""
+
+
+def test_doctor_warns_on_a_land_job_that_cannot_close_the_proposal_only_under_propose(repo: Repo) -> None:
+    repo.write(".github/workflows/release.yml", LAND_CALLER.format(issues=""))
+
+    def land_warnings() -> list[str]:
+        found = doctor(repo.root, repo.github)
+        return [c.detail for c in found if c.name == "permissions" and "land job" in c.detail]
+
+    assert land_warnings() == []
+    set_autonomy(repo, 'release = "propose"\n')
+    [detail] = land_warnings()
+    assert detail.startswith("release autonomy is propose") and detail.endswith("grants no `issues: write`: add it")
+    repo.write(".github/workflows/release.yml", LAND_CALLER.format(issues="      issues: write\n"))
+    assert land_warnings() == []
+
+
+def test_land_yml_closes_the_proposal_with_the_callers_grant_only() -> None:
+    # as prepare.yml's propose job: no job asks for `issues`, and no workflow-level block
+    # lends one to the job that takes the caller's grant
+    text = (Path(__file__).parent.parent / ".github" / "workflows" / "land.yml").read_text()
+    assert not re.search(r"^\s+issues:", text, re.MULTILINE)
+    assert "\npermissions:" not in text
+    job = text.split("\n  close-proposal:\n", 1)[1].split("\n  cleanup:\n", 1)[0]
+    assert "    permissions:" not in job and job.startswith("    needs: land\n")
+    assert 'shipyard close-proposal --lane "$LANE" --version "$VERSION"' in job

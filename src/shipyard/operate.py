@@ -11,7 +11,8 @@ GitHub, D-6), and then:
 
 Either deploy follows the environment's deploy autonomy under the hold: act dispatches its
 workflow, propose opens or updates one issue that `--approve <env>` acts on, observe only
-reports. shipyard deploys a tag to an environment at most once: a deployment of that tag
+reports. A proposal closes once the environment runs its tag or a later one, whoever
+deployed it. shipyard deploys a tag to an environment at most once: a deployment of that tag
 there, in any state, means it was tried, and so does a run of the environment's workflow on
 the tag (still queued, or failed before its deploy job made a deployment).
 
@@ -662,6 +663,30 @@ def proposal_body(env: Environment, wanted: Wanted, cause: str) -> str:
     )
 
 
+_TAG_LINE = re.compile(r"<!-- shipyard:tag=(?P<tag>\S+) -->")
+
+
+def _close_deployed(github: GitHub, seen: Observed, dry_run: bool) -> str | None:
+    """Close the environment's open deploy proposal once the environment runs its tag or a
+    later one, whoever deployed it; what it did"""
+    if seen.current is None or seen.tag is None:
+        return None
+    issue = github.find_issue(deploy_marker(seen.env.name))
+    if issue is None:
+        return None
+    found = _TAG_LINE.search(issue.body)
+    proposed = Version.of_tag(found["tag"]) if found else None
+    if proposed is not None and proposed > seen.tag:
+        return None
+    if dry_run:
+        return f"would close proposal #{issue.number}: {seen.tag.tag} deployed"
+    text = f"{seen.env.name} runs {seen.tag.tag} now (deployment {seen.current.id})."
+    if proposed != seen.tag:
+        text += f" This issue proposed {proposed.tag if proposed else 'another tag'}, so it is closed too."
+    github.close_issue(issue.number, text)
+    return f"closed proposal #{issue.number}: {seen.tag.tag} deployed"
+
+
 def _act(
     policy: Policy,
     github: GitHub,
@@ -714,6 +739,7 @@ def operate(
         if incident is not None:
             actions.append(incident)
         wanted = _wanted(seen, observed, tags, now)
+        waits = False  # a deploy waits: its proposal is updated, not closed
         if isinstance(wanted, str):
             actions.append(wanted)
         elif (tried := seen.tried(wanted.tag)) is not None:
@@ -728,7 +754,10 @@ def operate(
                 " shipyard doesn't deploy it again"
             )
         else:
+            waits = True
             actions.append(_act(policy, github, seen.env, wanted, hold, dry_run))
+        if not waits and (closed := _close_deployed(github, seen, dry_run)) is not None:
+            actions.append(closed)
         tag = seen.tag.tag if seen.tag else (seen.current.ref if seen.current else "-")
         health = _health_text(seen, target, rollback_after, now)
         reports.append(Report(name, tag, health, "; ".join(actions)))
@@ -748,7 +777,7 @@ def approve(policy: Policy, github: GitHub, name: str, dry_run: bool) -> str:
     issue = github.find_issue(deploy_marker(name))
     if issue is None:
         raise ReleaseError(f"no open proposal to deploy to {name}; operate opens one when a deploy waits on approval")
-    found = re.search(r"<!-- shipyard:tag=(?P<tag>\S+) -->", issue.body)
+    found = _TAG_LINE.search(issue.body)
     if found is None:
         raise ReleaseError(f"proposal #{issue.number} names no tag; the next operate run rewrites it")
     tag = Version.of_tag(found["tag"])

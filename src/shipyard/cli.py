@@ -5,6 +5,7 @@
   propose         open or update the issue for each release a plan proposed
   prepare         stamp a planned release into the checkout, optionally commit and push it
   land            push, tag, sync main, and publish a release commit that passed CI
+  close-proposal  close the lane's proposal issue once land released it
   cleanup         delete a release commit's work branch
   sync            bring a stable release made off main into main's CHANGELOG (recovery)
   notes           print a release's notes
@@ -38,7 +39,7 @@ from shipyard.launchd import DEFAULT_TOOL, build, install, remove
 from shipyard.operate import Http, UrllibHttp, approve, approve_rollback, operate, summary
 from shipyard.planner import Event, Hotfix, Planner, Proposal
 from shipyard.policy import Lane, Policy
-from shipyard.propose import propose
+from shipyard.propose import close_released, propose, run_url
 from shipyard.stamp import notes, sync
 from shipyard.version import Version
 
@@ -115,6 +116,9 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--sha", required=True)
     p.add_argument("--base", required=True)
     p.add_argument("--date", type=dt.date.fromisoformat, help="YYYY-MM-DD (default: today, UTC)")
+
+    p = sub.add_parser("close-proposal", help="close the lane's proposal issue once land released it")
+    _release_args(p)
 
     p = sub.add_parser("cleanup", help="delete a release commit's work branch")
     p.add_argument("--version", required=True, type=Version.parse)
@@ -263,6 +267,8 @@ def main(argv: list[str], github: GitHub | None = None, http: Http | None = None
                 indent=2,
             )
         )
+    elif args.command == "close-proposal":
+        print(close_released(policy, hub, Lane(args.lane), args.version, run_url(os.environ)))
     elif args.command == "cleanup":
         print("deleted the work branch" if cleanup(git, args.version) else "no work branch to delete")
     elif args.command == "sync":

@@ -316,6 +316,38 @@ def test_approve_deploys_the_proposed_tag_once(setup: tuple[Repo, FakeHttp]) -> 
         approve(repo.policy, repo.github, "qa", dry_run=False)
 
 
+def test_a_proposal_closes_once_its_tag_is_deployed(setup: tuple[Repo, FakeHttp]) -> None:
+    repo, http = setup
+    configure(repo, 'deploy.production = "propose"\n')
+    run(repo, http, minutes(61))
+    [number] = repo.github.issues
+    deployment = repo.github.deploy("production", "v1.1.0rc1", minutes(62), S.IN_PROGRESS)  # a person deploys it
+    run(repo, http, minutes(64))
+    assert number in repo.github.issues  # not running there yet
+    repo.github.deploy("production", "v1.1.0rc1", minutes(65), S.IN_PROGRESS, S.SUCCESS)
+    deployment += 1
+    http.answer(PRODUCTION, '{"version": "v1.1.0rc1"}')
+    assert run(repo, http, minutes(67), dry_run=True)["production"].action.endswith(
+        f"would close proposal #{number}: v1.1.0rc1 deployed"
+    )
+    found = run(repo, http, minutes(67))
+    assert found["production"].action.endswith(f"closed proposal #{number}: v1.1.0rc1 deployed")
+    assert repo.github.closed == {number: f"production runs v1.1.0rc1 now (deployment {deployment})."}
+    assert repo.github.dispatched == []
+
+
+def test_a_proposal_for_an_older_tag_closes_naming_it(setup: tuple[Repo, FakeHttp]) -> None:
+    repo, http = setup
+    configure(repo, 'deploy.production = "propose"\n')
+    run(repo, http, minutes(61))
+    [number] = repo.github.issues
+    tag(repo, "v1.1.0rc2", minutes(62))
+    repo.github.deploy("production", "v1.1.0rc2", minutes(62), S.IN_PROGRESS, S.SUCCESS)
+    http.answer(PRODUCTION, '{"version": "v1.1.0rc2"}')
+    run(repo, http, minutes(70))
+    assert repo.github.closed[number].endswith("This issue proposed v1.1.0rc1, so it is closed too.")
+
+
 # -- a missed lane deploy --------------------------------------------------------------------
 
 

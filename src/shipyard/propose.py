@@ -1,10 +1,12 @@
 """Release autonomy propose: one issue per lane saying what shipyard would release, opened
 once and then kept up to date, so a person can release it by starting the lane"""
 
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
-from shipyard.autonomy import HOLD_LABEL
+from shipyard.autonomy import HOLD_LABEL, Autonomy
 from shipyard.changelog import Changelog, Entry
 from shipyard.doctor import CALLER
 from shipyard.errors import ReleaseError
@@ -12,6 +14,7 @@ from shipyard.github import GitHub
 from shipyard.gitrepo import Git
 from shipyard.planner import Proposal
 from shipyard.policy import Lane, Policy
+from shipyard.version import Version
 
 
 class Outcome(StrEnum):
@@ -98,3 +101,30 @@ def upsert(github: GitHub, mark: str, title: str, body: str, fix: str) -> tuple[
         return found.number, Outcome.UPDATED
     except ReleaseError as exc:
         raise ReleaseError(f"{exc}; if GitHub refused it (403): {fix}") from exc
+
+
+def run_url(env: Mapping[str, str]) -> str | None:
+    """The Actions run's URL, from the variables GitHub sets in every job"""
+    parts = [env.get(name, "") for name in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID")]
+    return "{}/{}/actions/runs/{}".format(*parts) if all(parts) else None
+
+
+def close_released(policy: Policy, github: GitHub, lane: Lane, version: Version, run: str | None) -> str:
+    """Close the lane's open proposal issue once land tagged its release, saying so; only
+    under release = "propose", the one setup whose callers grant the land job `issues: write`"""
+    if policy.autonomy.release is not Autonomy.PROPOSE:
+        return f"release autonomy is {policy.autonomy.release}: no proposal to close"
+    fix = f"grant `issues: write` to the land job in {CALLER}"
+    try:
+        found = github.find_issue(marker(lane))
+        if found is None:
+            return f"no open proposal for the {lane} lane"
+        text = f"Released {version.tag} on the {lane} lane" + (f" in {run}" if run else "") + "."
+        named = re.search(r"would release \*\*(\S+)\*\*", found.body)
+        if named is None or named[1] != version.tag:
+            proposed = named[1] if named else "another version"
+            text += f" This issue proposed {proposed}; the lane released {version.tag}, so it is closed too."
+        github.close_issue(found.number, text)
+    except ReleaseError as exc:
+        raise ReleaseError(f"{exc}; if GitHub refused it (403): {fix}") from exc
+    return f"closed proposal #{found.number}: {version.tag} released"
