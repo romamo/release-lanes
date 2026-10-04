@@ -26,8 +26,9 @@ bot.
   propose; under a hold only a hotfix started by hand does. `doctor` prints the effective
   autonomy per stage and warns on an open hold. Proposing needs `issues: write` on the
   prepare job of the calling workflow, which `shipyard init` now writes; `doctor` warns
-  about it only once a stage is set to propose or a hold is open. Deploy and rollback
-  autonomy take effect once shipyard deploys (#32)
+  about it only once a stage is set to propose or a hold is open. Each `deploy.<name>` must
+  name an environment in `[environments]`. Deploy and rollback autonomy take effect once
+  shipyard deploys (#32)
 
 ## [0.7.0] - 2026-10-04
 

@@ -10,7 +10,7 @@ the planner; deploy and rollback autonomy are parsed and exposed here for the de
 rollback stages to call once they exist."""
 
 import re
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
@@ -116,6 +116,13 @@ class AutonomyPolicy:
             rollback=_level(raw, "rollback", where),
             deploy={EnvironmentName(name): _level(deploy, name, f"{where} [deploy]") for name in deploy},
         )
+
+    def require_environments(self, known: Collection[str], where: str) -> None:
+        """Each deploy.<name> names an environment the config declares in [environments]"""
+        for name in self.deploy:
+            if name.name not in known:
+                declared = ", ".join(known) or "none"
+                raise ReleaseError(f"{where}: deploy.{name} names no environment in [environments]; known: {declared}")
 
     def configured(self, stage: Stage) -> Autonomy:
         if stage.kind is StageKind.RELEASE:

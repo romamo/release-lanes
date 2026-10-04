@@ -180,6 +180,9 @@ class Policy:
             raise ReleaseError(f"{where}: lanes.stable promotes from rc, but lanes.rc is not enabled")
         from shipyard import environments  # it reads tables as this module does, so it imports from here
 
+        declared = environments.parse(top.table("environments", optional=True), lanes)
+        autonomy = AutonomyPolicy.parse(top.table("autonomy", optional=True).raw, f"{where} [autonomy]")
+        autonomy.require_environments(declared.keys(), f"{where} [autonomy]")
         return cls(
             name=top.string("name"),
             mode=top.enum("mode", Mode),
@@ -201,8 +204,8 @@ class Policy:
             release_title=publish.string("release_title", default="{name} {version}"),
             bot_name=bot.string("name", default="github-actions[bot]"),
             bot_email=bot.string("email", default="41898282+github-actions[bot]@users.noreply.github.com"),
-            environments=environments.parse(top.table("environments", optional=True), lanes),
-            autonomy=AutonomyPolicy.parse(top.table("autonomy", optional=True).raw, f"{where} [autonomy]"),
+            environments=declared,
+            autonomy=autonomy,
         )
 
     def rule(self, lane: Lane) -> LaneRule:

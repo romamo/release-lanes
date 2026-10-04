@@ -22,14 +22,23 @@ from .test_lanes import plan
 
 HELD = Hold(("#7 Investigating the 1.1 regression",))
 PRODUCTION = Stage.deploy(EnvironmentName("production"))
+ENVIRONMENTS = """
+[environments.staging]
+lane = "rc"
+workflow = "deploy.yml"
+
+[environments.production]
+from = "staging"
+workflow = "deploy.yml"
+"""
 
 
-def autonomy(text: str) -> AutonomyPolicy:
-    return Policy.parse(tomllib.loads(POLICY + "\n[autonomy]\n" + text), "shipyard.toml").autonomy
+def autonomy(text: str, environments: str = ENVIRONMENTS) -> AutonomyPolicy:
+    return Policy.parse(tomllib.loads(POLICY + environments + "\n[autonomy]\n" + text), "shipyard.toml").autonomy
 
 
 def set_autonomy(repo: Repo, text: str) -> None:
-    repo.write(repo.policy_file, POLICY + "\n[autonomy]\n" + text)
+    repo.write(repo.policy_file, POLICY + ENVIRONMENTS + "\n[autonomy]\n" + text)
 
 
 # -- the config ------------------------------------------------------------------------------
@@ -68,6 +77,20 @@ def test_autonomy_parses_each_stage() -> None:
 def test_autonomy_refuses_what_it_does_not_know(text: str, error: str) -> None:
     with pytest.raises(ReleaseError, match=error):
         autonomy(text)
+
+
+def test_autonomy_deploy_names_a_declared_environment() -> None:
+    known = r"known: staging, production$"
+    with pytest.raises(
+        ReleaseError,
+        match=r"^shipyard\.toml \[autonomy\]: deploy\.qa names no environment in \[environments\]; " + known,
+    ):
+        autonomy('deploy.qa = "propose"\n')
+    with pytest.raises(
+        ReleaseError, match=r"deploy\.production names no environment in \[environments\]; known: none$"
+    ):
+        autonomy('deploy.production = "propose"\n', environments="")
+    assert autonomy('release = "propose"\n', environments="").release is Autonomy.PROPOSE
 
 
 def test_a_deploy_stage_names_its_environment() -> None:

@@ -239,8 +239,9 @@ Opening the proposal issue needs `issues: write` on the prepare job in your
 `.github/workflows/release.yml`; `shipyard init` writes it. A repository set up earlier
 grants `issues: read`, which is enough until a stage is set to `propose` or a hold is
 opened; from then on `doctor` warns until the prepare job grants `issues: write`. `doctor`
-prints the effective autonomy per stage and warns while a hold is open. `deploy` and `rollback` are read and checked now, and
-take effect once shipyard deploys and rolls back.
+prints the effective autonomy per stage and warns while a hold is open. Each `deploy.<name>`
+must name an environment in `[environments]`. `deploy` and `rollback` are read and checked
+now, and take effect once shipyard deploys and rolls back.
 
 ### Versions
 
