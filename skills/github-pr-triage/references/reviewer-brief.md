@@ -20,6 +20,7 @@ Review GitHub PR #{N} of {owner/repo} ("{title}", fixes #{issue}). The repo is a
    - The repo's rules in {rules_files, e.g. AGENTS.md, CLAUDE.md}
    - The settled decisions the diff touches: run `{decisions_script} find $(git diff --name-only origin/{default}...HEAD)` and check the diff against each Rule. A departure is a finding unless the PR records a superseding entry the user approved. Also run `{decisions_script} check` if the PR edits the log
    - Whether the code matches the design in the issue's triage comment, for a contract change
+   - For a PR that builds a spec (its issue links `docs/specs/NNN-<slug>.md`): run `{specs_script} coverage --spec NNN` and read each test it lists. Check the test really asserts its criterion: the script finds names, you judge substance. A criterion this PR delivers with no test, or a test whose assertions don't match its criterion's statement, is a finding. If the PR moves the spec to `status: built`, check that its Verification section says how each criterion was checked on the code, not just that the tests pass, and run `{specs_script} check`
    - Whether CHANGELOG, README, and docs agree with the code
 4. Reproduce each real bug before fixing it. Commit each small fix with a regression test that fails on the old code, on review-{N}, and rerun the affected checks. Leave larger problems as findings.
 5. Final report, under 250 words: verdict (MERGE / MERGE AFTER SMALL FIX / REFUSE), rebase status, test results, findings with file:line (fixed or not), and the HEAD SHA of review-{N}.

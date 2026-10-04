@@ -59,6 +59,14 @@ bot.
   on a pull request of the same repo: BLOCKED while it is open, UNBLOCKED once it
   merges, and the new action state SPEC_REFUSED (exit 1) once it closes unmerged, until
   a newer triage comment decides again (#54)
+- Acceptance tests from specs: a test proves a spec's criterion by naming it,
+  `test_s007_2_...` (Go `TestS007_2...`) or a `proves: S-007-2` comment line, and
+  `specs.py coverage [--spec NNN]` lists each criterion of the built specs with the
+  Python, JS/TS, Go, and Rust tests that prove it, exiting 1 when one has none. A spec
+  carries `status: draft|approved|built` and a Verification section; `check` refuses a
+  built spec that lists no issues or leaves a criterion out of Verification. CI runs
+  `check` and `coverage`, and the reviewer brief checks that each listed test really
+  asserts its criterion (#55)
 
 ### Fixed
 

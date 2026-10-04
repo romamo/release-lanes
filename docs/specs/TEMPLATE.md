@@ -1,5 +1,7 @@
 # S-NNN: <title>
 
+status: draft
+
 ## Problem
 
 Who needs this and what goes wrong without it, in a few sentences. Link the issue it came
@@ -29,3 +31,8 @@ proves one names the id.
 ## Issues
 
 The build issues, filled in once they are filed, one `owner/repo#N` per line.
+
+## Verification
+
+Filled in when the spec reaches `built`: one line per criterion id, saying how it was
+checked against the default branch (beyond its tests) and the result.
