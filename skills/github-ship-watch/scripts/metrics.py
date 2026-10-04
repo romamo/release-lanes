@@ -29,6 +29,11 @@ Measures, each over the --days before now:
                      PRs. A person is a GitHub User whose login doesn't end in "[bot]" and
                      isn't a --bot; apps (github-actions, dependabot, mergify) are Bots. An
                      agent that merges with a person's token counts as that person
+  Agent share        PRs merged in the window whose own work says an agent made them / all
+                     merged PRs: the body carries Claude Code's "Generated with [Claude Code]"
+                     footer, or a commit a "Co-Authored-By: Claude" or "Claude-Session:"
+                     trailer (AGENT_MARKS, case-insensitive). Of those, how many a person
+                     approved in a GitHub review: the human gate
 
 A measure with nothing to measure (no releases, no merges, no deployments) reads "no data",
 never 0. Exit 0 on success, 2 on bad input or a gh failure. Every list is paged; a page GitHub
@@ -55,6 +60,15 @@ STABLE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 NOTICE = re.compile(r"^Released in \S+")  # shipped.py's marker, f"Released in {tag}"
 HEALTHY = re.compile(r"^\S+ is healthy again on ")  # shipyard operate's comment on an incident
 PAGE_INFO = "pageInfo { hasNextPage endCursor }"
+
+# What the work itself says about who made it: a PR is agent-made when its body ("body") or
+# any of its commit messages ("commit") matches one of these, ignoring case. Add another
+# agent's footer or trailer here
+AGENT_MARKS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("body", re.compile(r"Generated with \[Claude Code\]", re.IGNORECASE)),  # Claude Code's PR footer
+    ("commit", re.compile(r"^Co-Authored-By: Claude\b", re.IGNORECASE | re.MULTILINE)),
+    ("commit", re.compile(r"^Claude-Session:", re.IGNORECASE | re.MULTILINE)),
+)
 
 RELEASES = (
     """
@@ -101,13 +115,26 @@ query($owner: String!, $name: String!, $size: Int!, $cursor: String) {
     + PAGE_INFO
     + """
       nodes {
-        number updatedAt mergedAt
+        number updatedAt mergedAt body
         mergeCommit { oid }
         mergedBy { __typename login }
-        commits(first: 1) { nodes { commit { authoredDate } } }
+        commits(first: 100) { """
+    + PAGE_INFO
+    + """ nodes { commit { authoredDate message } } }
         reviews(states: APPROVED, first: 50) { pageInfo { hasNextPage } nodes { author { __typename login } } }
       }
     }
+  }
+}
+"""
+)
+PULL_COMMITS = (
+    """
+query($owner: String!, $name: String!, $size: Int!, $cursor: String, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) { commits(first: $size, after: $cursor) { """
+    + PAGE_INFO
+    + """ nodes { commit { authoredDate message } } } }
   }
 }
 """
@@ -188,6 +215,7 @@ SIZES = {
     RELEASES: 100,
     COMPARE: 100,
     PULLS: 50,
+    PULL_COMMITS: 100,
     DEPLOYMENTS: 100,
     LABELLED: 50,
     LABELLED_COMMENTS: 100,
@@ -414,7 +442,11 @@ def fetch(
     # shipped (a merge's commit date is its merge time; a day covers clock skew)
     cutoff = oldest - dt.timedelta(days=1)
     pulls = pages(run, PULLS, base, sizes, ["pullRequests"], "merged pull requests", lambda n: _older(n, cutoff))
+    for pr in pulls:
+        pull_commits(run, base, sizes, pr)
 
+    # Newest first, back to the window's start; with --environment, also back to a chosen
+    # environment's deployment, so one deployed only before the window still counts as deployed
     deploys = pages(
         run,
         DEPLOYMENTS,
@@ -422,7 +454,7 @@ def fetch(
         sizes,
         ["deployments"],
         "deployments",
-        lambda n: timestamp(n["createdAt"]) < window.start,
+        lambda n: timestamp(n["createdAt"]) < window.start and (not environments or n["environment"] in environments),
     )
     chosen = [d for d in deploys if not environments or d["environment"] in environments]
     deployed = bool(chosen) if environments else bool(deploys)
@@ -435,6 +467,25 @@ def fetch(
     blockers = labelled(run, base, sizes, blocker, since)
     notices = notice_issues(run, base, sizes, since, window)
     return Data(releases, shipped, hotfixes, pulls, deployed, in_window, incidents, blockers, notices)
+
+
+def pull_commits(run: Runner, base: Variables, sizes: Sizes, pr: Node) -> None:
+    """Page the PR's commits forwards while none carries an agent's mark"""
+    commits = pr["commits"]
+    seen: set[str] = set()
+    what = f"the commits of PR #{pr['number']}"
+    while commits["pageInfo"]["hasNextPage"] and not agent_made(pr):
+        cursor = advance(commits["pageInfo"]["endCursor"], seen, what)
+        variables: Variables = {**base, "number": pr["number"], "cursor": cursor}
+        page = dig(sized(run, PULL_COMMITS, variables, sizes, what), ["pullRequest", "commits"], what)
+        commits["nodes"] = commits["nodes"] + page["nodes"]
+        commits["pageInfo"] = page["pageInfo"]
+
+
+def agent_made(pr: Node) -> bool:
+    """The PR's body or one of its commits carries one of AGENT_MARKS"""
+    texts = {"body": [pr["body"] or ""], "commit": [c["commit"]["message"] for c in pr["commits"]["nodes"]]}
+    return any(pattern.search(text) for where, pattern in AGENT_MARKS for text in texts[where])
 
 
 def _older(node: Node, cutoff: dt.datetime) -> bool:
@@ -630,31 +681,65 @@ def person(actor: Node | None, bots: frozenset[str]) -> bool:
     return not login.endswith("[bot]") and login not in bots
 
 
+def approved_by_person(pr: Node, bots: frozenset[str]) -> bool:
+    """A person approved the PR in a GitHub review"""
+    reviews = pr["reviews"]
+    approver = any(person(r["author"], bots) for r in reviews["nodes"])
+    if reviews["pageInfo"]["hasNextPage"] and not approver:
+        fail(f"PR #{pr['number']} has over 50 approvals, none by a person")
+    return approver
+
+
+def merged_in(data: Data, window: Window) -> list[Node]:
+    return [p for p in data.pulls if p["mergedAt"] and timestamp(p["mergedAt"]) in window]
+
+
 def human_touch(data: Data, window: Window) -> Measure:
     name = "Human touch"
-    merged = [p for p in data.pulls if p["mergedAt"] and timestamp(p["mergedAt"]) in window]
+    merged = merged_in(data, window)
     if not merged:
         return Measure(name, None, NO_DATA, "no PR merged in the window", "ratio")
     by_person = approved = touched = 0
     for pr in merged:
         merger = person(pr["mergedBy"], data.bots)
-        reviews = pr["reviews"]
-        approver = any(person(r["author"], data.bots) for r in reviews["nodes"])
-        if reviews["pageInfo"]["hasNextPage"] and not approver:
-            fail(f"PR #{pr['number']} has over 50 approvals, none by a person")
+        approver = approved_by_person(pr, data.bots)
         by_person += merger
         approved += approver
         touched += merger or approver
     rate = touched / len(merged)
-    detail = f"{touched} of {len(merged)} merges: {by_person} merged by a person, {approved} approved by one"
+    detail = (
+        f"{touched} of {len(merged)} merges: {by_person} merged by a person, {approved} approved by one"
+        " (an agent merging with a person's token counts as the person)"
+    )
     extra = {"merges": len(merged), "merged_by_person": by_person, "approved_by_person": approved}
+    return Measure(name, rate, f"{rate:.0%}", detail, "ratio", extra)
+
+
+def agent_share(data: Data, window: Window) -> Measure:
+    name = "Agent share"
+    merged = merged_in(data, window)
+    if not merged:
+        return Measure(name, None, NO_DATA, "no PR merged in the window", "ratio")
+    made = [pr for pr in merged if agent_made(pr)]
+    gated = sum(approved_by_person(pr, data.bots) for pr in made)
+    rate = len(made) / len(merged)
+    detail = f"{len(made)} of {len(merged)} merges agent-made; a person approved {gated} of them in a review"
+    extra = {"merges": len(merged), "agent_made": len(made), "approved_by_person": gated}
     return Measure(name, rate, f"{rate:.0%}", detail, "ratio", extra)
 
 
 def measures(data: Data, window: Window) -> list[Measure]:
     return [
         f(data, window)
-        for f in (deploy_frequency, lead_time, change_failure_rate, time_to_restore, issue_to_release, human_touch)
+        for f in (
+            deploy_frequency,
+            lead_time,
+            change_failure_rate,
+            time_to_restore,
+            issue_to_release,
+            human_touch,
+            agent_share,
+        )
     ]
 
 

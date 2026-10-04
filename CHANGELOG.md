@@ -44,8 +44,11 @@ bot.
   and p90), change failure rate (incidents per deploy, or `release-blocker` issues and
   hotfix releases per release), time to restore (an incident to operate's "healthy
   again" comment or its close), issue to release (an issue to its "Released in" notice),
-  and human touch (merges a person merged or approved). An empty measure reads "no
-  data", never 0. A table by default, `--json`, and `--markdown` for a weekly post on
+  human touch (merges a person merged or approved; an agent merging with a person's
+  token counts as the person), and agent share (merged PRs whose body carries Claude
+  Code's footer or whose commits carry a `Co-Authored-By: Claude` or `Claude-Session:`
+  trailer, and how many of those a person approved in a review). An empty measure reads
+  "no data", never 0. A table by default, `--json`, and `--markdown` for a weekly post on
   the roadmap issue, which the user schedules (#56)
 
 ### Fixed

@@ -46,14 +46,20 @@ def pull(
     first: str = "",
     by: tuple[str, str] = ("User", "alice"),
     approvers: tuple[tuple[str, str], ...] = (),
+    body: str = "",
+    messages: tuple[str, ...] = ("Fix a thing",),
+    more: str | None = None,
 ) -> dict[str, Any]:
+    """messages: the PR's commit messages, oldest first; more: a cursor to more commits"""
+    commits = [{"commit": {"authoredDate": first or merged, "message": m}} for m in messages]
     return {
         "number": number,
         "updatedAt": merged,
         "mergedAt": merged,
+        "body": body,
         "mergeCommit": {"oid": merge or f"m{number}"},
         "mergedBy": {"__typename": by[0], "login": by[1]},
-        "commits": {"nodes": [{"commit": {"authoredDate": first or merged}}]},
+        "commits": {"pageInfo": {"hasNextPage": more is not None, "endCursor": more}, "nodes": commits},
         "reviews": {
             "pageInfo": {"hasNextPage": False},
             "nodes": [{"author": {"__typename": t, "login": login}} for t, login in approvers],
@@ -222,6 +228,30 @@ def test_human_touch_counts_a_person_merging_or_approving(mx: ModuleType) -> Non
     m = by_name(mx, d)["Human touch"]
     assert m.value == pytest.approx(2 / 5)
     assert m.extra == {"merges": 5, "merged_by_person": 1, "approved_by_person": 1}
+    assert "an agent merging with a person's token counts as the person" in m.detail
+
+
+def test_agent_share_reads_the_footer_and_trailers_and_the_human_gate(mx: ModuleType) -> None:
+    footer = "Summary\n\n🤖 generated with [claude code](https://claude.com/claude-code)"
+    trailer = "Fix it\n\nco-authored-by: Claude Opus 5.5 <noreply@anthropic.com>"
+    session = "Fix it\n\nCLAUDE-SESSION: https://claude.ai/code/session_x"
+    pulls = [
+        pull(1, day(1), body=footer, approvers=(("User", "bob"),)),  # agent-made, a person approved
+        pull(2, day(2), messages=("Start", trailer)),  # a later commit's trailer
+        pull(3, day(3), messages=(session,), approvers=(("Bot", "copilot"),)),  # a bot's approval is no gate
+        pull(4, day(4), body="Mentions Co-Authored-By: Claude mid-line", approvers=(("User", "bob"),)),
+        pull(5, day(5), messages=("Thanks to Claude-Session: none",)),  # not a trailer at a line's start
+        pull(6, day(50), body=footer),  # merged before the window
+    ]
+    m = by_name(mx, data(mx, pulls=pulls))["Agent share"]
+    assert m.value == pytest.approx(3 / 5)
+    assert m.extra == {"merges": 5, "agent_made": 3, "approved_by_person": 1}
+    assert m.detail == "3 of 5 merges agent-made; a person approved 1 of them in a review"
+
+
+def test_agent_share_is_zero_without_a_mark_and_no_data_without_merges(mx: ModuleType) -> None:
+    assert by_name(mx, data(mx, pulls=[pull(1, day(1))]))["Agent share"].text == "0%"
+    assert by_name(mx, data(mx))["Agent share"].value is None
 
 
 def test_the_markdown_form_is_a_table(mx: ModuleType) -> None:
@@ -254,7 +284,8 @@ class FakeGitHub:
             mx.COMPARE: self.compare,
             mx.LINE: self.line,
             mx.PULLS: self.pulls,
-            mx.DEPLOYMENTS: lambda v: ok({"deployments": page([], totalCount=0)}),
+            mx.PULL_COMMITS: self.pull_commits,
+            mx.DEPLOYMENTS: self.deployments,
             mx.LABELLED: lambda v: ok({"issues": page([])}),
             mx.NOTICES: lambda v: ok({"issues": page([])}),
         }
@@ -280,7 +311,15 @@ class FakeGitHub:
         return ok({"line": {"compare": {"status": "BEHIND"}}})
 
     def pulls(self, v: dict[str, Any]) -> dict[str, Any]:
-        return ok({"pullRequests": page([pull(1, day(3), "c1", first=day(4))])})
+        return ok({"pullRequests": page([pull(1, day(3), "c1", first=day(4), more="p1")])})
+
+    def pull_commits(self, v: dict[str, Any]) -> dict[str, Any]:
+        assert (v["number"], v["cursor"]) == (1, "p1")
+        commit = {"commit": {"authoredDate": day(3), "message": "Last\n\nClaude-Session: https://x"}}
+        return ok({"pullRequest": {"commits": page([commit])}})
+
+    def deployments(self, v: dict[str, Any]) -> dict[str, Any]:
+        return ok({"deployments": page([], totalCount=0)})
 
 
 def test_fetch_pages_shrinks_rejected_pages_and_finds_a_hotfix(mx: ModuleType) -> None:
@@ -295,6 +334,7 @@ def test_fetch_pages_shrinks_rejected_pages_and_finds_a_hotfix(mx: ModuleType) -
     assert sizes == [100, 50, 25, 25]  # halved until accepted, and the smaller size stuck
     found = by_name(mx, d)
     assert found["Lead time for changes"].value == pytest.approx(48.0)
+    assert found["Agent share"].extra["agent_made"] == 1  # the trailer was on the PR's second page of commits
     assert found["Change failure rate"].value == pytest.approx(1.0)  # the one release was a hotfix
 
 
@@ -309,3 +349,21 @@ def test_a_page_rejected_at_the_floor_fails(mx: ModuleType, capsys: pytest.Captu
 def test_a_malformed_repo_fails(mx: ModuleType) -> None:
     with pytest.raises(SystemExit):
         mx.fetch("no-slash", window(mx), frozenset(), "incident", "release-blocker", run=FakeGitHub(mx))
+
+
+class DeployedLongAgo(FakeGitHub):
+    """Recent deployments to staging only; production's last one is on the second page"""
+
+    def deployments(self, v: dict[str, Any]) -> dict[str, Any]:
+        if "cursor" not in v:
+            nodes = [deployment("staging", day(1), "SUCCESS"), deployment("staging", day(40), "SUCCESS")]
+            return ok({"deployments": page(nodes, "d1", totalCount=3)})
+        return ok({"deployments": page([deployment("production", day(60), "SUCCESS")], totalCount=3)})
+
+
+def test_an_environment_deployed_only_before_the_window_still_counts_as_deployed(mx: ModuleType) -> None:
+    gh = DeployedLongAgo(mx)
+    d = mx.fetch("o/r", window(mx), frozenset({"production"}), "incident", "release-blocker", run=gh)
+    assert d.deployed
+    assert d.deployments == []
+    assert by_name(mx, d)["Deploy frequency"].value is None  # no data, not the releases
