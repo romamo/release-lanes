@@ -252,7 +252,9 @@ most once: a deployment of that tag there, in any state, means it was tried, and
 run of its workflow on the tag (still queued, or failed before its deploy job made a
 deployment); a failed one is not retried. Approve a proposal with `gh workflow run operate.yml -f
 approve=<environment> -f dry-run=false`: it deploys the proposed tag once and closes the
-issue, under `propose` or `observe`, but not while a hold is open. The run summary lists
+issue, under `propose` or `observe`, but not while a hold is open. A proposal also closes,
+with a comment, once the environment runs its tag (or a later one), whoever deployed it. The
+run summary lists
 each environment's tag, health, and what the run did; `shipyard operate --dry-run` shows the
 same and changes nothing.
 
@@ -311,7 +313,9 @@ rollback = "act"
   `<lane>`", with the version and its entries, and updates that same issue on later runs. A
   person releases by starting the lane by hand: `gh workflow run release.yml -f lane=<lane>
   -f dry-run=false`. A lane started by hand is a person acting, so it releases under
-  `observe` and `propose`; `lane=policy` follows the policy like a scheduled run
+  `observe` and `propose`; `lane=policy` follows the policy like a scheduled run. Once the
+  release is tagged, the land workflow closes the lane's issue with a comment naming the tag
+  and the run, and says so when the issue proposed another version
 - **The stop switch**: any open issue labelled `shipyard-hold` turns every `act` into
   `propose` for the repository. One label, no commit, so it works from a phone. While it is
   open no release happens by itself, the run summary names the hold, and a lane started by
@@ -321,7 +325,9 @@ rollback = "act"
 Opening the proposal issue needs `issues: write` on the prepare job in your
 `.github/workflows/release.yml`; `shipyard init` writes it. A repository set up earlier
 grants `issues: read`, which is enough until a stage is set to `propose` or a hold is
-opened; from then on `doctor` warns until the prepare job grants `issues: write`. `doctor`
+opened; from then on `doctor` warns until the prepare job grants `issues: write`. Under
+`release = "propose"` closing the issue once released needs `issues: write` on the land job
+too; `doctor` warns until it has it. `doctor`
 prints the effective autonomy per stage and warns while a hold is open. Each `deploy.<name>`
 must name an environment in `[environments]`. `deploy` and `rollback` take effect in
 `shipyard operate` (see Operate above).
@@ -349,6 +355,7 @@ The workflows call these; you can run them locally too.
 | `propose` | Open or update the issue for each release a plan proposed |
 | `prepare` | Stamp a planned release; `--commit`, `--push` |
 | `land` | Push, tag, sync main, and publish a release commit that passed CI |
+| `close-proposal` | Close the lane's proposal issue once its release landed, under `release = "propose"` |
 | `cleanup` | Delete a release commit's work branch |
 | `sync` | Bring a stable release made off main into main, to recover a failed sync |
 | `notes` | Print a release's notes |

@@ -229,6 +229,16 @@ def _autonomy(policy: Policy, github: GitHub | None, caller: Path) -> tuple[list
             " `issues: write`: change its `issues: read` to `issues: write`"
         )
         checks.append(Check("WARN", "permissions", detail))
+    if (
+        policy.autonomy.release is Autonomy.PROPOSE
+        and caller.is_file()
+        and _job_grants(caller.read_text("utf-8"), "land.yml", "issues") is False
+    ):
+        detail = (
+            "release autonomy is propose, so a release closes its lane's proposal issue, but the land job in"
+            f" {CALLER} grants no `issues: write`: add it"
+        )
+        checks.append(Check("WARN", "permissions", detail))
     return checks, hold
 
 
