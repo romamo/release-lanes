@@ -36,7 +36,7 @@ def detect(root: Path) -> Detected:
             version_files = VersionFiles.PYPROJECT
     changelog = root / "CHANGELOG.md"
     if not changelog.is_file():
-        raise ReleaseError("no CHANGELOG.md: shipyard releases what its Unreleased section lists; add one first")
+        raise ReleaseError("no CHANGELOG.md, whose Unreleased section shipyard releases; add one first")
     text = changelog.read_text(encoding="utf-8")
     if "## [Unreleased]" in text:
         style = Style.KEEP_A_CHANGELOG
