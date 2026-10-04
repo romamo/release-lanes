@@ -271,3 +271,13 @@ def test_prepare_yml_never_asks_a_caller_for_issues_write() -> None:
     propose_job = text.split("\n  propose:\n", 1)[1]
     assert "\n    permissions:" not in propose_job
     assert "needs.prepare.outputs.action == 'propose' && needs.prepare.outputs.mode == 'release'" in propose_job
+
+
+def test_a_held_proposal_says_to_close_the_hold_under_propose_too(repo: Repo) -> None:
+    # under release = "propose" a hold still refuses the hand-started lane, so the issue
+    # must say to close the hold, not just to start the lane
+    repo.merge(1, "Added", "Feature A")
+    set_autonomy(repo, 'release = "propose"\n')
+    repo.github.holds = ["#7 Investigating"]
+    [rc, _] = propose(repo.git, repo.policy, repo.github, proposed(repo, at_day(1)).proposals)
+    assert f"Close the open `{HOLD_LABEL}` issues first" in repo.github.issues[rc.issue].body

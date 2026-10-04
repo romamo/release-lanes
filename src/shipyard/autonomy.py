@@ -131,8 +131,9 @@ class AutonomyPolicy:
         return Autonomy.PROPOSE if level is Autonomy.ACT and hold.on else level
 
     def cause(self, stage: Stage, hold: Hold) -> str:
-        """Why the stage doesn't act: the hold, or the configured level"""
-        if self.configured(stage) is Autonomy.ACT and hold.on:
+        """Why the stage doesn't act: the hold, or the configured level. Under propose the
+        hold still names itself, as it also refuses a person starting the stage by hand"""
+        if self.configured(stage) is not Autonomy.OBSERVE and hold.on:
             return hold.reason
         return f"{stage} autonomy is {self.configured(stage)}"
 
