@@ -9,7 +9,7 @@ From a GitHub issue to a published release, run by agents and shipyard's release
 | Land | `github-pr-triage` skill | Review each PR in its own worktree, fix small problems, merge only on green CI |
 | Release | shipyard (`prepare.yml`, `land.yml`) | Cut the release on its lane when the policy says one is due, run CI on it, tag, publish |
 | Watch | `github-ship-watch` skill | On a loop or schedule: catch a failed or stalled release run, a release missing from PyPI, unannounced fixes, and untriaged issues; finish what the policy decided |
-| Set up | `release-lanes-setup` skill | Wire a repository to shipyard: package checks, CI, publishing, the policy, a dry run |
+| Set up | `shipyard-setup` skill | Wire a repository to shipyard: package checks, CI, publishing, the policy, a dry run |
 
 [docs/flow.md](docs/flow.md) shows what to say to run each stage, alone or all at once.
 
@@ -97,7 +97,7 @@ Merge it, run the Release workflow by hand with dry-run on, read the release com
 run summary, then set `mode = "release"`.
 
 An agent can do the whole setup with the skill in
-[`skills/release-lanes-setup`](skills/release-lanes-setup/SKILL.md).
+[`skills/shipyard-setup`](skills/shipyard-setup/SKILL.md).
 
 ### The policy
 

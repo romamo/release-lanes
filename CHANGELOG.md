@@ -7,6 +7,14 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- The `release-lanes-setup` skill is now `shipyard-setup`: `/shipyard-setup` (or
+  `/shipyard:shipyard-setup` from the plugin) replaces `/release-lanes-setup`. A checkout
+  linked into `~/.agents/skills` re-runs the link loop from the README and removes the
+  dangling `release-lanes-setup` link. "Set up release lanes" and "add a release bot"
+  still find it
+
 ### Fixed
 
 - The design gate finds an open decisions PR by the log file it changes, not by

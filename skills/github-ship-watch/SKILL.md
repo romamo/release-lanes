@@ -1,6 +1,6 @@
 ---
 name: github-ship-watch
-description: Watch a GitHub repo's issue-to-release pipeline on a loop or a schedule, and finish what its standing policy already decided. Reports a failed or stalled release bot, a release missing from PyPI, fixed issues not yet told which version shipped them, and issues that triage owes; then reruns a flaky release job, starts a stalled lane, posts the shipped notices, and hands new issues to github-issue-triage when asked. Use when the user asks to "watch the repo", "keep it shipping", "babysit releases", "check the release went out", or sets up /loop or /schedule for a repo. Not for triaging a backlog by hand (github-issue-triage), landing PRs (github-pr-triage), or setting up the bot (release-lanes-setup).
+description: Watch a GitHub repo's issue-to-release pipeline on a loop or a schedule, and finish what its standing policy already decided. Reports a failed or stalled release bot, a release missing from PyPI, fixed issues not yet told which version shipped them, and issues that triage owes; then reruns a flaky release job, starts a stalled lane, posts the shipped notices, and hands new issues to github-issue-triage when asked. Use when the user asks to "watch the repo", "keep it shipping", "babysit releases", "check the release went out", or sets up /loop or /schedule for a repo. Not for triaging a backlog by hand (github-issue-triage), landing PRs (github-pr-triage), or setting up shipyard (shipyard-setup).
 ---
 
 # GitHub Ship Watch
