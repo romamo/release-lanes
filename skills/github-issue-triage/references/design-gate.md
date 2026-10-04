@@ -49,4 +49,11 @@ uv run --no-project python <skill>/scripts/decisions.py add \
 - **Enforced by** names the test or lint that fails on a violation, or "review" until one exists
 - **To change a rule, supersede it** (`--supersedes D-n`) with the user's answer as the source. Never edit an old entry's rule
 
-**One decisions PR per pass.** Ids are sequential, so two PRs that each add an entry both take the same `D-n` and collide when the second merges. The orchestrating session records every decision of a pass in one docs PR of its own, opened before it dispatches implementers, and gives each implementer the rule's text and id in its brief; implementer agents never edit the log. Before opening it, check for an open PR that already edits the log (`gh pr list --search "DECISIONS in:title" --state open`, or the log's path in `gh pr list --json files`): if there is one, add to that PR rather than starting a second. Run `decisions.py check` before pushing; github-pr-triage runs it on review too.
+**One decisions PR per pass.** Ids are sequential, so two PRs that each add an entry both take the same `D-n` and collide when the second merges. The orchestrating session records every decision of a pass in one docs PR of its own, opened before it dispatches implementers, and gives each implementer the rule's text and id in its brief; implementer agents never edit the log. Before opening it, check for an open PR that already edits the log, by the files it changes rather than its title (a title like "Record D-1 and D-2" never says "decisions"):
+
+```bash
+gh pr list --state open --json number,title,files \
+  --jq '.[] | select(any(.files[]; .path == "DECISIONS.md" or .path == "docs/decisions.md")) | "#\(.number) \(.title)"'
+```
+
+If there is one, add to that PR rather than starting a second. Run `decisions.py check` before pushing; github-pr-triage runs it on review too.

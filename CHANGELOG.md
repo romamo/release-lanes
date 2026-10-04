@@ -7,6 +7,11 @@ bot.
 
 ## [Unreleased]
 
+### Fixed
+
+- The design gate finds an open decisions PR by the log file it changes, not by
+  `DECISIONS` in its title, which missed a PR titled "Record D-1 and D-2"
+
 ## [0.5.2] - 2026-10-04
 
 ### Fixed
