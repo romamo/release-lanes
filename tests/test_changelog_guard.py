@@ -187,3 +187,87 @@ def test_union_of_plain_bullets_adds_no_blank_line(tmp_path: Path) -> None:
 
     assert guard(tmp_path, "union", "CHANGELOG.md").returncode == 0
     assert path.read_text() == "### Fixed\n\n- A\n- B\n"
+
+
+REL = "## [0.5.2] - 2026-10-04\n\n"
+# The PR, cut before 0.5.2, adds an Added heading and entry above Unreleased's Fixed
+SYNC_BEFORE = TOP + "### Fixed\n\n- A\n\n" + OLD
+SYNC_PR = TOP + "### Added\n\n- C\n\n### Fixed\n\n- A\n\n" + OLD
+
+
+def synced_with_pr(tmp_path: Path, *mains: str) -> Path:
+    """main moved through `mains` after the PR branched; the PR is checked out, not yet rebased"""
+    root = scratch(tmp_path, SYNC_BEFORE)
+    git(root, "switch", "-q", "-c", "pr")
+    commit(root, SYNC_PR, "pr")
+    git(root, "switch", "-q", "main")
+    for n, text in enumerate(mains):
+        commit(root, text, f"main {n}")
+    git(root, "switch", "-q", "pr")
+    return root
+
+
+def released_tail(text: str) -> str:
+    return text[text.index("## [0.5.2]") :]
+
+
+def test_move_puts_a_bullet_whose_heading_union_absorbed_under_that_heading(tmp_path: Path) -> None:
+    # The #82 shape: 0.5.2 synced into main, then an Added entry landed in Unreleased. Git moves
+    # the shared "### Added" line out of the conflict block, so after union the PR's entry sits
+    # right under the release heading, with no heading of its own
+    released = TOP + REL + "### Fixed\n\n- A\n\n" + OLD
+    main = TOP + "### Added\n\n- X\n\n" + REL + "### Fixed\n\n- A\n\n" + OLD
+    root = synced_with_pr(tmp_path, released, main)
+    assert rebase(root)
+    assert guard(root, "union", "CHANGELOG.md").returncode == 0
+    assert "## [0.5.2] - 2026-10-04\n\n- C\n\n### Fixed\n" in (root / "CHANGELOG.md").read_text()
+
+    move = guard(root, "move", "--base", "main")
+    assert move.returncode == 0, move.stderr
+    assert "Added (1)" in move.stdout
+    text = (root / "CHANGELOG.md").read_text()
+    assert section(text, "## [Unreleased]") == "## [Unreleased]\n\n### Added\n\n- X\n- C\n\n"
+    assert released_tail(text) == released_tail(main)
+    assert guard(root, "check", "--base", "main").returncode == 0
+
+
+def test_move_after_a_release_sync_creates_the_heading_in_an_empty_unreleased(tmp_path: Path) -> None:
+    # Unreleased is empty after the sync and the release has Added and Fixed: the entry
+    # goes under a new Added heading in Unreleased
+    main = TOP + "### Added\n\n- W\n\n### Fixed\n\n- A\n\n" + OLD
+    released = TOP + REL + "### Added\n\n- W\n\n### Fixed\n\n- A\n\n" + OLD
+    root = synced_with_pr(tmp_path, main, released)
+    assert rebase(root)
+    assert guard(root, "union", "CHANGELOG.md").returncode == 0
+
+    move = guard(root, "move", "--base", "main")
+    assert move.returncode == 0, move.stderr
+    text = (root / "CHANGELOG.md").read_text()
+    assert section(text, "## [Unreleased]") == "## [Unreleased]\n\n### Added\n\n- C\n\n"
+    assert released_tail(text) == released_tail(released)
+    assert guard(root, "check", "--base", "main").returncode == 0
+
+
+def test_move_creates_an_absorbed_heading_missing_from_unreleased_in_order(tmp_path: Path) -> None:
+    # The absorbed shape one release down: the entry sits right under 0.5.1, and the nearest
+    # heading above it is 0.5.2's Added, which Unreleased does not have yet
+    base = TOP + "### Fixed\n\n- E\n\n" + REL + "### Added\n\n- W\n\n" + OLD
+    root = scratch(tmp_path, base)
+    (root / "CHANGELOG.md").write_text(base.replace(OLD, OLD.replace("01\n\n", "01\n\n- C\n\n", 1)))
+
+    move = guard(root, "move", "--base", "HEAD")
+    assert move.returncode == 0, move.stderr
+    assert (root / "CHANGELOG.md").read_text() == base.replace(TOP, TOP + "### Added\n\n- C\n\n", 1)
+    assert guard(root, "check", "--base", "HEAD").returncode == 0
+
+
+def test_move_refuses_an_entry_with_no_heading_anywhere_above(tmp_path: Path) -> None:
+    base = TOP + REL + "### Fixed\n\n- A\n\n" + OLD
+    root = scratch(tmp_path, base)
+    misplaced = base.replace(REL, REL + "- C\n\n", 1)
+    (root / "CHANGELOG.md").write_text(misplaced)
+
+    move = guard(root, "move", "--base", "HEAD")
+    assert move.returncode == 2
+    assert "no ### heading above them" in move.stderr
+    assert (root / "CHANGELOG.md").read_text() == misplaced
