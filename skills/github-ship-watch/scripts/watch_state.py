@@ -3,7 +3,7 @@
 recent releases, the environments shipyard operate runs, and the issue intake.
 
 Usage: watch_state.py <owner/repo> [--repo-dir PATH] [--releases N] [--grace MIN]
-                      [--tool SPEC] [--json]
+                      [--tool SPEC] [--incident-label LABEL] [--json]
 
 Release bot (a repo with .github/shipyard.toml, or its alias .github/release-policy.toml):
   BOT_FAILED      the bot's latest finished run failed (cancelled runs are ignored:
@@ -50,6 +50,9 @@ deployments and issues shipyard operate writes):
 Intake (github-issue-triage's triage_state.py):
   ISSUES          issues needing triage action, counted by state
   PRS_OPEN        open non-draft pull requests (reported, never an action by itself)
+
+--incident-label names the label the repo's incidents carry, in place of the config's
+[operate] incident_label (fleet.py passes a fleet file's incident_label this way).
 
 Holds and incidents lead the report. Exit 0 when nothing needs action, 1 when any
 BOT_FAILED, BOT_STALLED, NOT_PUBLISHED, UNANNOUNCED, ISSUES, OPERATE_FAILED, UNHEALTHY,
@@ -371,9 +374,10 @@ def ago(span: dt.timedelta) -> str:
     return f"{minutes // (24 * 60)} d"
 
 
-def config(text: str, policy: Path) -> Config:
+def config(text: str, policy: Path, incident_label: str | None = None) -> Config:
     """The environments and the incident label of the config, read as shipyard reads it: with
-    tomllib on Python 3.11+, with the regex fallback on 3.10"""
+    tomllib on Python 3.11+, with the regex fallback on 3.10. A given incident_label (the
+    --incident-label flag) takes the place of the config's, which is still checked"""
     if tomllib is None:
         envs, levels = environments_310(text, policy), deploy_autonomy_310(text, policy)
         label = incident_label_310(text, policy)
@@ -384,7 +388,7 @@ def config(text: str, policy: Path) -> Config:
             raise Refused(f"error: {policy}: {exc}") from None
         envs, levels = environments_toml(raw, policy), deploy_autonomy_toml(raw, policy)
         label = incident_label_toml(raw, policy)
-    return Config([replace(e, deploy=levels.get(e.name, "act")) for e in envs], label)
+    return Config([replace(e, deploy=levels.get(e.name, "act")) for e in envs], incident_label or label)
 
 
 def autonomy_level(value: object, name: str, policy: Path) -> str:
@@ -841,15 +845,23 @@ def intake_rows(repo: str) -> list[Row]:
     return rows
 
 
-def main() -> int:
+def arguments() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("repo", help="owner/name")
     parser.add_argument("--repo-dir", default=".", help="local checkout (default: cwd)")
     parser.add_argument("--releases", type=int, default=3, help="newest version tags to check")
     parser.add_argument("--grace", type=int, default=20, help="minutes a run or an upload may take")
     parser.add_argument("--tool", default="git+https://github.com/romamo/shipyard@v0", help="where uvx gets shipyard")
+    parser.add_argument("--incident-label", help="the label incidents carry (default: the config's)")
     parser.add_argument("--json", action="store_true", help="JSON lines instead of a table")
+    return parser
+
+
+def main() -> int:
+    parser = arguments()
     args = parser.parse_args()
+    if args.incident_label is not None and not args.incident_label.strip():
+        parser.error("--incident-label must not be empty")
     if "/" not in args.repo:
         parser.error("repo must be owner/name")
     if not 1 <= args.releases <= 20:
@@ -886,7 +898,7 @@ def main() -> int:
                 rows.append(Row("UNANNOUNCED", tag.name, f"{' '.join(issues)} (since {tags[i + 1].name})"))
 
     if policy is not None:
-        read = config((repo_dir / policy).read_text(encoding="utf-8"), policy)
+        read = config((repo_dir / policy).read_text(encoding="utf-8"), policy, args.incident_label)
         holds = hold_rows(fetch_issues(args.repo, "--label", HOLD_LABEL), now)
         rows += holds
         closed = fetch_issues(args.repo, "--label", read.incident_label, state="closed")

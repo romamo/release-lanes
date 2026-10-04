@@ -7,6 +7,16 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- A fleet file for github-ship-watch (spec S-001): `[[repos]]` tables naming each repo
+  as `owner/name`, with an optional `incident_label`, read by `fleet.py` and refused
+  (exit 2, naming the file and the problem) when it is missing, isn't TOML, has no
+  repos, has an entry without `repo` or with an unknown key, names a repo not in
+  owner/name form, or lists a repo twice. `watch_state.py --incident-label` takes the
+  place of the config's `[operate] incident_label`, so a fleet entry's label is the one
+  its watch reads (#91)
+
 ## [0.11.0] - 2026-10-04
 
 ### Added

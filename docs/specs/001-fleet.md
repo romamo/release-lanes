@@ -51,8 +51,9 @@ incident_label = "sev"   # optional; the label that repo's incidents carry (defa
 
 ## Issues
 
-The build issues, filled in once they are filed: one `- owner/repo#N: S-NNN-1, S-NNN-2` per
-line, naming the criteria that issue delivers. Each criterion belongs to exactly one.
+- romamo/shipyard#93: S-001-3, S-001-4, S-001-8
+- romamo/shipyard#94: S-001-1, S-001-2, S-001-5, S-001-7
+- romamo/shipyard#95: S-001-6, S-001-9
 
 ## Verification
 
