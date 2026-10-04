@@ -20,9 +20,14 @@ Each of the --releases newest version tags (default 3):
   UNANNOUNCED     closed issues it fixed that have no "Released in <tag>" comment
                   (github-pr-triage's shipped.py, in plan mode)
 
-Hold (a repo with a shipyard config):
+Hold and postmortems (a repo with a shipyard config):
   HOLD            an open shipyard-hold issue, with who opened it and when (reported, never
                   an action by itself: a person stopped the factory on purpose)
+  POSTMORTEM_DUE  an issue labelled [operate] incident_label (default "incident") closed as
+                  completed (not as not planned or a duplicate) that no docs/postmortems/*.md
+                  on the default branch names in an "Incident: owner/repo#N" line (or the
+                  issue's URL, or "#N" for the repo itself), read through the GitHub
+                  contents API, not the checkout
 
 Operations (only when the config declares environments; read from the
 deployments and issues shipyard operate writes):
@@ -48,7 +53,7 @@ Intake (github-issue-triage's triage_state.py):
 
 Holds and incidents lead the report. Exit 0 when nothing needs action, 1 when any
 BOT_FAILED, BOT_STALLED, NOT_PUBLISHED, UNANNOUNCED, ISSUES, OPERATE_FAILED, UNHEALTHY,
-PROMOTION_DUE, or INCIDENT_OPEN row is present, 2 on bad input or a git, gh, or uvx failure.
+PROMOTION_DUE, INCIDENT_OPEN, or POSTMORTEM_DUE row is present, 2 on bad input or a git, gh, or uvx failure.
 Needs git, an authenticated gh, and uvx (for a shipyard bot's plan). Python 3.10+,
 standard library only.
 """
@@ -99,6 +104,7 @@ ACTION = {
     "UNHEALTHY",
     "PROMOTION_DUE",
     "INCIDENT_OPEN",
+    "POSTMORTEM_DUE",
 }
 LEAD = ("INCIDENT_OPEN", "HOLD")  # the report starts with these, in this order
 ACTIVE = {"queued", "in_progress", "waiting", "pending", "requested"}
@@ -109,6 +115,13 @@ OPERATE_SILENT = dt.timedelta(hours=1)  # a scheduled operate runs every 10 minu
 AUTONOMY = ("observe", "propose", "act")
 RELEASE_TAG = re.compile(r"v(\d+)\.(\d+)\.(\d+)(?:(a|b|rc)(\d+))?(?:\.dev(\d+))?")  # shipyard's version.PATTERN
 PRE_RANK = {"a": 1, "b": 2, "rc": 3}
+POSTMORTEMS = "docs/postmortems"  # one file per incident, named in an "Incident: owner/repo#N" line
+# "Incident: owner/repo#N", the issue's URL, or "#N" for the repo itself; one per line
+POSTMORTEM_NAMES = re.compile(
+    r"^Incident:[ \t]*(?:https://github\.com/([\w.-]+/[\w.-]+)/issues/(\d+)|([\w.-]+/[\w.-]+)?#(\d+))[ \t]*$",
+    re.MULTILINE,
+)
+POSTMORTEM_REASONS = {None, "", "COMPLETED"}  # closed as done; "" or None on issues closed before GitHub kept a reason
 ISSUE_LIMIT = 1000  # per label or search; no repo has that many holds, incidents, or proposals
 PROPOSAL_LABEL = "shipyard-proposal"  # shipyard's github.PROPOSAL_LABEL
 PROPOSAL_SEARCH = 'in:title "Ready to"'  # proposals opened before the label; the marker in the body decides
@@ -337,6 +350,8 @@ class Issue:
     author: str
     labels: tuple[str, ...]
     closing_prs: tuple[int, ...]  # pull requests linked to close it
+    closed: dt.datetime | None = None
+    state_reason: str | None = None  # a closed issue's: COMPLETED, NOT_PLANNED, or DUPLICATE
 
 
 @dataclass(frozen=True)
@@ -663,6 +678,56 @@ def incident_rows(issues: list[Issue], label: str, now: dt.datetime) -> list[Row
     return rows
 
 
+def postmortem_named(texts: list[str], repo: str) -> set[int]:
+    """The incidents of the repo that the postmortems name, by number"""
+    named = set()
+    for text in texts:
+        for url_repo, url_number, short_repo, number in POSTMORTEM_NAMES.findall(text):
+            owner_repo = url_repo or short_repo or repo  # a plain #N is the repo's own
+            if owner_repo.lower() == repo.lower():
+                named.add(int(url_number or number))
+    return named
+
+
+def postmortem_rows(issues: list[Issue], label: str, texts: list[str], repo: str, now: dt.datetime) -> list[Row]:
+    """A closed incident that no postmortem names; an open one isn't due yet, and one closed
+    as not planned or as a duplicate was no incident"""
+    named = postmortem_named(texts, repo)
+    rows = []
+    for i in issues:
+        if label not in i.labels or i.closed is None or i.state_reason not in POSTMORTEM_REASONS or i.number in named:
+            continue
+        missing = f"no {POSTMORTEMS}/*.md names it (Incident: {repo}#{i.number})"
+        rows.append(Row("POSTMORTEM_DUE", f"#{i.number}", f"{i.title}; closed {ago(now - i.closed)} ago, {missing}"))
+    return rows
+
+
+def postmortem_texts(repo: str, branch: str) -> list[str]:
+    """Every docs/postmortems/*.md on the default branch, through the contents API; none
+    without the folder"""
+    listing = ["gh", "api", "-X", "GET", f"repos/{repo}/contents/{POSTMORTEMS}", "-f", f"ref={branch}"]
+    proc = subprocess.run(listing, capture_output=True, text=True, check=False)
+    raw = ["gh", "api", "-X", "GET", "-H", "Accept: application/vnd.github.raw+json"]
+    return [
+        run([*raw, f"repos/{repo}/contents/{path}", "-f", f"ref={branch}"])
+        for path in postmortem_paths(proc, repo, branch)
+    ]
+
+
+def postmortem_paths(proc: subprocess.CompletedProcess[str], repo: str, branch: str) -> list[str]:
+    """The *.md files of the folder listing; none when the folder is missing. Any other
+    failure, a missing ref included, stops the watch"""
+    if proc.returncode != 0 and "Not Found (HTTP 404)" in proc.stderr:
+        return []
+    if proc.returncode != 0:
+        sys.stderr.write(f"error: gh api {POSTMORTEMS}: {proc.stderr.strip()}\n")
+        raise SystemExit(2)
+    entries = json.loads(proc.stdout)
+    if not isinstance(entries, list):
+        raise Refused(f"error: {repo}: {POSTMORTEMS} on {branch} is not a folder")
+    return [e["path"] for e in entries if e["type"] == "file" and e["name"].endswith(".md")]
+
+
 def hold_rows(issues: list[Issue], now: dt.datetime) -> list[Row]:
     return [
         Row(
@@ -680,13 +745,13 @@ def ordered(rows: list[Row]) -> list[Row]:
     return sorted(rows, key=lambda r: LEAD.index(r.state) if r.state in LEAD else len(LEAD))
 
 
-def fetch_issues(repo: str, *filters: str) -> list[Issue]:
-    """The open issues a filter picks: a label, or a title search, so no repo has too many"""
-    fields = "number,title,body,createdAt,author,labels,closedByPullRequestsReferences"
-    cmd = ["gh", "issue", "list", "-R", repo, "--state", "open", *filters, "-L", str(ISSUE_LIMIT), "--json", fields]
+def fetch_issues(repo: str, *filters: str, state: str = "open") -> list[Issue]:
+    """The issues a filter picks: a label, or a title search, so no repo has too many"""
+    fields = "number,title,body,createdAt,closedAt,stateReason,author,labels,closedByPullRequestsReferences"
+    cmd = ["gh", "issue", "list", "-R", repo, "--state", state, *filters, "-L", str(ISSUE_LIMIT), "--json", fields]
     found = json.loads(run(cmd))
     if len(found) >= ISSUE_LIMIT:
-        raise Refused(f"error: {repo} has {ISSUE_LIMIT}+ open issues for {' '.join(filters)}")
+        raise Refused(f"error: {repo} has {ISSUE_LIMIT}+ {state} issues for {' '.join(filters)}")
     return [
         Issue(
             int(i["number"]),
@@ -696,6 +761,8 @@ def fetch_issues(repo: str, *filters: str) -> list[Issue]:
             (i["author"] or {}).get("login", "ghost"),
             tuple(label["name"] for label in i["labels"]),
             tuple(int(p["number"]) for p in i["closedByPullRequestsReferences"]),
+            parse_time(i["closedAt"]) if i["closedAt"] else None,
+            i["stateReason"],
         )
         for i in found
     ]
@@ -822,6 +889,10 @@ def main() -> int:
         read = config((repo_dir / policy).read_text(encoding="utf-8"), policy)
         holds = hold_rows(fetch_issues(args.repo, "--label", HOLD_LABEL), now)
         rows += holds
+        closed = fetch_issues(args.repo, "--label", read.incident_label, state="closed")
+        if closed:  # the postmortems are read only once an incident has closed
+            texts = postmortem_texts(args.repo, branch)
+            rows += postmortem_rows(closed, read.incident_label, texts, args.repo, now)
         if read.environments:
             rows += operations_rows(args.repo, repo_dir, read.environments, bool(holds), read.incident_label, now)
 

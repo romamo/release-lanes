@@ -106,9 +106,21 @@ def issue(ws: ModuleType, number: int, labels: tuple[str, ...] = (), body: str =
         "created": NOW - dt.timedelta(hours=3),
         "author": "alice",
         "closing_prs": (),
+        "closed": None,
+        "state_reason": None,
     }
     fields.update(kw)
-    return ws.Issue(number, fields["title"], body, fields["created"], fields["author"], labels, fields["closing_prs"])
+    return ws.Issue(
+        number,
+        fields["title"],
+        body,
+        fields["created"],
+        fields["author"],
+        labels,
+        fields["closing_prs"],
+        fields["closed"],
+        fields["state_reason"],
+    )
 
 
 def deployment(ws: ModuleType, id_: int, tag: str, minutes_ago: int = 120) -> object:
@@ -138,6 +150,87 @@ def test_an_incident_reports_its_age_and_linking_prs(ws: ModuleType) -> None:
     assert [(r.state, r.subject, r.detail) for r in rows] == [
         ("INCIDENT_OPEN", "#4", "issue 4; open 30 min, no PR links it")
     ]
+
+
+POSTMORTEM = """# 2026-10-02: staging served HTTP 503
+
+Incident: romamo/shipyard#3
+Incident: other/repo#4
+"""
+
+
+def test_a_closed_incident_without_a_postmortem_is_due(ws: ModuleType) -> None:
+    closed = issue(ws, 3, ("incident",), title="staging 503", closed=NOW - dt.timedelta(hours=5))
+    rows = ws.postmortem_rows([closed], "incident", [], "romamo/shipyard", NOW)
+    assert [(r.state, r.subject) for r in rows] == [("POSTMORTEM_DUE", "#3")]
+    assert rows[0].detail == (
+        "staging 503; closed 5 h ago, no docs/postmortems/*.md names it (Incident: romamo/shipyard#3)"
+    )
+    assert "POSTMORTEM_DUE" in ws.ACTION
+
+
+def test_a_postmortem_naming_the_incident_clears_it(ws: ModuleType) -> None:
+    closed = [issue(ws, n, ("incident",), closed=NOW - dt.timedelta(days=1)) for n in (3, 4)]
+    rows = ws.postmortem_rows(closed, "incident", [POSTMORTEM], "Romamo/Shipyard", NOW)
+    # #4 is named only for another repo, so it is still due
+    assert [r.subject for r in rows] == ["#4"]
+
+
+def test_an_open_incident_is_not_due_yet(ws: ModuleType) -> None:
+    still_open = issue(ws, 5, ("incident",))
+    unlabelled = issue(ws, 6, ("bug",), closed=NOW)
+    assert ws.postmortem_rows([still_open, unlabelled], "incident", [], "romamo/shipyard", NOW) == []
+
+
+def test_a_postmortem_names_an_incident_only_on_its_own_line(ws: ModuleType) -> None:
+    texts = ["See Incident: romamo/shipyard#7 inline", "Incident: romamo/shipyard#N", "Incident:romamo/shipyard#8\n"]
+    assert ws.postmortem_named(texts, "romamo/shipyard") == {8}
+
+
+def test_an_incident_closed_as_not_planned_or_a_duplicate_is_not_due(ws: ModuleType) -> None:
+    closed = NOW - dt.timedelta(days=1)
+    incidents = [
+        issue(ws, n, ("incident",), closed=closed, state_reason=reason)
+        for n, reason in ((3, "NOT_PLANNED"), (4, "DUPLICATE"), (5, "COMPLETED"), (6, ""), (7, None))
+    ]
+    rows = ws.postmortem_rows(incidents, "incident", [], "romamo/shipyard", NOW)
+    assert [r.subject for r in rows] == ["#5", "#6", "#7"]
+
+
+def test_a_postmortem_names_an_incident_by_url_or_plain_number(ws: ModuleType) -> None:
+    text = (
+        "Incident: https://github.com/romamo/shipyard/issues/9\n"
+        "Incident: #10\n"
+        "Incident: https://github.com/other/repo/issues/11\n"
+        "Incident:\nromamo/shipyard#12\n"  # the line ends at the colon: names nothing
+    )
+    assert ws.postmortem_named([text], "romamo/shipyard") == {9, 10}
+
+
+def test_only_a_missing_postmortems_folder_reads_as_none(ws: ModuleType, capsys: pytest.CaptureFixture[str]) -> None:
+    def gh(code: int, out: str = "", err: str = "") -> Any:
+        return ws.subprocess.CompletedProcess([], code, out, err)
+
+    assert ws.postmortem_paths(gh(1, err="gh: Not Found (HTTP 404)"), "o/r", "main") == []
+    listing = '[{"type": "file", "name": "a.md", "path": "docs/postmortems/a.md"},'
+    listing += ' {"type": "file", "name": "a.txt", "path": "docs/postmortems/a.txt"},'
+    listing += ' {"type": "dir", "name": "b.md", "path": "docs/postmortems/b.md"}]'
+    assert ws.postmortem_paths(gh(0, listing), "o/r", "main") == ["docs/postmortems/a.md"]
+    with pytest.raises(SystemExit) as stopped:
+        ws.postmortem_paths(gh(1, err="gh: No commit found for the ref main (HTTP 404)"), "o/r", "main")
+    assert stopped.value.code == 2
+    assert "No commit found" in capsys.readouterr().err
+    with pytest.raises(SystemExit):
+        ws.postmortem_paths(gh(1, err="gh: Server Error (HTTP 502)"), "o/r", "main")
+    with pytest.raises(ws.Refused):
+        ws.postmortem_paths(gh(0, '{"type": "file"}'), "o/r", "main")
+
+
+def test_the_template_names_no_incident(ws: ModuleType) -> None:
+    template = SCRIPT.parents[3] / "docs" / "postmortems" / "TEMPLATE.md"
+    text = template.read_text(encoding="utf-8")
+    assert "Incident: owner/repo#N" in text
+    assert ws.postmortem_named([text], "owner/repo") == set()
 
 
 def test_the_report_leads_with_incidents_and_holds(ws: ModuleType) -> None:

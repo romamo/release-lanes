@@ -23,6 +23,21 @@ bot.
   config has it (#70), stacks a
   dependent PR on its dependency's open one, and verifies the whole spec when the last
   build issue closes (#71)
+- github-ship-watch learns from failures. `watch_state.py` reports POSTMORTEM_DUE (an
+  action) for an issue labelled `[operate] incident_label` (default `incident`) closed as
+  completed, not as not planned or a duplicate, that no `docs/postmortems/*.md` on the
+  default branch names in an `Incident:` line (`owner/repo#N`, the issue's URL, or `#N`),
+  read through the GitHub contents API. The skill drafts the postmortem from the
+  incident's comments and deployment statuses as a pull request the maintainer merges,
+  from the new `docs/postmortems/TEMPLATE.md` (timeline, cause, what caught it, what would
+  have caught it sooner, actions); after the merge each rule becomes a `D-n` entry through
+  `decisions.py` and each other action an issue. A weekly retro, run only when the user
+  schedules it, compares this week's metrics with last week's, reads the refused and
+  reworked PRs, recurring review findings, and stuck states, and posts a short comment on
+  the roadmap issue with at most three proposals, each opened as an issue. The new
+  `scripts/retro.py` gathers the retro (`gather`) and checks proposal titles against the
+  open issues (`dedupe`), and `metrics.py --until` ends the window at a date or time, so
+  the week before can be measured (#72)
 
 ## [0.10.1] - 2026-10-04
 
