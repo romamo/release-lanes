@@ -99,7 +99,7 @@ Follow [references/landing.md](references/landing.md#release). Check first for a
 
 Keep a list of the worktree paths you create in this session. That list, not the path name, is how you know a worktree is yours. Use unique names (`tmp/wt-<purpose>-<n>`).
 
-Before removing one, check that its HEAD commit and branch still match what you left. A peer may have reused the path, which `git worktree list` and the path's file times (`stat`, anything changed since you last used it) show. Then run `scripts/landed.py --onto origin/<default> <sha>...` for its commits. Remove it only on exit 0. Otherwise keep it, and name the commits that haven't landed in the report.
+Before removing one, check that its HEAD commit and branch still match what you left. A peer may have reused the path, which `git worktree list` and the path's file times (`stat`, anything changed since you last used it) show. Then run `scripts/landed.py --onto origin/<default> <sha>...` for its commits. Remove it only on exit 0. Keep a reviewer's or implementer's worktree while its PR is open, even after the fixes are pushed: a rebase or a second review round goes back to that agent through SendMessage, which needs the worktree. Otherwise keep it, and name the commits that haven't landed in the report.
 
 Unlock a lock only if it is held by one of your own finished agents.
 

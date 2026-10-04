@@ -86,7 +86,7 @@ For each PR, check:
 Then comment the PR link on the issue, with what it does and any trade-off. When a PR is replaced (a peer's rebase with fixes), point the issue at the new one. A PR covering part of an issue says "Part of #N" in its body; the script counts that as a link.
 
 - **An agent finds an unrelated bug** (a stress test exposing a secret leak in a CI PR): file it as its own issue, and have the agent split the fix into its own PR. Stack the original PR on it if it depends on the fix. A fix hidden in an unrelated PR gets no review of its own
-- **An agent from an earlier context can't be resumed** (SendMessage reports no transcript): brief a fresh agent with the PR number, its branch, and the change. Don't redo the work in your own context
+- **An agent can't be resumed** (SendMessage reports no transcript, or its worktree was removed): brief a fresh agent with the PR number, its branch, and the change. Don't redo the work in your own context
 - **A spec limit an agent reports** (a schema that rejects a key): keep the PR within the schema, and file the gap on the spec repo with the requirement IDs and a proposed shape. When that spec issue closes, the issue shows UNBLOCKED; implement the rest then
 
 ### 6. Land (only if asked)
@@ -111,7 +111,7 @@ When the new plan drops the PR, close it with a comment linking the issue, so th
 
 **Continuous intake:** issues keep arriving while you work. When the user wants the backlog kept current, offer `/loop 30m` (or `/schedule` for daily) running `triage_state.py` and triaging only what it flags. Don't start a loop unasked.
 
-Clean up only the worktrees your agents created. After confirming each branch is merged or pushed, remove the worktree and its local branch.
+Clean up only the worktrees your agents created, and only once their PRs have merged. A pushed branch isn't enough: an implementer revises its PR through SendMessage, and an agent whose worktree is gone can't be resumed, so a review finding or a rebase after removal needs a fresh agent briefed from scratch. After a merge, confirm the commits landed (`landed.py`), then remove the worktree and its local branch.
 
 ## Report
 
