@@ -7,8 +7,6 @@ bot.
 
 ## [Unreleased]
 
-## [0.10.1] - 2026-10-04
-
 ### Added
 
 - A merged spec becomes a task graph: `specs.py split NNN` proposes its build issues,
@@ -25,6 +23,8 @@ bot.
   config has it (#70), stacks a
   dependent PR on its dependency's open one, and verifies the whole spec when the last
   build issue closes (#71)
+
+## [0.10.1] - 2026-10-04
 
 ### Fixed
 

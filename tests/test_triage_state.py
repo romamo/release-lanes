@@ -545,9 +545,18 @@ def test_a_build_issue_is_blocked_until_its_dependency_closes(ts: ModuleType) ->
         states = {("o", "r", 3): state}
         verdict = ts.classify_open(item, "Triage:", "postponed", states, None, ("o", "r"))
         assert verdict == (expected, f"o/r#3:{state.lower()}")
-    both = issue(body="Depends on #3\nDepends on other/lib#4\n")
+    both = issue(("2026-09-01T10:00:00Z", "Triage: implement"), body="Depends on #3\nDepends on other/lib#4\n")
     states = {("o", "r", 3): "CLOSED", ("other", "lib", 4): "OPEN"}
     assert ts.classify_open(both, "Triage:", "postponed", states, None, ("o", "r"))[0] == "BLOCKED"
+
+
+def test_an_untriaged_issue_reads_new_whatever_its_body_depends_on(ts: ModuleType) -> None:
+    # romamo/shipyard#49 says "Depends on #48." in its body and was never triaged: once #48
+    # merged it read UNBLOCKED ("resume"), skipping the triage it is still owed
+    item = issue(body="Depends on #48. The other session takes it once #48 lands.\n")
+    for state in ("OPEN", "CLOSED", "MERGED"):
+        verdict = ts.classify_open(item, "Triage:", "postponed", {("o", "r", 48): state}, None, ("o", "r"))
+        assert verdict[0] == "NEW", state
 
 
 def test_a_dependency_closed_as_not_planned_unblocks_but_says_so(ts: ModuleType) -> None:

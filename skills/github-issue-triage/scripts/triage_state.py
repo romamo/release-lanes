@@ -18,10 +18,11 @@ For each open issue:
                    names it as owner/repo#N or its URL anywhere on the line, or
                    as a plain #N (this repo) right after "waits on", "waiting on",
                    "depends on", "blocked by", "blocked on", "decided in", or
-                   "on hold until" (a #N elsewhere on the line is context). Or its
-                   body has a "Depends on owner/repo#N" line (or "#N" anywhere on
-                   that line, the same repo: a build issue split from a spec)
-                   naming an issue still open
+                   "on hold until" (a #N elsewhere on the line is context). Or,
+                   once triaged, its body has a "Depends on owner/repo#N" line (or
+                   "#N" anywhere on that line, the same repo: a build issue split
+                   from a spec) naming an issue still open; an untriaged issue
+                   reads NEW whatever its body depends on
   UNFILLED         a "Depends on" line of its body still names a placeholder such
                    as #{B1} from specs.py split: put in the dependency's number
   SPEC_REFUSED     a pull request it waits on (such as its spec PR) closed without
@@ -560,8 +561,10 @@ def classify_open(
         return "IN_PROGRESS", note
     if merged:
         return "DONE_NOT_CLOSED", note
-    # The body's dependencies are older than every comment; a comment naming one too is newer
-    named = {**dict.fromkeys(dependency_refs(issue, repo), -1), **hold_refs(issue, repo)}
+    # The body's dependencies are older than every comment; a comment naming one too is newer.
+    # They hold a triaged issue only: an untriaged one with "Depends on #48" still reads NEW
+    body = dependency_refs(issue, repo) if triage else []
+    named = {**dict.fromkeys(body, -1), **hold_refs(issue, repo)}
     comments = issue["comments"]["nodes"]
     verdict = max((i for i, c in enumerate(comments) if c["body"].lstrip().startswith(marker)), default=-1)
     # A refused PR named before the newest triage comment was decided again: it holds nothing
