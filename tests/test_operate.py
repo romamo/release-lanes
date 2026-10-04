@@ -478,7 +478,8 @@ def test_shipyards_own_pages_environment_and_operate_caller_pass_doctor(repo: Re
     )
     assert checks["environment"] == (
         "PASS",
-        "deploy.yml (github-pages) runs on workflow_dispatch with 'tag' and 'environment' inputs",
+        "deploy.yml (github-pages) runs on workflow_dispatch with 'tag' and 'environment' inputs; fails a run that"
+        " isn't on the tag",
     )
     pages = repo.policy.environments["github-pages"]
     assert (pages.lane, pages.workflow, pages.health) == (
@@ -495,6 +496,7 @@ def test_the_deploy_workflow_reports_the_tag_as_the_version_operate_checks() -> 
     text = (SHIPYARD / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
     assert 'version="${TAG#v}"' in text and 'version="0.0.0-simulated-failure"' in text
     assert '"$ENVIRONMENT" != "github-pages"' in text
+    assert '"$GITHUB_REF" != "refs/tags/$TAG"' in text  # a run off the tag fails (#80)
     deployed = Version.parse("1.2.0")
     http = FakeHttp()
     http.answer("u", '{"version": "1.2.0"}')

@@ -128,11 +128,19 @@ on:
         type: string
         required: true
 jobs:
+  ref:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          TAG: ${{ inputs.tag }}
+        run: '[ "$GITHUB_REF" = "refs/tags/$TAG" ]'
   deploy:
+    needs: ref
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
     steps: []
 """
+GUARD_JOB = DEPLOY[DEPLOY.index("  ref:") : DEPLOY.index("  deploy:")]
 
 
 def test_init_writes_an_environments_example_that_parses(repo: Repo) -> None:
@@ -167,7 +175,7 @@ def test_doctor_checks_each_environments_workflow(repo: Repo) -> None:
         ("FAIL", "deploy.yml (production): no .github/workflows/deploy.yml"),
     ]
     repo.write(".github/workflows/deploy.yml", DEPLOY)
-    passed = "runs on workflow_dispatch with 'tag' and 'environment' inputs"
+    passed = "runs on workflow_dispatch with 'tag' and 'environment' inputs; fails a run that isn't on the tag"
     assert checks() == [("PASS", f"deploy.yml (staging) {passed}"), ("PASS", f"deploy.yml (production) {passed}")]
 
     no_input = DEPLOY.replace("      environment:\n        type: string\n        required: true\n", "")
@@ -193,7 +201,7 @@ def test_doctor_wants_environment_as_a_jobs_own_key(repo: Repo) -> None:
     head = DEPLOY[: DEPLOY.index("jobs:")]
 
     def status(jobs: str) -> str:
-        repo.write(".github/workflows/deploy.yml", head + jobs)
+        repo.write(".github/workflows/deploy.yml", head + jobs + GUARD_JOB)
         return next(c.status for c in doctor(repo.root) if c.name == "environment")
 
     steps = "jobs:\n  deploy:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo\n"
@@ -215,6 +223,34 @@ def test_doctor_wants_environment_as_a_jobs_own_key(repo: Repo) -> None:
     # a blank line between steps doesn't end the jobs, so a later job's environment counts (#53)
     two_jobs = steps + "\n      - run: echo\n\n  deploy-site:\n    needs: deploy\n" + mapping + "    steps: []\n"
     assert status(two_jobs) == "PASS"
+
+
+def test_doctor_warns_when_a_deploy_workflow_runs_off_its_tag(repo: Repo) -> None:
+    """A deploy started without --ref <tag> records a deployment whose ref names no release
+    tag (#80): doctor wants a step that fails such a run, comparing the ref, not ref_name"""
+    repo.write(
+        repo.policy_file,
+        repo.read(repo.policy_file) + '\n[environments.staging]\nlane = "rc"\nworkflow = "deploy.yml"\n',
+    )
+    guard = '\'[ "$GITHUB_REF" = "refs/tags/$TAG" ]\''
+
+    def check(text: str) -> tuple[str, str]:
+        repo.write(".github/workflows/deploy.yml", text)
+        return next((c.status, c.detail) for c in doctor(repo.root) if c.name == "environment")
+
+    assert check(DEPLOY)[0] == "PASS"
+    status, detail = check(DEPLOY.replace(guard, "echo $TAG"))
+    assert status == "WARN"
+    assert "no step fails a run whose github.ref isn't refs/tags/<tag>" in detail
+    # the checkout of the tag isn't a guard; ref_name doesn't tell a branch named v1.2.0 from the tag
+    assert check(DEPLOY.replace(guard, "echo refs/tags/$TAG"))[0] == "WARN"
+    assert check(DEPLOY.replace(guard, '\'[ "$GITHUB_REF_NAME" = "refs/tags/$TAG" ]\''))[0] == "WARN"
+    expression = "        if: github.ref != format('refs/tags/{0}', inputs.tag)\n        run: exit 1"
+    assert check(DEPLOY.replace(f"        run: {guard}", expression))[0] == "PASS"
+    either_order = '\'[ "refs/tags/$TAG" = "${GITHUB_REF}" ]\''
+    assert check(DEPLOY.replace(guard, either_order))[0] == "PASS"
+    # a workflow that fails the other checks reports those, not the guard
+    assert check(DEPLOY.replace("    environment: ${{ inputs.environment }}\n", "").replace(guard, "x"))[0] == "FAIL"
 
 
 def test_doctor_catches_a_version_line_that_no_longer_matches(repo: Repo) -> None:
