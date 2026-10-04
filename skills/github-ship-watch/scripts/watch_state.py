@@ -30,9 +30,12 @@ deployments and issues shipyard operate writes):
                   failed (cancelled runs are ignored)
   UNHEALTHY       an environment's newest "shipyard health" deployment status is a failure
   PROMOTION_DUE   an open "Ready to promote" proposal issue, with its approve command; or a
-                  `from` environment whose source has run a release for its bake_minutes
-                  while nothing promotes it, as no operate workflow runs on a schedule (no
-                  caller, no schedule in it, or no run in the last hour)
+                  `from` environment operate would promote now if it ran: its source baked
+                  a release (bake_minutes since its success, or since the first health
+                  status after a failed check), it is behind that release and never tried
+                  it, and deploy.<name> autonomy is act with no hold; yet no operate
+                  workflow runs on a schedule (no caller, no schedule in it, or no run in
+                  the last hour)
   INCIDENT_OPEN   an open issue labelled [operate] incident_label (default "incident"),
                   with its age and the pull requests linked to close it
 
@@ -59,7 +62,7 @@ import sys
 import urllib.error
 import urllib.request
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 try:
@@ -89,6 +92,9 @@ HOLD_LABEL = "shipyard-hold"  # shipyard's autonomy.HOLD_LABEL
 INCIDENT_LABEL = "incident"  # the default of [operate] incident_label
 HEALTH_PREFIX = "shipyard health"  # starts the description of every status shipyard operate writes
 OPERATE_SILENT = dt.timedelta(hours=1)  # a scheduled operate runs every 10 minutes
+AUTONOMY = ("observe", "propose", "act")
+RELEASE_TAG = re.compile(r"v(\d+)\.(\d+)\.(\d+)(?:(a|b|rc)(\d+))?(?:\.dev(\d+))?")  # shipyard's version.PATTERN
+PRE_RANK = {"a": 1, "b": 2, "rc": 3}
 ISSUE_LIMIT = 1000  # per label or search; no repo has that many holds, incidents, or proposals
 PROPOSAL_SEARCH = 'in:title "Ready to"'  # shipyard's operate.proposal_title; the marker in the body decides
 PROPOSAL = re.compile(r"<!-- shipyard:propose deploy=(?P<env>\S+) -->")  # shipyard's operate.deploy_marker
@@ -276,6 +282,7 @@ class Environment:
     name: str
     source: str | None  # `from`: promoted from this environment
     bake_minutes: int
+    deploy: str = "act"  # [autonomy] deploy.<name>: observe, propose, or act (the default, D-7)
 
 
 @dataclass(frozen=True)
@@ -338,12 +345,31 @@ def config(text: str, policy: Path) -> Config:
     """The environments and the incident label of the config, read as shipyard reads it: with
     tomllib on Python 3.11+, with the regex fallback on 3.10"""
     if tomllib is None:
-        return Config(environments_310(text, policy), incident_label_310(text, policy))
-    try:
-        raw = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as exc:
-        raise Refused(f"error: {policy}: {exc}") from None
-    return Config(environments_toml(raw, policy), incident_label_toml(raw, policy))
+        envs, levels = environments_310(text, policy), deploy_autonomy_310(text, policy)
+        label = incident_label_310(text, policy)
+    else:
+        try:
+            raw = tomllib.loads(text)
+        except tomllib.TOMLDecodeError as exc:
+            raise Refused(f"error: {policy}: {exc}") from None
+        envs, levels = environments_toml(raw, policy), deploy_autonomy_toml(raw, policy)
+        label = incident_label_toml(raw, policy)
+    return Config([replace(e, deploy=levels.get(e.name, "act")) for e in envs], label)
+
+
+def autonomy_level(value: object, name: str, policy: Path) -> str:
+    if not isinstance(value, str) or value not in AUTONOMY:
+        raise Refused(f"error: {policy}: [autonomy] deploy.{name} must be one of {list(AUTONOMY)}, got {value!r}")
+    return value
+
+
+def deploy_autonomy_toml(raw: dict[str, object], policy: Path) -> dict[str, str]:
+    """[autonomy] deploy.<name> of the parsed config, per environment that sets it"""
+    table = raw.get("autonomy", {})
+    deploy = table.get("deploy", {}) if isinstance(table, dict) else None
+    if not isinstance(deploy, dict):
+        raise Refused(f"error: {policy}: [autonomy] deploy is a table of environments")
+    return {name: autonomy_level(value, name, policy) for name, value in deploy.items()}
 
 
 def environments_toml(raw: dict[str, object], policy: Path) -> list[Environment]:
@@ -429,6 +455,37 @@ def environments_310(text: str, policy: Path) -> list[Environment]:
     return found
 
 
+def deploy_autonomy_310(text: str, policy: Path) -> dict[str, str]:
+    """[autonomy] deploy.<name>, written as dotted keys in a plain [autonomy] table or as keys
+    of a plain [autonomy.deploy] table"""
+    unreadable = Refused(
+        f"error: {policy}: can't read [autonomy] deploy on Python 3.10: use 3.11+, deploy.<name> keys in a plain"
+        " [autonomy] table, or a plain [autonomy.deploy] table"
+    )
+    tables = toml_tables(text)
+    if re.search(r"^\s*[\"']?autonomy[\"']?\s*[.=]", tables.get("", ""), re.MULTILINE):
+        raise unreadable
+    if any(name.startswith("autonomy.") and name != "autonomy.deploy" for name in tables):
+        raise unreadable
+    level = r"\s*=\s*(?:\"(?P<level>[^\"]*)\"|'(?P<plain>[^']*)')\s*(?:#.*)?$"
+    found: list[tuple[str, str]] = []
+    for line in tables.get("autonomy", "").splitlines():
+        if not re.match(r"^\s*[\"']?deploy\b", line):
+            continue
+        key = re.match(rf"^\s*deploy\s*\.\s*[\"']?(?P<name>[A-Za-z0-9][A-Za-z0-9_.-]*?)[\"']?{level}", line)
+        if key is None:
+            raise unreadable
+        found.append((key["name"], key["level"] if key["level"] is not None else key["plain"]))
+    for line in tables.get("autonomy.deploy", "").splitlines():
+        if blank(line):
+            continue
+        key = re.match(rf"^\s*[\"']?(?P<name>[A-Za-z0-9][A-Za-z0-9_.-]*?)[\"']?{level}", line)
+        if key is None:
+            raise unreadable
+        found.append((key["name"], key["level"] if key["level"] is not None else key["plain"]))
+    return {name: autonomy_level(value, name, policy) for name, value in found}
+
+
 def incident_label_310(text: str, policy: Path) -> str:
     """[operate] incident_label, or the default"""
     tables = toml_tables(text)
@@ -509,28 +566,61 @@ def proposal_rows(issues: list[Issue], caller: str, held: bool) -> list[Row]:
     return rows
 
 
+def version_key(tag: str) -> tuple[int, int, int, int, int, int] | None:
+    """A release tag's order, as shipyard's Version sorts it (PEP 440: X.Y.Z.devN < X.Y.ZaN <
+    X.Y.ZbN < X.Y.ZrcN < X.Y.Z); None when the tag names no release"""
+    found = RELEASE_TAG.fullmatch(tag)
+    if found is None:
+        return None
+    major, minor, patch, pre, pre_n, dev = found.groups()
+    if pre is None:
+        phase, n = (0, 0) if dev is not None else (4, 0)
+    else:
+        phase, n = PRE_RANK[pre], int(pre_n)
+    return int(major), int(minor), int(patch), phase, n, int(dev) if dev is not None else 2**62
+
+
+def bake_start(current: Current) -> dt.datetime | None:
+    """When the current healthy stretch began, as shipyard operate counts it: from the first
+    success, but after a failed health check from the first health status that followed it;
+    None while the newest check failed"""
+    ours = [s for s in current.statuses if s.description.startswith(HEALTH_PREFIX)]
+    failures = [s for s in ours if s.state == "failure"]
+    if not failures:
+        return min(s.created for s in current.statuses if s.state == "success")
+    recovered = [s for s in ours if s.id > failures[-1].id]
+    return recovered[0].created if recovered else None
+
+
 def unpromoted_row(
     env: Environment,
     source: Current | None,
+    target: Current | None,
     deployments: list[Deployment],
     idle: str | None,
+    held: bool,
     command: str,
     now: dt.datetime,
 ) -> Row | None:
-    """A `from` environment whose source baked a release that nothing promotes, because no
-    operate runs; operate itself counts the bake from health checks, so with it running the
-    proposal issue or the deploy is the signal"""
+    """A `from` environment that operate would promote now, if it ran: its source baked a
+    release, the environment is behind it and never tried it, and its deploy autonomy acts.
+    With operate running, its proposal issue or its deploy is the signal instead"""
     if env.source is None or idle is None or source is None:
         return None
-    ours = [s for s in source.statuses if s.description.startswith(HEALTH_PREFIX)]
-    if ours and ours[-1].state == "failure":
+    if env.deploy != "act" or held:
+        return None  # observe never promotes; propose and the hold wait on a proposal issue
+    wanted = version_key(source.tag)
+    if wanted is None:
+        return None  # operate promotes only a deployment whose ref names a release tag
+    on = version_key(target.tag) if target else None
+    if on is not None and on >= wanted:
         return None
-    succeeded = min(s.created for s in source.statuses if s.state == "success")
-    if now - succeeded < dt.timedelta(minutes=env.bake_minutes):
-        return None
-    if any(d.sha == source.deployment.sha for d in deployments):
+    if any(d.ref.removeprefix("refs/tags/") == source.tag for d in deployments):
         return None  # tried there already, in any state: operate deploys a release once
-    detail = f"{source.tag} on {env.source} for {ago(now - succeeded)}, unpromoted: {idle}; {command}"
+    since = bake_start(source)
+    if since is None or now - since < dt.timedelta(minutes=env.bake_minutes):
+        return None
+    detail = f"{source.tag} healthy on {env.source} for {ago(now - since)}, unpromoted: {idle}; {command}"
     return Row("PROMOTION_DUE", env.name, detail)
 
 
@@ -585,9 +675,8 @@ def fetch_issues(repo: str, *filters: str) -> list[Issue]:
 
 
 def fetch_deployments(repo: str, environment: str) -> list[Deployment]:
-    out = run(
-        ["gh", "api", "-X", "GET", f"repos/{repo}/deployments", "-f", f"environment={environment}", "-f", "per_page=30"]
-    )
+    query = ["-f", f"environment={environment}", "-f", "per_page=100"]  # as shipyard operate reads them
+    out = run(["gh", "api", "-X", "GET", f"repos/{repo}/deployments", *query])
     found = [Deployment(int(d["id"]), d["ref"], d["sha"], parse_time(d["created_at"])) for d in json.loads(out)]
     return sorted(found, key=lambda d: d.id, reverse=True)
 
@@ -625,7 +714,8 @@ def operations_rows(
     for env in envs:
         if env.name in proposed or env.source is None:
             continue
-        row = unpromoted_row(env, current.get(env.source), deployments[env.name], idle, command, now)
+        source = current.get(env.source)
+        row = unpromoted_row(env, source, current[env.name], deployments[env.name], idle, held, command, now)
         if row is not None:
             rows.append(row)
     return rows + incident_rows(fetch_issues(repo, "--label", label), label, now)

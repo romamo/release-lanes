@@ -66,7 +66,7 @@ bot.
   `[environments.<name>]` tables: OPERATE_FAILED (the operate caller's latest run failed;
   the watch reruns a flaky one once), UNHEALTHY (an environment's newest `shipyard health`
   status is a failure), PROMOTION_DUE (an open "Ready to promote" proposal, with its
-  approve command, or a baked source nothing promotes because operate isn't running on a
+  approve command, or a promotion operate would make under `act` autonomy if it ran on a
   schedule), and INCIDENT_OPEN (an open issue labelled `[operate] incident_label`, default
   `incident`, with its age and the PRs linked to close it). Every repo with a shipyard
   config also gets a HOLD row for an open `shipyard-hold` issue, with who opened it and

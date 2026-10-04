@@ -5,6 +5,7 @@ import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
+from typing import Any
 
 import pytest
 
@@ -191,27 +192,79 @@ def test_an_open_proposal_is_due_with_its_approve_command(ws: ModuleType) -> Non
     assert held[0].detail.startswith("#9 v1.2.0: close the shipyard-hold issues, then gh workflow run")
 
 
-def baked_source(ws: ModuleType, minutes_ago: int, *health: object) -> object:
+def baked_source(ws: ModuleType, minutes_ago: int, *health: object) -> Any:
     return ws.Current(deployment(ws, 5, "v1.2.0"), (status(ws, 50, "success", "", minutes_ago), *health))
+
+
+IDLE = "no workflow calls shipyard's operate.yml"
+
+
+def due(
+    ws: ModuleType,
+    env: object,
+    source: object,
+    target: object = None,
+    deployments: tuple[object, ...] = (),
+    idle: str | None = IDLE,
+    held: bool = False,
+) -> Any:
+    return ws.unpromoted_row(env, source, target, list(deployments), idle, held, "run it", NOW)
+
+
+def on(ws: ModuleType, tag: str) -> Any:
+    return ws.Current(deployment(ws, 1, tag), (status(ws, 10, "success", "", 300),))
 
 
 def test_a_baked_source_nothing_promotes_is_due_while_operate_is_idle(ws: ModuleType) -> None:
     prod = ws.Environment("production", "staging", 60)
     source = baked_source(ws, 90)
-    idle = "no workflow calls shipyard's operate.yml"
-    row = ws.unpromoted_row(prod, source, [deployment(ws, 1, "v1.1.0")], idle, "run it", NOW)
+    old = on(ws, "v1.1.0")
+    row = due(ws, prod, source, old, (old.deployment,))
     assert (row.state, row.subject) == ("PROMOTION_DUE", "production")
-    assert row.detail == f"v1.2.0 on staging for 90 min, unpromoted: {idle}; run it"
+    assert row.detail == f"v1.2.0 healthy on staging for 90 min, unpromoted: {IDLE}; run it"
+    assert due(ws, prod, source) is not None  # nothing deployed there yet
     # operate is running: its proposal or its deploy is the signal
-    assert ws.unpromoted_row(prod, source, [], None, "run it", NOW) is None
+    assert due(ws, prod, source, idle=None) is None
     # still baking, unhealthy, or tried on production already
-    assert ws.unpromoted_row(prod, baked_source(ws, 30), [], idle, "run it", NOW) is None
+    assert due(ws, prod, baked_source(ws, 30)) is None
     sick = baked_source(ws, 90, status(ws, 51, "failure", "shipyard health: HTTP 500", 10))
-    assert ws.unpromoted_row(prod, sick, [], idle, "run it", NOW) is None
-    tried = [ws.Deployment(9, "v1.2.0", "sha-v1.2.0", NOW)]
-    assert ws.unpromoted_row(prod, source, tried, idle, "run it", NOW) is None
-    # a lane environment is never promoted
-    assert ws.unpromoted_row(ws.Environment("staging", None, 0), source, [], idle, "run it", NOW) is None
+    assert due(ws, prod, sick) is None
+    assert due(ws, prod, source, deployments=(ws.Deployment(9, "refs/tags/v1.2.0", "other", NOW),)) is None
+    # a lane environment is never promoted, nor a source whose ref names no release
+    assert due(ws, ws.Environment("staging", None, 0), source) is None
+    assert due(ws, prod, ws.Current(deployment(ws, 5, "main"), source.statuses)) is None
+
+
+@pytest.mark.parametrize(("level", "held"), [("observe", False), ("propose", False), ("act", True)])
+def test_only_a_deploy_that_acts_is_due_without_operate(ws: ModuleType, level: str, held: bool) -> None:
+    # observe never promotes; propose and the hold wait on a proposal issue, the first case
+    prod = ws.Environment("production", "staging", 60, level)
+    assert due(ws, prod, baked_source(ws, 90), held=held) is None
+    assert due(ws, ws.Environment("production", "staging", 60), baked_source(ws, 90)) is not None
+
+
+@pytest.mark.parametrize("tag", ["v1.2.0", "v1.2.1", "v1.3.0rc1", "v2.0.0.dev3"])
+def test_a_target_on_or_ahead_of_the_source_is_not_due(ws: ModuleType, tag: str) -> None:
+    prod = ws.Environment("production", "staging", 60)
+    assert due(ws, prod, baked_source(ws, 90), on(ws, tag)) is None
+
+
+@pytest.mark.parametrize("tag", ["v1.1.9", "v1.2.0rc3", "v1.2.0.dev1", "main"])
+def test_a_target_behind_the_source_is_due(ws: ModuleType, tag: str) -> None:
+    prod = ws.Environment("production", "staging", 60)
+    assert due(ws, prod, baked_source(ws, 90), on(ws, tag)) is not None
+
+
+def test_a_failed_health_check_restarts_the_bake(ws: ModuleType) -> None:
+    prod = ws.Environment("production", "staging", 60)
+    failed = status(ws, 51, "failure", "shipyard health: HTTP 500", 70)
+    # the first health status after the failure starts the bake again, as operate counts it
+    recent = baked_source(ws, 300, failed, status(ws, 52, "in_progress", "shipyard health: baking for 60 min", 40))
+    assert ws.bake_start(recent) == NOW - dt.timedelta(minutes=40)
+    assert due(ws, prod, recent) is None
+    long_ago = baked_source(ws, 300, failed, status(ws, 52, "success", "shipyard health: baked", 65))
+    assert due(ws, prod, long_ago).detail.startswith("v1.2.0 healthy on staging for 65 min")
+    assert ws.bake_start(baked_source(ws, 300, failed)) is None
 
 
 def test_operate_idle_reasons(ws: ModuleType) -> None:
@@ -294,6 +347,31 @@ def test_every_form_shipyard_accepts_is_read_on_311(ws: ModuleType, text: str) -
     read = ws.config(text, Path(".github/shipyard.toml"))
     assert read.environments == [ws.Environment("staging", None, 0), ws.Environment("production", "staging", 60)]
     assert read.incident_label == ("sev1" if "sev1" in text else "incident")
+
+
+AUTONOMY = [
+    '[autonomy]\nrelease = "act"\ndeploy.production = "observe"  # by hand\n',
+    "[autonomy.deploy]\n# by hand\nproduction = 'observe'\n",
+]
+
+
+@pytest.mark.parametrize("section", AUTONOMY)
+def test_deploy_autonomy_comes_from_the_config(ws: ModuleType, section: str) -> None:
+    policy = Path(".github/shipyard.toml")
+    assert ws.deploy_autonomy_310(CONFIG + section, policy) == {"production": "observe"}
+    read = ws.config(CONFIG + section, policy)
+    assert [e.deploy for e in read.environments] == ["act", "observe"]
+    with pytest.raises(SystemExit, match="must be one of") as refused:
+        ws.config(CONFIG + section.replace("observe", "never"), policy)
+    assert refused.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "config", ['autonomy.deploy.production = "observe"\n', '[autonomy]\ndeploy = { production = "observe" }\n']
+)
+def test_the_310_fallback_refuses_autonomy_it_cannot_read(ws: ModuleType, config: str) -> None:
+    with pytest.raises(SystemExit, match=r"can't read \[autonomy\] deploy on Python 3\.10"):
+        ws.deploy_autonomy_310(config, Path(".github/shipyard.toml"))
 
 
 @pytest.mark.parametrize(
