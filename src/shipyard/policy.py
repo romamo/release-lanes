@@ -4,48 +4,23 @@ release rewrites and publishes"""
 
 import re
 import shlex
-import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from shipyard import environments
+from shipyard.agents import AgentsConfig
 from shipyard.autonomy import AutonomyPolicy
+from shipyard.config import Table, read
+from shipyard.environments import Environment, OperateConfig
 from shipyard.errors import ReleaseError
+from shipyard.lanes import Lane as Lane  # re-exported: most modules name a lane through the policy
 from shipyard.schedule import Freeze, Window
 from shipyard.version import Part
 
-if TYPE_CHECKING:
-    from shipyard.agents import AgentsConfig
-    from shipyard.environments import Environment, OperateConfig
-
-CONFIG_PATH = Path(".github") / "shipyard.toml"
-ALIAS_PATH = Path(".github") / "release-policy.toml"  # the policy's first name; the same keys
 _MAX_QUIET = 300  # a GitHub job runs at most 6 hours; leave room for the rest of the run
-
-
-def config_path(root: Path) -> Path:
-    """The file shipyard reads its settings from: .github/shipyard.toml, else its alias
-    .github/release-policy.toml. A repository may not have both."""
-    found = [root / p for p in (CONFIG_PATH, ALIAS_PATH) if (root / p).is_file()]
-    if len(found) > 1:
-        raise ReleaseError(f"both {CONFIG_PATH} and {ALIAS_PATH} exist; keep one, git rm the other")
-    if not found:
-        raise ReleaseError(f"no release policy at {root / CONFIG_PATH} (or its alias {ALIAS_PATH})")
-    return found[0]
-
-
-class Lane(StrEnum):
-    DEV = "dev"
-    RC = "rc"
-    STABLE = "stable"
-    HOTFIX = "hotfix"
-
-    @property
-    def is_pre(self) -> bool:
-        return self in (Lane.DEV, Lane.RC)
-
 
 # When several lanes are due in one run, the first one here releases; the next run takes the rest
 PRIORITY = (Lane.HOTFIX, Lane.STABLE, Lane.RC, Lane.DEV)
@@ -131,15 +106,11 @@ class Policy:
     def load(cls, path: Path) -> Policy:
         if not path.is_file():
             raise ReleaseError(f"no release policy at {path}")
-        try:
-            raw = tomllib.loads(path.read_text(encoding="utf-8"))
-        except tomllib.TOMLDecodeError as exc:
-            raise ReleaseError(f"{path}: {exc}") from None
-        return cls.parse(raw, path.name)
+        return cls.parse(read(path), path.name)
 
     @classmethod
     def parse(cls, raw: Mapping[str, Any], where: str) -> Policy:
-        top = _Table(raw, where)
+        top = Table(raw, where)
         top.allow(
             "name",
             "mode",
@@ -191,14 +162,11 @@ class Policy:
             raise ReleaseError(f"{where}: [lanes] enables no lane")
         if Lane.STABLE in lanes and lanes[Lane.STABLE].promote and Lane.RC not in lanes:
             raise ReleaseError(f"{where}: lanes.stable promotes from rc, but lanes.rc is not enabled")
-        from shipyard import environments  # it reads tables as this module does, so it imports from here
-
         declared = environments.parse(top.table("environments", optional=True), lanes)
-        operate = environments.OperateConfig.parse(top.table("operate", optional=True))
-        autonomy = AutonomyPolicy.parse(top.table("autonomy", optional=True).raw, f"{where} [autonomy]")
-        autonomy.require_environments(declared.keys(), f"{where} [autonomy]")
-        from shipyard.agents import AgentsConfig  # it reads tables as this module does, so it imports from here
-
+        operate = OperateConfig.parse(top.table("operate", optional=True))
+        autonomy_table = top.table("autonomy", optional=True)
+        autonomy = AutonomyPolicy.parse(autonomy_table)
+        autonomy.require_environments(declared.keys(), autonomy_table.where)
         agents = AgentsConfig.parse(top.table("agents")) if "agents" in raw else None
         return cls(
             name=top.string("name"),
@@ -238,7 +206,7 @@ class Policy:
         return max((r.quiet_minutes or 0 for r in self.lanes.values()), default=0)
 
 
-def _lane(lane: Lane, t: _Table) -> LaneRule:
+def _lane(lane: Lane, t: Table) -> LaneRule:
     triggers = ("quiet_minutes", "schedule", "milestone")
     extra = {Lane.RC: ("marker",), Lane.STABLE: ("promote_from", "min_soak_days")}.get(lane, ())
     if lane is Lane.HOTFIX:
@@ -272,7 +240,7 @@ def _lane(lane: Lane, t: _Table) -> LaneRule:
     )
 
 
-def _version_line(i: int, t: _Table) -> VersionLine:
+def _version_line(i: int, t: Table) -> VersionLine:
     t.allow("file", "pattern", "replace")
     try:
         pattern = re.compile(t.string("pattern"), re.MULTILINE)
@@ -286,75 +254,3 @@ def _command(text: str, where: str) -> tuple[str, ...]:
     if not argv:
         raise ReleaseError(f"{where}: after_stamp holds an empty command")
     return argv
-
-
-class _Table:
-    """A TOML table read strictly: unknown keys and wrong types fail with the key's path"""
-
-    def __init__(self, raw: Mapping[str, Any], where: str) -> None:
-        self.raw = raw
-        self.where = where
-
-    def keys(self) -> list[str]:
-        return list(self.raw)
-
-    def allow(self, *keys: str) -> None:
-        if unknown := sorted(set(self.raw) - set(keys)):
-            raise ReleaseError(f"{self.where}: unknown keys {unknown}; allowed: {sorted(keys)}")
-
-    def _get(self, key: str, default: object, kind: type | tuple[type, ...], label: str) -> Any:
-        if key not in self.raw:
-            if default is _REQUIRED:
-                raise ReleaseError(f"{self.where}: {key} is required")
-            return default
-        value = self.raw[key]
-        if not isinstance(value, kind) or (kind is int and isinstance(value, bool)):
-            raise ReleaseError(f"{self.where}: {key} must be {label}, got {value!r}")
-        return value
-
-    def string(self, key: str, default: object = None) -> str:
-        value: str = self._get(key, _REQUIRED if default is None else default, str, "a string")
-        return value
-
-    def boolean(self, key: str, default: bool) -> bool:
-        value: bool = self._get(key, default, bool, "true or false")
-        return value
-
-    def integer(self, key: str, default: int | None, low: int, high: int) -> int | None:
-        value: int | None = self._get(key, default, int, "an integer")
-        if value is not None and not low <= value <= high:
-            raise ReleaseError(f"{self.where}: {key} must be in {low}..{high}, got {value}")
-        return value
-
-    def strings(self, key: str, default: tuple[str, ...] | None = None) -> tuple[str, ...]:
-        value = self._get(key, _REQUIRED if default is None else default, (list, tuple), "a list of strings")
-        if not all(isinstance(v, str) and v for v in value):
-            raise ReleaseError(f"{self.where}: {key} must be a list of non-empty strings")
-        return tuple(value)
-
-    def enum[E: StrEnum](self, key: str, kind: type[E]) -> E:
-        value = self.string(key)
-        try:
-            return kind(value)
-        except ValueError:
-            raise ReleaseError(f"{self.where}: {key} must be one of {[e.value for e in kind]}, got {value!r}") from None
-
-    def enums[E: StrEnum](self, key: str, kind: type[E], default: tuple[E, ...]) -> tuple[E, ...]:
-        values = self.strings(key, default=tuple(default))
-        try:
-            return tuple(kind(v) for v in values)
-        except ValueError:
-            raise ReleaseError(f"{self.where}: {key} holds values outside {[e.value for e in kind]}") from None
-
-    def table(self, key: str, optional: bool = False) -> _Table:
-        value = self._get(key, {} if optional else _REQUIRED, dict, "a table")
-        return _Table(value, f"{self.where} [{key}]")
-
-    def tables(self, key: str) -> list[_Table]:
-        value = self._get(key, [], list, "an array of tables")
-        if not all(isinstance(v, dict) for v in value):
-            raise ReleaseError(f"{self.where}: {key} must be an array of tables, [[{key}]]")
-        return [_Table(v, f"{self.where} [[{key}]][{i}]") for i, v in enumerate(value)]
-
-
-_REQUIRED = object()

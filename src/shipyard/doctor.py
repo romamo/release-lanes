@@ -8,11 +8,12 @@ from pathlib import Path
 
 from shipyard.autonomy import HOLD_LABEL, Autonomy, Hold
 from shipyard.changelog import Changelog
+from shipyard.config import ALIAS_PATH, CONFIG_PATH, config_path
 from shipyard.errors import ReleaseError
 from shipyard.github import GitHub
 from shipyard.gitrepo import REMOTE, Git
 from shipyard.land import BLOCKING_BRANCH, WORK_PREFIX, blocked
-from shipyard.policy import ALIAS_PATH, CONFIG_PATH, BumpFrom, Lane, Policy, VersionFiles, config_path
+from shipyard.policy import BumpFrom, Lane, Policy, VersionFiles
 from shipyard.stamp import project_version
 
 CALLER = Path(".github") / "workflows" / "release.yml"

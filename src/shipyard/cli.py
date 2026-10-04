@@ -26,6 +26,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from shipyard.agents import AgentsConfig
+from shipyard.config import ALIAS_PATH, CONFIG_PATH, config_path
 from shipyard.doctor import CALLER, OPERATE_CALLER, doctor
 from shipyard.errors import ReleaseError
 from shipyard.gate import ClaudeCli, check_checkout, gate, refresh, watch
@@ -36,7 +37,7 @@ from shipyard.land import cleanup, land, prepare
 from shipyard.launchd import DEFAULT_TOOL, build, install, remove
 from shipyard.operate import Http, UrllibHttp, approve, approve_rollback, operate, summary
 from shipyard.planner import Event, Hotfix, Planner, Proposal
-from shipyard.policy import ALIAS_PATH, CONFIG_PATH, Lane, Policy, config_path
+from shipyard.policy import Lane, Policy
 from shipyard.propose import propose
 from shipyard.stamp import notes, sync
 from shipyard.version import Version

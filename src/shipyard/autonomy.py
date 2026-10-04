@@ -12,8 +12,9 @@ import re
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Protocol
+from typing import Protocol
 
+from shipyard.config import Table
 from shipyard.errors import ReleaseError
 
 HOLD_LABEL = "shipyard-hold"
@@ -104,16 +105,16 @@ class AutonomyPolicy:
     deploy: Mapping[EnvironmentName, Autonomy] = field(default_factory=dict)
 
     @classmethod
-    def parse(cls, raw: Mapping[str, Any], where: str) -> AutonomyPolicy:
-        if unknown := sorted(set(raw) - {kind.value for kind in StageKind}):
-            raise ReleaseError(f"{where}: unknown keys {unknown}; allowed: {sorted(StageKind)}")
-        deploy = raw.get("deploy", {})
-        if not isinstance(deploy, dict):
-            raise ReleaseError(f"{where}: deploy is a table of environments, such as deploy.production = 'propose'")
+    def parse(cls, t: Table) -> AutonomyPolicy:
+        t.allow(*StageKind)
+        # its own words, not Table.table's: the message shows the shape a deploy level takes
+        if not isinstance(t.raw.get("deploy", {}), dict):
+            raise ReleaseError(f"{t.where}: deploy is a table of environments, such as deploy.production = 'propose'")
+        deploy = t.table("deploy", optional=True)
         return cls(
-            release=_level(raw, "release", where),
-            rollback=_level(raw, "rollback", where),
-            deploy={EnvironmentName(name): _level(deploy, name, f"{where} [deploy]") for name in deploy},
+            release=_level(t, "release"),
+            rollback=_level(t, "rollback"),
+            deploy={EnvironmentName(name): _level(deploy, name) for name in deploy.raw},
         )
 
     def require_environments(self, known: Collection[str], where: str) -> None:
@@ -149,8 +150,10 @@ class AutonomyPolicy:
         return (Stage.release(), *(Stage.deploy(e) for e in envs), Stage.rollback())
 
 
-def _level(raw: Mapping[str, Any], key: str, where: str) -> Autonomy:
-    value = raw.get(key, Autonomy.ACT.value)
+def _level(t: Table, key: str) -> Autonomy:
+    """A level, absent meaning act. Not Table.enum: that one requires the key and refuses
+    a non-string as "must be a string", where a level names its choices either way"""
+    value = t.raw.get(key, Autonomy.ACT.value)
     if not isinstance(value, str) or value not in set(Autonomy):
-        raise ReleaseError(f"{where}: {key} must be one of {[a.value for a in Autonomy]}, got {value!r}")
+        raise ReleaseError(f"{t.where}: {key} must be one of {[a.value for a in Autonomy]}, got {value!r}")
     return Autonomy(value)

@@ -4,10 +4,11 @@ from pathlib import Path
 import pytest
 
 from shipyard.cli import main
+from shipyard.config import config_path
 from shipyard.doctor import doctor
 from shipyard.errors import ReleaseError
 from shipyard.init import init
-from shipyard.policy import Lane, Policy, config_path
+from shipyard.policy import Lane, Policy
 
 from .conftest import Repo
 
