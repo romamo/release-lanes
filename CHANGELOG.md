@@ -7,6 +7,14 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- shipmill-setup's `setup_state.py` reports whether GitHub deletes a pull request's branch
+  when it merges: `BRANCH_DELETE_ON`, or `BRANCH_DELETE_OFF` (exit 1), which `--fix` turns
+  on through the repo setting `delete_branch_on_merge`. github-pr-triage's stacked merges
+  rely on it to retarget a stacked PR. github-issue-triage now deletes the branch of a PR
+  it closes because the new plan dropped it (#117)
+
 ### Changed
 
 - shipmill's own `.github/shipmill.toml` has an `[agents]` section, so `shipmill gate` triages

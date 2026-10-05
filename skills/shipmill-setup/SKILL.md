@@ -247,9 +247,14 @@ or the tags are wrong; fix those, not the version.
    release commit in the run summary
 3. Run the checklist: `uv run --no-project python <skill>/scripts/setup_state.py <owner/repo>`.
    It reports releases, the `[agents]` section, the plugin in `.claude/settings.json`, and
-   the labels (`postponed`, `blocked`, `shipmill-hold`, and the blocker label). `--fix`
-   enables the plugin, keeping every other key, and creates the missing labels on GitHub
-   at once; commit the settings change in a follow-up PR. A plugin turned off on purpose
+   the labels (`postponed`, `blocked`, `shipmill-hold`, and the blocker label), and
+   whether GitHub deletes a pull request's branch when it merges (`BRANCH_DELETE_ON` or
+   `BRANCH_DELETE_OFF`, the repo setting `delete_branch_on_merge`). That setting matters
+   because github-pr-triage's stacked merges rely on GitHub retargeting a stacked PR when
+   the branch under it is deleted, and without it merged branches pile up. `--fix`
+   enables the plugin, keeping every other key, creates the missing labels, and turns the
+   setting on, all on GitHub at once; commit the settings change in a follow-up PR. A
+   plugin turned off on purpose
    (`PLUGIN_DISABLED`) is the user's call; ask before changing it
 4. Ask the user to switch `mode = "release"` once the dry run looks right
 5. Ask where the agents will run: releasing needs none of them, but triage, landing, and

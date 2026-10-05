@@ -119,7 +119,7 @@ Then work through github-pr-triage's handback list. `triage_state.py` can't flag
 - Postpone, or ask the reporter to clarify
 - Won't fix
 
-When the new plan drops the PR, close it with a comment linking the issue, so the issue reads NEEDS_PR or POSTPONED on the next pass. For a held PR, the comment names the decision the user owes; leave the verdict as it is.
+When the new plan drops the PR, close it with `gh pr close <n> --delete-branch` and a comment linking the issue, so the issue reads NEEDS_PR or POSTPONED on the next pass and the dead branch doesn't stay on GitHub. A PR closed for any other reason keeps its branch, since it may be reopened. For a held PR, the comment names the decision the user owes; leave the verdict as it is.
 
 **Continuous intake:** issues keep arriving while you work. When the user wants the backlog kept current, offer `/loop 30m` (or `/schedule` for daily) running `triage_state.py` and triaging only what it flags. Don't start a loop unasked.
 
