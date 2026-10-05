@@ -30,8 +30,14 @@ Labels (the triage skills and shipmill read them):
                    them on GitHub
   LABELS_OK        all exist
 
-Exit 0 when every row is RELEASE_READY, AGENTS_OK, PLUGIN_OK, or LABELS_OK, 1 otherwise,
-2 on bad input, a malformed settings.json, both config files, or a git or gh failure.
+Branches (the repo setting delete_branch_on_merge; github-pr-triage's stacked merges rely
+on GitHub retargeting a stacked PR when the branch under it is deleted):
+  BRANCH_DELETE_OFF  merged PR branches stay on GitHub; --fix turns the setting on
+  BRANCH_DELETE_ON   GitHub deletes a PR's branch when it merges
+
+Exit 0 when every row is RELEASE_READY, AGENTS_OK, PLUGIN_OK, LABELS_OK, or
+BRANCH_DELETE_ON, 1 otherwise, 2 on bad input, a malformed settings.json, both config
+files, or a git or gh failure (a failed read of the repo setting never reads as off).
 Needs git and an authenticated gh. Python 3.10+, standard library only.
 """
 
@@ -42,6 +48,7 @@ import json
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
@@ -59,7 +66,7 @@ LABELS = {
     "shipmill-hold": ("000000", "While open, no lane releases except a hotfix started by hand"),
 }
 BLOCKER = ("b60205", "Holds the release lanes the policy names until closed")
-DONE = {"RELEASE_READY", "AGENTS_OK", "PLUGIN_OK", "LABELS_OK"}
+DONE = {"RELEASE_READY", "AGENTS_OK", "PLUGIN_OK", "LABELS_OK", "BRANCH_DELETE_ON"}
 
 
 @dataclass(frozen=True)
@@ -68,7 +75,7 @@ class Row:
     detail: str
 
     def text(self) -> str:
-        return f"{self.state:<16} {self.detail}"
+        return f"{self.state:<17} {self.detail}"
 
 
 def run(cmd: list[str], cwd: Path | None = None) -> str:
@@ -196,6 +203,31 @@ def existing_labels(repo: str) -> set[str]:
     return {label["name"] for label in json.loads(out)}
 
 
+# -- branches ------------------------------------------------------------------------------
+
+
+def read_flag(out: str, what: str) -> bool:
+    """gh's -q output for a boolean: anything but true or false fails, never reads as off"""
+    value = out.strip()
+    if value not in ("true", "false"):
+        fail(f"{what}: expected true or false, got {value!r}")
+    return value == "true"
+
+
+def branch_delete_row(repo: str, fix: bool, gh: Callable[[list[str]], str] = run) -> Row:
+    """Whether GitHub deletes a PR's branch on merge; with fix, turns it on when it's off"""
+    query = ["-q", ".delete_branch_on_merge"]
+    on = read_flag(gh(["gh", "api", f"repos/{repo}", *query]), f"{repo}'s delete_branch_on_merge")
+    if not on and fix:
+        patch = ["gh", "api", "-X", "PATCH", f"repos/{repo}", "-F", "delete_branch_on_merge=true", *query]
+        on = read_flag(gh(patch), f"{repo}'s delete_branch_on_merge after --fix")
+        if not on:
+            fail(f"{repo}: turning delete_branch_on_merge on didn't take")
+    if on:
+        return Row("BRANCH_DELETE_ON", "GitHub deletes a pull request's branch when it merges")
+    return Row("BRANCH_DELETE_OFF", "merged branches stay on GitHub and stacked PRs aren't retargeted")
+
+
 # -- main ----------------------------------------------------------------------------------
 
 
@@ -212,7 +244,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("repo", help="owner/name")
     parser.add_argument("--repo-dir", type=Path, default=Path.cwd(), help="the repo's checkout (default: here)")
-    parser.add_argument("--fix", action="store_true", help="enable the plugin and create the missing labels")
+    parser.add_argument(
+        "--fix",
+        action="store_true",
+        help="enable the plugin, create the missing labels, and turn on deleting branches on merge",
+    )
     parser.add_argument("--json", action="store_true", help="JSON lines instead of a table")
     args = parser.parse_args()
     repo_dir: Path = args.repo_dir.resolve()
@@ -234,7 +270,13 @@ def main() -> int:
             run(["gh", "label", "create", name, "-R", args.repo, "--color", color, "--description", description])
         missing = []
 
-    rows = [release_row(repo_dir), agents_row(repo_dir), plugin_row(settings), labels_row(missing)]
+    rows = [
+        release_row(repo_dir),
+        agents_row(repo_dir),
+        plugin_row(settings),
+        labels_row(missing),
+        branch_delete_row(args.repo, args.fix),
+    ]
     for row in rows:
         print(json.dumps({"state": row.state, "detail": row.detail}) if args.json else row.text())
     return 0 if all(row.state in DONE for row in rows) else 1

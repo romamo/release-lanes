@@ -131,3 +131,76 @@ def test_a_gate_only_config_has_no_release(ss: ModuleType, tmp_path: Path) -> No
 def test_agents_without_a_prompt_are_missing(ss: ModuleType, tmp_path: Path, text: str) -> None:
     write(tmp_path, ".github/shipmill.toml", text)
     assert ss.agents_row(tmp_path).state == "AGENTS_MISSING"
+
+
+class FakeGh:
+    """Records each gh call and answers the repo-setting read and the PATCH with canned output"""
+
+    def __init__(self, read: str, patched: str = "true\n") -> None:
+        self.read = read
+        self.patched = patched
+        self.calls: list[list[str]] = []
+
+    def __call__(self, cmd: list[str]) -> str:
+        self.calls.append(cmd)
+        return self.patched if "PATCH" in cmd else self.read
+
+
+READ = ["gh", "api", "repos/me/demo", "-q", ".delete_branch_on_merge"]
+PATCH = [
+    "gh",
+    "api",
+    "-X",
+    "PATCH",
+    "repos/me/demo",
+    "-F",
+    "delete_branch_on_merge=true",
+    "-q",
+    ".delete_branch_on_merge",
+]
+
+
+def test_branch_delete_on_counts_as_done(ss: ModuleType) -> None:
+    gh = FakeGh("true\n")
+    row = ss.branch_delete_row("me/demo", False, gh)
+    assert row.state == "BRANCH_DELETE_ON"
+    assert row.state in ss.DONE
+    assert gh.calls == [READ]
+
+
+def test_branch_delete_off_without_fix_is_reported_and_never_patched(ss: ModuleType) -> None:
+    gh = FakeGh("false\n")
+    row = ss.branch_delete_row("me/demo", False, gh)
+    assert row.state == "BRANCH_DELETE_OFF"
+    assert row.state not in ss.DONE
+    assert gh.calls == [READ]
+
+
+def test_fix_turns_branch_delete_on(ss: ModuleType) -> None:
+    gh = FakeGh("false\n")
+    assert ss.branch_delete_row("me/demo", True, gh).state == "BRANCH_DELETE_ON"
+    assert gh.calls == [READ, PATCH]
+
+
+def test_fix_leaves_branch_delete_alone_when_already_on(ss: ModuleType) -> None:
+    gh = FakeGh("true\n")
+    assert ss.branch_delete_row("me/demo", True, gh).state == "BRANCH_DELETE_ON"
+    assert gh.calls == [READ]
+
+
+@pytest.mark.parametrize(("read", "patched"), [("", "true"), ("null\n", "true"), ("false", "false")])
+def test_an_unreadable_or_unchanged_setting_fails_rather_than_reading_as_off(
+    ss: ModuleType, read: str, patched: str
+) -> None:
+    with pytest.raises(SystemExit) as exc:
+        ss.branch_delete_row("me/demo", True, FakeGh(read, patched))
+    assert exc.value.code == 2
+
+
+def test_a_gh_api_failure_fails_loudly(ss: ModuleType) -> None:
+    def broken(cmd: list[str]) -> str:
+        return str(ss.run(["false"]))  # a nonzero exit, the way gh ends on a 403 or a network error
+
+    with pytest.raises(SystemExit) as exc:
+        ss.branch_delete_row("me/demo", False, broken)
+    assert exc.value.code == 2

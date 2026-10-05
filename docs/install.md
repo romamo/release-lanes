@@ -156,7 +156,9 @@ fix the bump lists or the tags, not the version.
    ```
 
    `<skills>` is the plugin's `skills` folder, or a checkout's. `--fix` also turns the
-   plugin on in `.claude/settings.json`; commit that in a follow-up pull request
+   plugin on in `.claude/settings.json`; commit that in a follow-up pull request. It turns
+   on the repo setting that deletes a pull request's branch when it merges, too: stacked
+   pull requests are retargeted only when the branch under them is deleted
 
 4. Set `mode = "release"` in `.github/shipmill.toml` and merge it
 
