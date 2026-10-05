@@ -14,25 +14,50 @@ From a GitHub issue to a published release, run by agents and shipmill's release
 
 [docs/flow.md](docs/flow.md) shows what to say to run each stage, alone or all at once.
 
-## Install the skills
+## Install
 
-As a Claude Code plugin, which also reaches scheduled cloud sessions:
-
-```
-/plugin marketplace add shipmill/shipmill
-/plugin install shipmill@shipmill
-```
-
-The skills are then `/shipmill:github-issue-triage` and so on. For a checkout you edit,
-or for Codex, link each skill folder into `~/.agents/skills` (Claude Code reads it through
-`~/.claude/skills`):
+From the root of your repo:
 
 ```bash
-for s in ~/PycharmProjects/shipmill/skills/*/; do ln -sfn "$s" ~/.agents/skills/; done
+claude plugin marketplace add shipmill/shipmill && claude plugin install shipmill@shipmill && claude "/shipmill:shipmill-setup"
 ```
 
-The skills need `gh` signed in, and run their scripts with `uv run --no-project python`
-or Python 3.10+.
+This installs the plugin and starts the `shipmill-setup` skill, which inspects the repo,
+asks you which lanes to run, and does everything below on a branch, ending with a pull
+request.
+
+By hand instead: three parts, each working without the next; take the ones you need.
+Prerequisites, every step, and how to pause or remove it: [docs/install.md](docs/install.md).
+
+1. **The skills**, in Claude Code, one command at a time:
+
+   ```
+   /plugin marketplace add shipmill/shipmill
+   ```
+
+   ```
+   /plugin install shipmill@shipmill
+   ```
+
+2. **Release lanes**, on a branch of your repo (needs `gh` signed in, `uv`, and a
+   `CHANGELOG.md` with an Unreleased section, which `init` refuses to start without):
+
+   ```bash
+   uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill init --ci ci.yml
+   uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill doctor
+   ```
+
+   `init` writes `.github/shipmill.toml` in `mode = "dry-run"` and the Release workflow.
+   Merge, run the Release workflow by hand with dry-run on, read the release commit in
+   its summary, then set `mode = "release"`
+
+3. **The agents' schedule** (optional): add an `[agents]` section to the config, then run
+   `shipmill gate` from its own checkout every 15 minutes:
+
+   ```bash
+   git worktree add --detach tmp/shipmill-gate origin/main
+   uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill --repo tmp/shipmill-gate launchd <owner/repo> --every 15
+   ```
 
 ## Release lanes
 
@@ -75,53 +100,6 @@ Escalate in this order:
 2. **Revert**: someone files a `release-blocker` issue, which holds `rc` and `stable`; the
    revert pull request removes the bad change and its CHANGELOG entry, and the next rc soaks
 3. **Hotfix**: when only a stable release will do, ship feature A alone from `release/X.Y`
-
-### Quick start
-
-```bash
-uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill init --ci ci.yml
-uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill doctor
-```
-
-`init` writes `.github/shipmill.toml` in `mode = "dry-run"` and
-`.github/workflows/release.yml`, which wires shipmill's reusable workflows to your CI.
-`doctor` checks what shipmill needs:
-
-- A CHANGELOG with an Unreleased section, in keep-a-changelog or dash style
-- A stable `vX.Y.Z` tag to count from
-- A CI workflow that runs on `workflow_call` with a `ref` input and checks that ref out
-- A workflow for each `dispatch` entry that runs on `workflow_dispatch` with a `tag` input
-- For each environment, a workflow that runs on `workflow_dispatch` with `tag` and
-  `environment` inputs, and a job that sets `environment:`
-- When an environment uses `from` or `health`, `.github/workflows/operate.yml` (from
-  `shipmill init --operate`) granting `deployments: write` and `actions: write`, and
-  `issues: write` once an environment has `health` (for incidents) or a stage proposes
-- An `[operate]` section with known keys only, `rollback_after` in 1..20 and a non-empty
-  `incident_label`
-- No `[tool.uv.sources]` entry taken from a local path, which CI and users don't have
-- No branch named `shipmill` on origin, which would block the `shipmill/<tag>` work branches
-
-Merge it, run the Release workflow by hand with dry-run on, read the release commit in the
-run summary, then set `mode = "release"`.
-
-An agent can do the whole setup with the skill in
-[`skills/shipmill-setup`](skills/shipmill-setup/SKILL.md).
-
-### Where the agents run
-
-Releasing runs in GitHub Actions and needs nothing else. The skills (triage, landing,
-shipped notices) run wherever you start them:
-
-| Option | Runs | Good for |
-|---|---|---|
-| On demand | in your Claude Code session, when you invoke a skill | getting started; you see each step |
-| `/loop 30m /github-ship-watch <owner/repo> — watch and triage` | in an open session | a working day; stops when the session closes |
-| A `/schedule` routine | in the cloud, with your computer off | hands-off intake and shipped notices |
-
-A routine merges only when its prompt says "merge when green"; without it, it stops at open
-pull requests. A cloud routine may not load the plugin, so its prompt clones shipmill
-itself (the prompt is in [docs/flow.md](docs/flow.md#keeping-it-running)). Start with a
-routine that doesn't merge, read its first runs, then decide.
 
 ### The policy
 
