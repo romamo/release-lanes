@@ -1,6 +1,6 @@
 # S-003: Notify when a gated session waits on you
 
-status: approved
+status: built
 
 ## Problem
 
@@ -189,3 +189,20 @@ have happened.
 - shipmill/shipmill#130: S-003-10, S-003-11, S-003-12, S-003-13, S-003-16
 
 ## Verification
+
+- S-003-1: read `AgentsConfig.parse` in `src/shipmill/agents.py` and ran the `test_s003_1` config tests, defaults true, 4, 0 and given values read as given
+- S-003-2: read the `allow` list and ranges in `AgentsConfig.parse` and ran the `test_s003_2` tests, each bad key or value refused naming the key, `shipmill gate` exits 2
+- S-003-3: ran `gate()` with fakes on a tick with no blocked session and a config reader that raises, nothing read or sent, `waiting.json` removed, decision RUNNING or LAUNCH as before
+- S-003-4: ran `gate()` with a fake Claude and notifier on a first blocked tick, one notification `shipmill o/r` / `session b1 waits on you (0h): claude attach b1`, `since` and `notified` set to the tick, WAITING
+- S-003-5: ran a second tick 3h later with `remind_hours = 4`, no send and `notified` unchanged; `test_s003_5` shows the reminder after 4h updating `notified`
+- S-003-6: ran `notify.run` against a missing command, a non-zero exit, and a sleeping command (`test_s003_6`), each raised NotifyFailed; a failing fake notifier printed `notify failed for b: ...`, kept `notified` null, decision WAITING
+- S-003-7: ran ticks at 0h, 5h, 30h with `notify = false` (`test_s003_7`), no send, entry recorded with `notified` null
+- S-003-8: ran `Desktop.detect` with injected platform, `which`, and runner, darwin gives `osascript -e 'on run argv' ... 'end run' T B`, linux gives `notify-send T B`, neither raises `no notifier (osascript or notify-send)` with no command run
+- S-003-9: ran ticks where a blocked session went to working and back (`test_s003_9`), its entry dropped then recreated with a new `since` and a new first notification; eight malformed records each exit naming the path
+- S-003-10: ran `gate()` with fakes at `max_wait_hours = 6` and a 6h wait, `claude stop b1` called through the fake, entry dropped, `stopped b1 after 6h waiting: <name>` printed, stopped notification sent; `test_s003_10` shows the tick then launching, or UNCHANGED with the same findings within `retry_hours`; `gate()` takes no GitHub writer
+- S-003-11: ran ticks at 0h and 900h with `max_wait_hours = 0`, no stop, entry kept, reminders sent
+- S-003-12: ran a held tick at 6h with fakes, HELD, the session stopped and its stopped notification sent, the reason without `claude stop b1`; `test_s003_12` shows a second blocked session notified and still named
+- S-003-13: ran a tick with a fake `claude stop` that raises, ReleaseError (exit 2 from `cli.run`), nothing launched, the entry unchanged in `waiting.json`
+- S-003-14: ran a dry tick at 6h, `would stop b1 after 6h waiting: <name>`, no stop, no send, `waiting.json` byte for byte unchanged; `test_s003_14` shows `would notify b`
+- S-003-15: read the `--json` `waiting` list from `tick_record` on blocked, stopped, and quiet ticks, every object has session, name, since, waited_hours, notified, stopped, error; an empty list with none blocked
+- S-003-16: opened the shipmill-setup gate section, `docs/design/agent-modes.md`, and `docs/install.md`, each `[agents]` block parses with the three keys; agent-modes documents `waiting.json` and that a blocked session shows no question, no time it blocked, and no issue (`test_s003_16`)

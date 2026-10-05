@@ -6,7 +6,8 @@ asks Claude Code which of its own sessions are alive, and launches a background 
 the user, and the work changed since the last launch. Everything it knows comes from
 GitHub and from Claude Code; the two files it writes, under the checkout's git directory,
 keep an unchanged state from starting a session on every tick and time how long a session
-has waited on the user, so a reminder repeats only every few hours.
+has waited on the user, so a reminder repeats only every few hours and an optional limit
+stops it.
 """
 
 import datetime as dt
@@ -82,7 +83,7 @@ class Launch:
 
 
 class Action(enum.Enum):
-    HELD = "HELD"  # an open shipmill-hold issue stops every launch (D-11)
+    HELD = "HELD"  # an open shipmill-hold issue stops every launch (D-13)
     QUIET = "QUIET"  # nothing needs an agent
     RUNNING = "RUNNING"  # a session is still working
     WAITING = "WAITING"  # a session waits on the user
@@ -104,8 +105,8 @@ def fingerprint(work: Iterable[Finding]) -> str:
 
 
 def held(hold: Hold, sessions: Sequence[Session]) -> Decision | None:
-    """D-11: a hold starts nothing. A session already running finishes; the reason names it
-    so a person can stop it"""
+    """D-13: a hold starts nothing. A session already running finishes; the reason names it
+    so a person can stop it. A session the waiting step stopped is no longer passed in"""
     if not hold.on:
         return None
     live = [s.id for s in sessions if s.running or s.blocked]
@@ -296,6 +297,9 @@ class Waiting:
     error: str | None
 
     def line(self, dry_run: bool) -> str:
+        if self.stopped:
+            verb = "would stop" if dry_run else "stopped"
+            return f"{verb} {self.session} after {self.waited_hours}h waiting: {self.name}"
         if self.error is not None:
             return f"notify failed for {self.session}: {self.error}"
         if self.notified:
@@ -366,10 +370,13 @@ def attend(
     notifier: Notifier,
     now: dt.datetime,
     dry_run: bool,
+    stop: Callable[[str], None],
 ) -> tuple[Waiting, ...]:
     """Spec 003's waiting step: record each blocked session's wait and notify for it, at
-    once and then every remind_hours. With none blocked it only drops the record and reads
-    nothing. A failed send is reported, never raised, and is tried again next tick"""
+    once and then every remind_hours, and stop one that waited max_wait_hours (> 0). With
+    none blocked it only drops the record and reads nothing. A failed send is reported,
+    never raised, and is tried again next tick; a failed stop raises after saving the
+    record with that session's entry kept, so the next tick tries again"""
     blocked = [s for s in sessions if s.blocked]
     if not blocked:
         if path.exists() and not dry_run:
@@ -377,23 +384,37 @@ def attend(
         return ()
     agents = config()  # the checkout as it stands: a busy tick never moves it
     remind = dt.timedelta(hours=agents.remind_hours)
+    limit = dt.timedelta(hours=agents.max_wait_hours)
     known = load_waiting(path)
     waits: dict[str, Wait] = {}  # only the blocked sessions: any other entry is dropped
     report = []
-    for s in blocked:
+    for index, s in enumerate(blocked):
         wait = known.get(s.id) or Wait(now, None)
         hours = max(0, int((now - wait.since).total_seconds() // 3600))
-        due = agents.notify and (wait.notified is None or now - wait.notified >= remind)
+        expired = agents.max_wait_hours > 0 and now - wait.since >= limit
+        if expired:
+            body = f"stopped session {s.id} after {hours}h waiting: claude attach {s.id} shows its question"
+            if not dry_run:
+                try:
+                    stop(s.id)
+                except ReleaseError:
+                    rest = {b.id: known.get(b.id) or Wait(now, None) for b in blocked[index:]}
+                    save_waiting(path, waits | rest)
+                    raise
+        else:
+            body = f"session {s.id} waits on you ({hours}h): claude attach {s.id}"
+        due = agents.notify and (expired or wait.notified is None or now - wait.notified >= remind)
         error = None
         if due and not dry_run:
             try:
-                notifier.send(f"shipmill {repo}", f"session {s.id} waits on you ({hours}h): claude attach {s.id}")
+                notifier.send(f"shipmill {repo}", body)
             except NotifyFailed as exc:
                 error = str(exc)
             else:
                 wait = Wait(wait.since, now)
-        waits[s.id] = wait
-        report.append(Waiting(s.id, s.name, wait.since, hours, due and error is None, False, error))
+        if not expired:  # a stopped session's entry is dropped
+            waits[s.id] = wait
+        report.append(Waiting(s.id, s.name, wait.since, hours, due and error is None, expired, error))
     if not dry_run:
         save_waiting(path, waits)
     return tuple(report)
@@ -444,12 +465,16 @@ def gate(
 ) -> tuple[Decision, str | None, tuple[Waiting, ...]]:
     """Decide, and on LAUNCH stop the finished sessions and start a new one. Returns the
     decision, the launched session's id, and what the waiting step did for each blocked
-    session. A hold, then a busy session, ends the run before the checkout moves or the
-    state is read; of the two, only a blocked session reads the config"""
+    session. The waiting step runs first, held or not (D-13), and the rest of the tick is
+    decided without the sessions it stopped. A hold, then a busy session, ends the run
+    before the checkout moves or the state is read; of the two, only a blocked session
+    reads the config"""
     check_checkout(git, repo)
     record = state_dir(git) / RECORD
     sessions = claude.sessions(git.root, repo)
-    waiting = attend(state_dir(git) / WAITING, repo, sessions, config, notifier, now, dry_run)
+    waiting = attend(state_dir(git) / WAITING, repo, sessions, config, notifier, now, dry_run, claude.stop)
+    gone = {w.session for w in waiting if w.stopped}  # on a dry run, the ones a real tick would stop
+    sessions = [s for s in sessions if s.id not in gone]
     stopped = held(hold(), sessions)
     if stopped is not None:
         return stopped, None, waiting
@@ -488,7 +513,10 @@ def tick_record(
 def tick_lines(decision: Decision, launched: str | None, waiting: Sequence[Waiting], dry_run: bool) -> list[str]:
     """`shipmill gate`'s text: the decision, then one line per blocked session"""
     lines = [f"{decision.action.value}: {decision.reason}"]
-    lines += [f"  {w.line(dry_run)}" for w in waiting]
+    for w in waiting:
+        lines.append(f"  {w.line(dry_run)}")
+        if w.stopped and w.error is not None:  # the stop line above leaves out the failed send
+            lines.append(f"  notify failed for {w.session}: {w.error}")
     lines += [f"  {f.line()}" for f in decision.work]
     if launched:
         lines.append(f"  launched {launched}: claude attach {launched}")
