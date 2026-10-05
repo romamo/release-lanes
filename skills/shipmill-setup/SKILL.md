@@ -296,7 +296,13 @@ docs/design/agent-modes.md has the details.
    prompt = "/github-issue-triage {repo} triage the new issues; do not merge"
    prs = false        # true when the prompt lands PRs
    retry_hours = 24   # unchanged findings start a new session after this
+   notify = true      # a desktop notification when a session waits on you
+   remind_hours = 4   # repeat it while the session still waits
+   max_wait_hours = 0 # stop a session that waited this long; 0: never
    ```
+
+   Ask whether a session that waits on a question too long may be stopped so the repo
+   moves again; if so, set `max_wait_hours` (1..168)
 3. **A dedicated checkout.** The session branches and commits where it starts, so never
    use the user's working copy: `git worktree add --detach tmp/shipmill-gate
    origin/<default>` inside the trusted checkout (a worktree outside it would need its
@@ -310,9 +316,13 @@ docs/design/agent-modes.md has the details.
    it once now. Its log is under `~/Library/Logs/shipmill/`. `--remove` unloads it; on
    Linux, run the same `gate` command from a systemd timer
 6. **Hand over.** Tell the user how to see a session (`claude agents`, `claude attach
-   <id>`), that a session waiting on a question holds the repo until they answer, that an
-   open `shipmill-hold` issue stops every launch as well as every release (D-11), and how
-   to remove the job (`launchd <owner/repo> --remove`)
+   <id>`), that a session waiting on a question holds the repo until they answer, that
+   such a session sends a desktop notification at once and every `remind_hours` while it
+   waits (`osascript` on macOS, `notify-send` elsewhere), that `max_wait_hours` (when not
+   0) stops it with `claude stop` so the repo moves again (`claude attach <id>` still
+   shows its question), that an open `shipmill-hold` issue stops every launch as well as
+   every release but not that stop (D-13), and how to remove the job (`launchd
+   <owner/repo> --remove`)
 
 ## Migrating from hand-made or scripted releases
 

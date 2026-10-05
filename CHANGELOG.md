@@ -23,6 +23,11 @@ bot.
   decision, notifying runs on held ticks too, `--dry-run` prints `would notify <id>`, and
   `--json` lists each blocked session under `waiting`. A tick with a blocked session now
   reads the `[agents]` section (#129)
+- `shipmill gate` stops a session that has waited on you for `max_wait_hours` (when not 0)
+  with `claude stop`, prints `stopped <id> after <N>h waiting: <name>`, sends a last
+  notification, and decides the rest of the tick without it, held or not (D-13); a failed
+  `claude stop` exits 2 and launches nothing, and `--dry-run` prints `would stop <id>`.
+  Spec 003 is built (#130)
 
 ## [0.16.0] - 2026-10-05
 

@@ -54,7 +54,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | `true` | INCIDENT_OPEN | An agent works the incident: diagnosis, then a hotfix or a revert |
 | `false` | PROMOTION_DUE | Only a person approves; an agent would wake every retry window for nothing |
 | `false` | UNHEALTHY | Operate owns it and rolls back after `rollback_after` failures; past that, the incident it opens reads INCIDENT_OPEN |
-| `false` | HOLD | Report only; the gate checks `shipmill-hold` itself before anything else (D-11) |
+| `false` | HOLD | Report only; the gate checks `shipmill-hold` itself before anything else (D-13) |
 | `false` | PRS_OPEN, POSTMORTEM_DUE, and every other state | Report only, or a repair the watch pass makes itself |
 
 Pass `--grace` to give a slow publish more minutes before it reads NOT_PUBLISHED, and `--tool` when the shipmill bot isn't installed from `shipmill/shipmill@v0`.
