@@ -11,6 +11,8 @@ bot.
 
 ### Changed
 
+- `shipmill gate` starts no session while an issue labelled `shipmill-hold` is open, and
+  reports HELD with any session still open (D-11)
 - The project is now shipmill, with no compatibility layer: the package and CLI
   `shipmill`, the config `.github/shipmill.toml`, the labels `shipmill-hold` and the
   other `shipmill-*` labels, the `shipmill/<tag>` work branches, the `shipmill-setup`

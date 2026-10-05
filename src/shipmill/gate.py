@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Protocol
 
 from shipmill.agents import AgentsConfig
+from shipmill.autonomy import Hold
 from shipmill.errors import ReleaseError
 from shipmill.gitrepo import Git
 
@@ -71,6 +72,7 @@ class Launch:
 
 
 class Action(enum.Enum):
+    HELD = "HELD"  # an open shipmill-hold issue stops every launch (D-11)
     QUIET = "QUIET"  # nothing needs an agent
     RUNNING = "RUNNING"  # a session is still working
     WAITING = "WAITING"  # a session waits on the user
@@ -89,6 +91,16 @@ class Decision:
 def fingerprint(work: Iterable[Finding]) -> str:
     lines = sorted(f"{f.state}\x00{f.subject}\x00{f.detail}" for f in work)
     return hashlib.sha256("\n".join(lines).encode()).hexdigest()[:16]
+
+
+def held(hold: Hold, sessions: Sequence[Session]) -> Decision | None:
+    """D-11: a hold starts nothing. A session already running finishes; the reason names it
+    so a person can stop it"""
+    if not hold.on:
+        return None
+    live = [s.id for s in sessions if s.running or s.blocked]
+    still = f"; still open: {', '.join(f'claude stop {i}' for i in live)}" if live else ""
+    return Decision(Action.HELD, f"{hold.reason}: no session starts{still}", ())
 
 
 def busy(sessions: Sequence[Session]) -> Decision | None:
@@ -271,15 +283,19 @@ def gate(
     claude: Claude,
     findings: Callable[[], list[Finding]],
     now: dt.datetime,
+    hold: Callable[[], Hold],
     refresh_checkout: bool = False,
     dry_run: bool = False,
 ) -> tuple[Decision, str | None]:
     """Decide, and on LAUNCH stop the finished sessions and start a new one. Returns the
-    decision and the launched session's id. A busy session ends the run before the checkout
-    moves, the config is read, or the state is read"""
+    decision and the launched session's id. A hold, then a busy session, ends the run before
+    the checkout moves, the config is read, or the state is read"""
     check_checkout(git, repo)
     record = state_dir(git) / RECORD
     sessions = claude.sessions(git.root, repo)
+    stopped = held(hold(), sessions)
+    if stopped is not None:
+        return stopped, None
     pending = busy(sessions)
     if pending is not None:
         return pending, None
