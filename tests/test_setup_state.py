@@ -9,7 +9,7 @@ from types import ModuleType
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "skills" / "shipmill-setup" / "scripts" / "setup_state.py"
-CALLER = "jobs:\n  prepare:\n    uses: romamo/shipmill/.github/workflows/prepare.yml@v0\n"
+CALLER = "jobs:\n  prepare:\n    uses: shipmill/shipmill/.github/workflows/prepare.yml@v0\n"
 
 
 @pytest.fixture(scope="module")
@@ -43,6 +43,13 @@ def test_the_config_mode_sets_the_release_state(ss: ModuleType, tmp_path: Path, 
     write(tmp_path, ".github/shipmill.toml", f'name = "demo"\nmode = "{mode}"  # comment\n')
     write(tmp_path, ".github/workflows/release.yml", CALLER)
     assert bot(ss, tmp_path) == state
+
+
+def test_a_release_workflow_from_shipmills_old_path_counts(ss: ModuleType, tmp_path: Path) -> None:
+    # a repo set up before shipmill moved from romamo/shipmill to the shipmill org
+    write(tmp_path, ".github/shipmill.toml", 'mode = "release"\n')
+    write(tmp_path, ".github/workflows/release.yml", CALLER.replace("shipmill/shipmill/", "romamo/shipmill/"))
+    assert bot(ss, tmp_path) == "RELEASE_READY"
 
 
 def test_a_release_workflow_from_another_tool_is_foreign(ss: ModuleType, tmp_path: Path) -> None:

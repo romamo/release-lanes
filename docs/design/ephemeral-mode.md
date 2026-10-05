@@ -74,7 +74,7 @@ concurrency: { group: shipmill-gate }   # a newer pending run replaces the older
 ## The gate
 
 `shipmill gate <owner/repo> --scope <scope> --json` runs code only, from
-`uvx --from git+https://github.com/romamo/shipmill@v0`. It needs no checkout for the state
+`uvx --from git+https://github.com/shipmill/shipmill@v0`. It needs no checkout for the state
 read; it uses a blobless clone (`--filter=blob:none`) only for the repairs that touch git.
 
 1. **Read.** One GraphQL pass plus a few REST calls: issues with comments and labels, open
@@ -157,11 +157,11 @@ Each agent job has the same shape:
     permission-issues: write
 - uses: actions/checkout@v5
   with: { token: "${{ steps.app.outputs.token }}", fetch-depth: 0, filter: "blob:none" }
-- run: uvx --from git+https://github.com/romamo/shipmill@v0 shipmill agent-env >> "$GITHUB_ENV"
+- run: uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill agent-env >> "$GITHUB_ENV"
   env: { GH_TOKEN: "${{ steps.app.outputs.token }}" }   # git author as <id>+<slug>[bot]
 - run: |
     npm install -g @anthropic-ai/claude-code
-    git clone --depth 1 --branch v0 https://github.com/romamo/shipmill "$RUNNER_TEMP/shipmill"
+    git clone --depth 1 --branch v0 https://github.com/shipmill/shipmill "$RUNNER_TEMP/shipmill"
     claude -p "/shipmill:github-issue-resolve ${{ matrix.issue }} — $(cat brief.md)" \
       --plugin-dir "$RUNNER_TEMP/shipmill" \
       --permission-mode dontAsk --allowedTools "$SHIPMILL_TOOLS" \

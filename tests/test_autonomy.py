@@ -357,7 +357,7 @@ def test_doctor_warns_when_it_cannot_read_issues(repo: Repo) -> None:
 CALLER_TEXT = """\
 jobs:
   prepare:
-    uses: romamo/shipmill/.github/workflows/prepare.yml@v0
+    uses: shipmill/shipmill/.github/workflows/prepare.yml@v0
     permissions:
       contents: write
       issues: {prepare}
@@ -475,7 +475,7 @@ def test_cli_close_proposal(repo: Repo, capsys: pytest.CaptureFixture[str]) -> N
 LAND_CALLER = """\
 jobs:
   land:
-    uses: romamo/shipmill/.github/workflows/land.yml@v0
+    uses: shipmill/shipmill/.github/workflows/land.yml@v0
     permissions:
       contents: write
       actions: write

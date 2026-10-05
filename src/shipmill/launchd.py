@@ -19,7 +19,7 @@ from shipmill.errors import ReleaseError
 
 TOOLS = ("claude", "gh", "git", "uvx")
 BASE_PATH = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
-DEFAULT_TOOL = "git+https://github.com/romamo/shipmill@v0"
+DEFAULT_TOOL = "git+https://github.com/shipmill/shipmill@v0"
 _TEMP_ROOTS = ("/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/")
 
 

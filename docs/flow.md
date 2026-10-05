@@ -90,7 +90,7 @@ To enable the plugin in every local session of a repo, commit this to its `.clau
 ```json
 {
   "extraKnownMarketplaces": {
-    "shipmill": { "source": { "source": "github", "repo": "romamo/shipmill" }, "autoUpdate": true }
+    "shipmill": { "source": { "source": "github", "repo": "shipmill/shipmill" }, "autoUpdate": true }
   },
   "enabledPlugins": { "shipmill@shipmill": true }
 }
@@ -99,7 +99,7 @@ To enable the plugin in every local session of a repo, commit this to its `.clau
 A cloud routine may not apply a repo's plugin keys ([plugins for organizations](https://code.claude.com/docs/en/plugins/org.md) lists where each surface reads them), so give the routine a prompt that doesn't depend on them:
 
 ```
-Clone https://github.com/romamo/shipmill into tmp/shipmill (or pull it if present), then follow
+Clone https://github.com/shipmill/shipmill into tmp/shipmill (or pull it if present), then follow
 tmp/shipmill/skills/github-ship-watch/SKILL.md for <owner/repo> — watch and triage
 ```
 

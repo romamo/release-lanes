@@ -514,5 +514,5 @@ def test_s001_9_the_skill_documents_the_fleet_file_the_report_and_a_routine(fl: 
     assert "/schedule" in section and "fleet.py report" in section.split("/schedule", 1)[1]  # a routine runs it
     example = section.split("```toml\n", 1)[1].split("```", 1)[0]
     assert fl.parse_plain(example, Path("fleet.toml")) == {
-        "repos": [{"repo": "romamo/shipmill"}, {"repo": "owner/other", "incident_label": "sev"}]
+        "repos": [{"repo": "shipmill/shipmill"}, {"repo": "owner/other", "incident_label": "sev"}]
     }

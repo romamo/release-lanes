@@ -25,7 +25,7 @@ on:
       tool:
         description: "Where uvx installs shipmill from"
         type: string
-        default: "git+https://github.com/romamo/shipmill@v0"
+        default: "git+https://github.com/shipmill/shipmill@v0"
 
 # No permissions here or on the job: it runs with the caller's grant, as a reusable job that
 # asks for more than its caller grants fails to start. It needs contents: read, deployments:

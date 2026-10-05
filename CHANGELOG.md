@@ -7,6 +7,15 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- shipmill moved to the shipmill GitHub org: the repository is `shipmill/shipmill`, so
+  `shipmill init` writes `uses: shipmill/shipmill/...@v0`, the default `--tool` for the
+  workflows, `launchd`, and `watch_state.py` is `git+https://github.com/shipmill/shipmill@v0`,
+  and the plugin's marketplace is `shipmill/shipmill`. GitHub redirects the old path; the
+  setup checklist still counts a `release.yml` that calls `romamo/shipmill`. shipmill's own
+  Pages site, and its health URL, moved to `https://shipmill.github.io/shipmill/`
+
 ## [0.14.0] - 2026-10-05
 
 ### Changed

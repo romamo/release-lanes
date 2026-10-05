@@ -6,8 +6,8 @@
     "name": "Roman Medvedev",
     "email": "pypi@romavm.dev"
   },
-  "homepage": "https://github.com/romamo/shipmill",
-  "repository": "https://github.com/romamo/shipmill",
+  "homepage": "https://github.com/shipmill/shipmill",
+  "repository": "https://github.com/shipmill/shipmill",
   "license": "MIT",
   "keywords": [
     "github",
