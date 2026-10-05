@@ -28,7 +28,6 @@ bot.
   operate run (OPERATE_FAILED) and an open incident (INCIDENT_OPEN) now start one; an open
   `shipmill-hold` issue still stops every launch (D-11). The gate refuses a row with no
   boolean `agent` rather than guessing (#49)
-
 - shipmill moved to the shipmill GitHub org: the repository is `shipmill/shipmill`, so
   `shipmill init` writes `uses: shipmill/shipmill/...@v0`, the default `--tool` for the
   workflows, `launchd`, and `watch_state.py` is `git+https://github.com/shipmill/shipmill@v0`,
