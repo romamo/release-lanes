@@ -209,12 +209,14 @@ class Fake:
         if step == "watch_state.py":
             rows = self.watch[repo]
             action = any(r["state"] in WATCH_ACTION for r in rows)
-            return proc(1 if action else 0, "".join(json.dumps(r, sort_keys=True) + "\n" for r in rows))
+            lines = (json.dumps({**r, "agent": r["state"] in WATCH_ACTION}, sort_keys=True) + "\n" for r in rows)
+            return proc(1 if action else 0, "".join(lines))
         assert step == "metrics.py", cmd
         return proc(0, json.dumps(self.metrics[repo]))
 
 
-WATCH_ACTION = {"BOT_FAILED", "UNANNOUNCED", "ISSUES", "INCIDENT_OPEN"}  # the action states these fixtures use
+# the action states these fixtures use; each also needs an agent (watch_state.py's AGENT)
+WATCH_ACTION = {"BOT_FAILED", "UNANNOUNCED", "ISSUES", "INCIDENT_OPEN"}
 
 THREE = """\
 [[repos]]
@@ -479,6 +481,19 @@ def test_a_watch_line_that_isnt_a_row_stops_the_report(fl: ModuleType) -> None:
     with pytest.raises(SystemExit) as refused:
         fl.watch_rows("o/r", '{"state": "BOT_OK"}\n')
     assert "not a row" in str(refused.value)
+
+
+@pytest.mark.parametrize("agent", ["", ', "agent": "false"', ', "agent": null'])
+def test_a_watch_row_needs_a_boolean_agent(fl: ModuleType, agent: str) -> None:
+    line = '{"state": "BOT_OK", "subject": "release.yml", "detail": ""' + agent + "}\n"
+    with pytest.raises(SystemExit, match="not a row"):
+        fl.watch_rows("o/r", line)
+    ok = fl.watch_rows("o/r", '{"state": "BOT_OK", "subject": "release.yml", "detail": "", "agent": false}\n')
+    assert ok == [fl.Row("BOT_OK", "release.yml", "")]
+
+
+def test_the_fixture_action_rows_are_agent_rows(ws: ModuleType) -> None:
+    assert WATCH_ACTION <= ws.AGENT
 
 
 def workdirs(fake: Fake) -> list[Path]:

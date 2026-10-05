@@ -89,7 +89,7 @@ ACTION = frozenset(
     }
 )
 REPO_ERROR = "REPO_ERROR"
-ROW_KEYS = {"state", "subject", "detail"}  # a watch_state.py --json line
+ROW_KEYS = {"state", "subject", "detail", "agent"}  # a watch_state.py --json line
 KEYS = ("repo", "incident_label")  # the keys of a [[repos]] entry
 REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*/(?!\.+$)[A-Za-z0-9._-]+$")  # owner/name; a name isn't only dots
 # the plain form Python 3.10 reads: a [[repos]] header or key = "string", each with an optional comment
@@ -294,7 +294,7 @@ def watch_rows(repo: str, out: str) -> list[Row]:
     rows = []
     for line in out.splitlines():
         found = decoded(line, f"watch_state.py for {repo}")
-        if not isinstance(found, dict) or set(found) != ROW_KEYS:
+        if not isinstance(found, dict) or set(found) != ROW_KEYS or not isinstance(found["agent"], bool):
             raise Refused(f"error: watch_state.py for {repo} printed {line!r}, not a row")
         rows.append(Row(str(found["state"]), str(found["subject"]), str(found["detail"])))
     return rows

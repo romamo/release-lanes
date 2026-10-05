@@ -15,8 +15,19 @@ bot.
 - A one-line setup: `claude plugin marketplace add shipmill/shipmill && claude plugin install
   shipmill@shipmill && claude "/shipmill:shipmill-setup"`, from the root of a repo, installs
   the plugin and starts the shipmill-setup skill
+- `watch_state.py --json` marks every row with `agent: true|false`: true for BOT_FAILED,
+  BOT_STALLED, NOT_PUBLISHED, UNANNOUNCED, ISSUES, OPERATE_FAILED, and INCIDENT_OPEN, the
+  rows an agent works on; false for every other state, PROMOTION_DUE, UNHEALTHY, HOLD, and
+  PRS_OPEN among them. The text table is unchanged, and `fleet.py` reads the new field
+  without adding it to its own report (#49)
 
 ### Changed
+
+- `shipmill gate` starts a session on the rows `watch_state.py` marks `agent: true`, plus
+  PRS_OPEN with `[agents] prs = true`, in place of its own copy of the states. A failed
+  operate run (OPERATE_FAILED) and an open incident (INCIDENT_OPEN) now start one; an open
+  `shipmill-hold` issue still stops every launch (D-11). The gate refuses a row with no
+  boolean `agent` rather than guessing (#49)
 
 - shipmill moved to the shipmill GitHub org: the repository is `shipmill/shipmill`, so
   `shipmill init` writes `uses: shipmill/shipmill/...@v0`, the default `--tool` for the

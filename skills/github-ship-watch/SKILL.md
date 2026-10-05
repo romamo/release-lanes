@@ -45,6 +45,18 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | ISSUES | Under "watch and triage", run github-issue-triage on the flagged issues. Otherwise list them |
 | PRS_OPEN, BOT_OK, BOT_NONE, NO_REGISTRY | Report only |
 
+`--json` prints one JSON object per row: `state`, `subject`, `detail`, and `agent`, which says whether the row needs an agent. `shipmill gate` starts a session only on `agent: true` rows (plus PRS_OPEN with `[agents] prs = true`), and refuses a row without the field. The script's `AGENT` set decides it, next to this table; change both together:
+
+| `agent` | States | Why |
+|---|---|---|
+| `true` | BOT_FAILED, BOT_STALLED, NOT_PUBLISHED, UNANNOUNCED, ISSUES | A repair above an agent does: a rerun, a lane start, the notices, triage |
+| `true` | OPERATE_FAILED | An agent reruns a flaky operate run or reports the failure |
+| `true` | INCIDENT_OPEN | An agent works the incident: diagnosis, then a hotfix or a revert |
+| `false` | PROMOTION_DUE | Only a person approves; an agent would wake every retry window for nothing |
+| `false` | UNHEALTHY | Operate owns it and rolls back after `rollback_after` failures; past that, the incident it opens reads INCIDENT_OPEN |
+| `false` | HOLD | Report only; the gate checks `shipmill-hold` itself before anything else (D-11) |
+| `false` | PRS_OPEN, POSTMORTEM_DUE, and every other state | Report only, or a repair the watch pass makes itself |
+
 Pass `--grace` to give a slow publish more minutes before it reads NOT_PUBLISHED, and `--tool` when the shipmill bot isn't installed from `shipmill/shipmill@v0`.
 
 HOLD and POSTMORTEM_DUE show for every repo with a shipmill config, since a hold stops releases too and an incident may be labelled by hand. POSTMORTEM_DUE reads the postmortems through the GitHub contents API on the default branch, so a draft counts only once merged. The operations states show only when the config declares environments (read with `tomllib`; on Python 3.10 only plain `[environments.<name>]` tables, and any other form stops the watch with a one-line message); they come from the GitHub deployments and issues `shipmill operate` writes. The incident label is `[operate] incident_label`, `incident` by default; `--incident-label` takes its place (the fleet report passes a fleet entry's label this way).

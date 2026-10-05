@@ -507,3 +507,19 @@ def test_the_issue_states_reported_are_the_ones_triage_state_acts_on(ws: ModuleT
     triage_state = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(triage_state)
     assert ws.TRIAGE_ACTION == triage_state.ACTION
+
+
+AGENT_ROWS = ["BOT_FAILED", "BOT_STALLED", "NOT_PUBLISHED", "UNANNOUNCED", "ISSUES", "OPERATE_FAILED", "INCIDENT_OPEN"]
+REPORT_ROWS = ["PROMOTION_DUE", "UNHEALTHY", "HOLD", "PRS_OPEN", "POSTMORTEM_DUE", "BOT_OK", "PUBLISHED", "PUBLISHING"]
+
+
+@pytest.mark.parametrize("state", AGENT_ROWS + REPORT_ROWS)
+def test_each_json_row_says_whether_it_needs_an_agent(ws: ModuleType, state: str) -> None:
+    row = ws.Row(state, "o/r", "d")
+    assert row.json() == {"state": state, "subject": "o/r", "detail": "d", "agent": state in AGENT_ROWS}
+    assert row.text() == f"{state:<14} o/r              d"  # the table is unchanged
+
+
+def test_agent_rows_are_action_rows(ws: ModuleType) -> None:
+    assert set(AGENT_ROWS) == ws.AGENT
+    assert ws.AGENT <= ws.ACTION

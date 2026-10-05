@@ -25,16 +25,18 @@ from shipmill.autonomy import Hold
 from shipmill.errors import ReleaseError
 from shipmill.gitrepo import Git
 
-# watch_state.py states that need an agent (its ACTION set)
-WORK = frozenset({"BOT_FAILED", "BOT_STALLED", "NOT_PUBLISHED", "UNANNOUNCED", "ISSUES"})
 RECORD = "gate.json"
+PRS_OPEN = "PRS_OPEN"  # watch_state.py's open pull requests: work only with [agents] prs = true
 
 
 @dataclass(frozen=True, slots=True)
 class Finding:
+    """One watch_state.py row; agent is its own verdict that the row needs an agent"""
+
     state: str
     subject: str
     detail: str
+    agent: bool
 
     def line(self) -> str:
         return f"{self.state} {self.subject}: {self.detail}" if self.detail else f"{self.state} {self.subject}"
@@ -120,12 +122,12 @@ def decide(
     last: Launch | None,
     now: dt.datetime,
     retry: dt.timedelta,
-    work_states: frozenset[str] = WORK,
+    prs: bool = False,
 ) -> Decision:
     pending = busy(sessions)
     if pending is not None:
         return pending
-    work = tuple(f for f in findings if f.state in work_states)
+    work = tuple(f for f in findings if f.agent or (prs and f.state == PRS_OPEN))
     if not work:
         return Decision(Action.QUIET, "nothing needs an agent", work)
     if last is not None and last.fingerprint == fingerprint(work) and now - last.at < retry:
@@ -171,10 +173,22 @@ def parse_launched(text: str) -> str:
 
 
 def parse_findings(text: str) -> list[Finding]:
+    """watch_state.py --json's rows; a row without a boolean agent is refused, never guessed"""
     findings = []
     for line in text.splitlines():
-        row = json.loads(line)
-        findings.append(Finding(str(row["state"]), str(row["subject"]), str(row["detail"])))
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ReleaseError(f"watch_state.py printed {line[:200]!r}, not JSON: {exc}") from None
+        if not isinstance(row, dict):
+            raise ReleaseError(f"watch_state.py printed {line[:200]!r}, not a row")
+        texts = [row.get(key) for key in ("state", "subject", "detail")]
+        if not all(isinstance(t, str) for t in texts) or not isinstance(row.get("agent"), bool):
+            raise ReleaseError(
+                f"watch_state.py printed {line[:200]!r}: a row needs string state, subject, and detail,"
+                " and a boolean agent"
+            )
+        findings.append(Finding(row["state"], row["subject"], row["detail"], row["agent"]))
     return findings
 
 
@@ -302,9 +316,8 @@ def gate(
     if refresh_checkout and not dry_run:
         refresh(git)
     agents = config()
-    work_states = WORK | {"PRS_OPEN"} if agents.prs else WORK
     retry = dt.timedelta(hours=agents.retry_hours)
-    decision = decide(findings(), sessions, load_launch(record), now, retry, work_states)
+    decision = decide(findings(), sessions, load_launch(record), now, retry, agents.prs)
     if decision.action is not Action.LAUNCH or dry_run:
         return decision, None
     for session in decision.stop:
