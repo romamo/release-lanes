@@ -8,7 +8,16 @@ import pytest
 
 from shipmill.autonomy import HOLD_LABEL
 from shipmill.config import CONFIG_PATH, config_path
-from shipmill.github import Deployment, DeploymentState, DeploymentStatus, Issue, Milestone, WorkflowRun
+from shipmill.errors import ReleaseError
+from shipmill.github import (
+    Deployment,
+    DeploymentState,
+    DeploymentStatus,
+    Issue,
+    Milestone,
+    PullRequest,
+    WorkflowRun,
+)
 from shipmill.gitrepo import Git
 from shipmill.policy import Policy
 
@@ -110,6 +119,8 @@ class FakeGitHub:
     status_writes: list[tuple[int, DeploymentState, str]] = field(default_factory=list)
     runs: list[tuple[str, str, WorkflowRun]] = field(default_factory=list)  # (workflow, ref, run), as dispatched
     scan_limit: int = 500  # the newest open issues find_issue reads, as gh lists them
+    pulls: list[PullRequest] = field(default_factory=list)  # open pull requests
+    pulls_error: str = ""  # when set, listing the open pull requests fails with it, as gh would
 
     def deploy(self, environment: str, ref: str, at: dt.datetime, *states: DeploymentState) -> int:
         """Record a deployment of ref, with its statuses one minute apart from at; its id"""
@@ -192,6 +203,11 @@ class FakeGitHub:
     def create_deployment_status(self, deployment: int, state: DeploymentState, description: str) -> None:
         self.status_writes.append((deployment, state, description))
         self._status(deployment, state, description, self.now)
+
+    def open_pull_requests(self) -> list[PullRequest]:
+        if self.pulls_error:
+            raise ReleaseError(f"gh pr list failed: {self.pulls_error}")
+        return sorted(self.pulls, key=lambda p: p.number)
 
 
 @dataclass

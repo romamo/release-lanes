@@ -13,6 +13,7 @@
   doctor          check that the repository is ready for the bot
   init            write a starting policy and the calling workflow (--operate: the operate one)
   gate            start a Claude Code session for the repo only when its state needs one
+  worktrees       list the repository's worktrees, each REMOVABLE once its work landed, or KEPT and why
 
 Exit codes: 0 done (a plan may skip); 1 doctor found a failure; 2 bad input or a refused state.
 """
@@ -44,6 +45,8 @@ from shipmill.policy import Lane, Policy
 from shipmill.propose import close_released, propose, run_url
 from shipmill.stamp import notes, sync
 from shipmill.version import Version
+from shipmill.worktrees import ClaudeSessions, Sessions, judge, table
+from shipmill.worktrees import report as worktrees_report
 
 
 def _outputs(path: Path | None, values: Mapping[str, str]) -> None:
@@ -173,6 +176,11 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true", help="decide and print; start, stop, or move nothing")
     p.add_argument("--json", action="store_true", help="print the decision as JSON")
 
+    p = sub.add_parser(
+        "worktrees", help="list every worktree of the repository as REMOVABLE once its work landed, or KEPT and why"
+    )
+    p.add_argument("--json", action="store_true", help="print the worktrees as one JSON object")
+
     p = sub.add_parser("launchd", help="run the gate for a dedicated checkout every few minutes (macOS)")
     p.add_argument("slug", metavar="owner/name", help="the GitHub repo; --repo is its gate checkout")
     p.add_argument("--every", type=int, default=15, help="minutes between runs (default: 15)")
@@ -188,8 +196,11 @@ def _release_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--version", required=True, type=Version.parse)
 
 
-def main(argv: list[str], github: GitHub | None = None, http: Http | None = None) -> int:
-    """github stands in for gh, and http for the health checks, as tests pass fakes"""
+def main(
+    argv: list[str], github: GitHub | None = None, http: Http | None = None, sessions: Sessions | None = None
+) -> int:
+    """github stands in for gh, http for the health checks, and sessions for `claude agents`,
+    as tests pass fakes"""
     args = _parser().parse_args(argv)
     root: Path = args.repo.resolve()
     hub = github or GhCli(root)
@@ -212,6 +223,10 @@ def main(argv: list[str], github: GitHub | None = None, http: Http | None = None
         return _gate(root, args)
     if args.command == "launchd":
         return _launchd(root, args)
+    if args.command == "worktrees":
+        judged = judge(Git(root), hub, sessions or ClaudeSessions(root), dt.datetime.now(dt.UTC))
+        sys.stdout.write(json.dumps(worktrees_report(judged), indent=2) + "\n" if args.json else table(judged))
+        return 0
 
     policy = Policy.load(config_path(root))
     git = Git(root, policy.bot_name, policy.bot_email)
