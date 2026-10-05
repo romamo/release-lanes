@@ -183,7 +183,11 @@ so give it the prompt in [flow.md](flow.md#keeping-it-running), which clones shi
 
 `shipmill gate` reads the repo's state and starts a Claude Code background session only
 when something needs an agent, no session it started is still working or waiting on you,
-and the findings changed since its last launch. [Agent modes](design/agent-modes.md) has
+and the findings changed since its last launch. Something needs an agent when
+github-ship-watch's `watch_state.py` marks a row `agent: true`: a failed or stalled release
+bot, a release missing from PyPI or not announced, issues triage owes, a failed operate
+run, or an open incident; open PRs count too with `prs = true`. A promotion waiting on
+you or an unhealthy environment starts nothing. [Agent modes](design/agent-modes.md) has
 the details.
 
 1. **Say what a session may do**, in `.github/shipmill.toml`, merged before the job

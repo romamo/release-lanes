@@ -49,8 +49,12 @@ the user's working copy, where the session would branch and commit. Each run:
 4. With `--refresh`, moves the detached, clean checkout to the head of origin's default
    branch, so the session reads the current config, `CLAUDE.md`, and skills
 5. Reads `[agents]`, then the state with github-ship-watch's `watch_state.py` (bundled in
-   the wheel). The rows that need an agent are its action states, plus open PRs when
-   `prs = true`. None: **QUIET**, stop. No model call has happened
+   the wheel, so the gate and the script always come from the same version). The rows
+   that need an agent are the ones it marks `agent: true` (a failed or stalled release
+   bot, a release missing from PyPI or not announced, issues triage owes, a failed operate
+   run, an open incident), plus open PRs when `prs = true`. A promotion waiting on a
+   person, an unhealthy environment (operate's rollback owns it), and a postmortem due
+   start nothing. None: **QUIET**, stop. No model call has happened
 6. Compares the rows with the last launch's fingerprint. The same rows within
    `retry_hours`: **UNCHANGED**, stop. A session that left an item alone on purpose
    doesn't wake a new one every tick

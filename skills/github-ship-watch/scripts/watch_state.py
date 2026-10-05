@@ -54,6 +54,10 @@ Intake (github-issue-triage's triage_state.py):
 --incident-label names the label the repo's incidents carry, in place of the config's
 [operate] incident_label (fleet.py passes a fleet file's incident_label this way).
 
+--json prints one JSON object per row: state, subject, detail, and agent, true when the
+row needs an agent (BOT_FAILED, BOT_STALLED, NOT_PUBLISHED, UNANNOUNCED, ISSUES,
+OPERATE_FAILED, INCIDENT_OPEN): the rows shipmill gate starts a session for.
+
 Holds and incidents lead the report. Exit 0 when nothing needs action, 1 when any
 BOT_FAILED, BOT_STALLED, NOT_PUBLISHED, UNANNOUNCED, ISSUES, OPERATE_FAILED, UNHEALTHY,
 PROMOTION_DUE, INCIDENT_OPEN, or POSTMORTEM_DUE row is present, 2 on bad input or a git, gh, or uvx failure.
@@ -109,6 +113,17 @@ ACTION = {
     "INCIDENT_OPEN",
     "POSTMORTEM_DUE",
 }
+# the states whose row needs an agent: --json marks each row's "agent" from this, and
+# shipmill gate starts a session on those rows (SKILL.md's repair table says what it does)
+AGENT = {
+    "BOT_FAILED",
+    "BOT_STALLED",
+    "NOT_PUBLISHED",
+    "UNANNOUNCED",
+    "ISSUES",
+    "OPERATE_FAILED",
+    "INCIDENT_OPEN",
+}
 LEAD = ("INCIDENT_OPEN", "HOLD")  # the report starts with these, in this order
 ACTIVE = {"queued", "in_progress", "waiting", "pending", "requested"}
 HOLD_LABEL = "shipmill-hold"  # shipmill's autonomy.HOLD_LABEL
@@ -155,6 +170,9 @@ class Row:
 
     def text(self) -> str:
         return f"{self.state:<14} {self.subject:<16} {self.detail}"
+
+    def json(self) -> dict[str, str | bool]:
+        return {"state": self.state, "subject": self.subject, "detail": self.detail, "agent": self.state in AGENT}
 
 
 @dataclass(frozen=True)
@@ -907,7 +925,7 @@ def main() -> int:
 
     rows += intake_rows(args.repo)
     for row in ordered(rows):
-        print(json.dumps(row.__dict__, sort_keys=True) if args.json else row.text())
+        print(json.dumps(row.json(), sort_keys=True) if args.json else row.text())
     return 1 if any(r.state in ACTION for r in rows) else 0
 
 

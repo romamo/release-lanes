@@ -274,7 +274,9 @@ or the tags are wrong; fix those, not the version.
 
 `shipmill gate` is code that reads the repo's state and starts a Claude Code background
 session (`claude --bg`) only when something needs an agent, no session it started is still
-working or waiting on the user, and the findings changed since its last launch.
+working or waiting on the user, and the findings changed since its last launch. Something
+needs an agent when github-ship-watch's `watch_state.py` marks a row `agent: true`
+(github-ship-watch's SKILL.md lists them), plus open PRs with `prs = true`.
 docs/design/agent-modes.md has the details.
 
 1. **Scope.** Ask what the session may do; the prompt carries it. Recommend triage without

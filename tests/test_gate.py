@@ -1,8 +1,10 @@
 """The gate decides with code whether a repo needs a Claude Code session"""
 
 import datetime as dt
+import importlib.util
 import json
 import subprocess
+import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,8 +38,19 @@ from .conftest import POLICY
 
 NOW = dt.datetime(2026, 10, 4, 12, 0, tzinfo=dt.UTC)
 DAY = dt.timedelta(hours=24)
-ISSUES = Finding("ISSUES", "romamo/demo", "NEW #12 #14; NEEDS_PR #9")
-QUIET_ROWS = [Finding("BOT_OK", "release.yml", ""), Finding("PRS_OPEN", "romamo/demo", "#3")]
+ISSUES = Finding("ISSUES", "romamo/demo", "NEW #12 #14; NEEDS_PR #9", True)
+OPEN_PRS = Finding("PRS_OPEN", "romamo/demo", "#3", False)
+QUIET_ROWS = [Finding("BOT_OK", "release.yml", "", False), OPEN_PRS]
+OPERATE_FAILED = Finding("OPERATE_FAILED", "operate-caller.yml", "failure: https://example.test/run/1", True)
+REPORT_ONLY = [
+    Finding("PROMOTION_DUE", "prod", "a proposal waits: gh workflow run operate.yml -f approve=prod", False),
+    Finding("UNHEALTHY", "staging", "v1.2.0: check failed, since 5 min ago", False),
+    Finding("HOLD", "#7", "Stop; opened by @amy 1 h ago", False),
+]
+
+
+def watch_line(state: str, subject: str = "romamo/demo", detail: str = "", **extra: object) -> str:
+    return json.dumps({"state": state, "subject": subject, "detail": detail, **extra}, sort_keys=True)
 
 
 def cfg(text: str = "/t", prs: bool = False) -> AgentsConfig:
@@ -109,16 +122,27 @@ def test_unchanged_findings_wait_for_the_retry_window() -> None:
 
 def test_changed_findings_launch_at_once() -> None:
     last = Launch(fingerprint([ISSUES]), "s1", NOW - dt.timedelta(minutes=15))
-    newer = Finding("ISSUES", "romamo/demo", "NEW #12 #14 #15; NEEDS_PR #9")
+    newer = Finding("ISSUES", "romamo/demo", "NEW #12 #14 #15; NEEDS_PR #9", True)
     assert decide([newer], [], last, NOW, DAY).action is Action.LAUNCH
 
 
 def test_open_prs_count_only_when_asked() -> None:
-    assert decide(QUIET_ROWS, [], None, NOW, DAY, frozenset({"PRS_OPEN"})).action is Action.LAUNCH
+    assert decide(QUIET_ROWS, [], None, NOW, DAY).action is Action.QUIET
+    decision = decide(QUIET_ROWS, [], None, NOW, DAY, prs=True)
+    assert (decision.action, decision.work) == (Action.LAUNCH, (OPEN_PRS,))
+
+
+def test_an_operate_failure_launches() -> None:
+    decision = decide([*REPORT_ONLY, OPERATE_FAILED], [], None, NOW, DAY)
+    assert (decision.action, decision.work) == (Action.LAUNCH, (OPERATE_FAILED,))
+
+
+def test_rows_watch_state_leaves_to_people_or_operate_launch_nothing() -> None:
+    assert decide(REPORT_ONLY, [], None, NOW, DAY, prs=True).action is Action.QUIET
 
 
 def test_the_fingerprint_ignores_order() -> None:
-    other = Finding("UNANNOUNCED", "v1.2.0", "#4 (since v1.1.0)")
+    other = Finding("UNANNOUNCED", "v1.2.0", "#4 (since v1.1.0)", True)
     assert fingerprint([ISSUES, other]) == fingerprint([other, ISSUES])
 
 
@@ -146,8 +170,50 @@ def test_launch_output_gives_the_session_id() -> None:
 
 
 def test_watch_rows_parse() -> None:
-    line = json.dumps({"detail": "#3", "state": "PRS_OPEN", "subject": "romamo/demo"})
-    assert parse_findings(line) == [Finding("PRS_OPEN", "romamo/demo", "#3")]
+    lines = [watch_line("PRS_OPEN", detail="#3", agent=False), watch_line("ISSUES", detail="NEW #12", agent=True)]
+    assert parse_findings("\n".join(lines)) == [
+        OPEN_PRS,
+        Finding("ISSUES", "romamo/demo", "NEW #12", True),
+    ]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        watch_line("ISSUES"),  # a watch_state.py from before the agent field
+        watch_line("ISSUES", agent="true"),
+        watch_line("ISSUES", agent=1),
+        watch_line("ISSUES", agent=None),
+        json.dumps({"state": "ISSUES", "subject": "romamo/demo", "agent": True}),
+        json.dumps({"state": 3, "subject": "romamo/demo", "detail": "", "agent": True}),
+        json.dumps(["ISSUES"]),
+        "ISSUES romamo/demo",
+    ],
+)
+def test_a_watch_row_without_a_boolean_agent_is_refused(line: str) -> None:
+    with pytest.raises(ReleaseError, match="watch_state.py printed"):
+        parse_findings(line)
+
+
+def test_the_gate_reads_the_rows_watch_state_prints() -> None:
+    script = skills_dir() / "github-ship-watch" / "scripts" / "watch_state.py"
+    spec = importlib.util.spec_from_file_location("watch_state", script)
+    assert spec is not None and spec.loader is not None
+    ws = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = ws  # dataclasses look their module up by name
+    spec.loader.exec_module(ws)
+    states = sorted(ws.ACTION | {"HOLD", "PRS_OPEN", "BOT_OK"})
+    text = "\n".join(json.dumps(ws.Row(s, "romamo/demo", "").json(), sort_keys=True) for s in states)
+    work = decide(parse_findings(text), [], None, NOW, DAY).work
+    assert {f.state for f in work} == {
+        "BOT_FAILED",
+        "BOT_STALLED",
+        "NOT_PUBLISHED",
+        "UNANNOUNCED",
+        "ISSUES",
+        "OPERATE_FAILED",
+        "INCIDENT_OPEN",
+    }
 
 
 def test_the_watch_script_is_found() -> None:
@@ -204,7 +270,7 @@ def test_a_malformed_record_fails(checkout: Git) -> None:
 
 
 def test_prs_in_the_config_make_open_prs_work(checkout: Git) -> None:
-    rows = [Finding("PRS_OPEN", "romamo/demo", "#3")]
+    rows = [OPEN_PRS]
     decision, _ = gate(checkout, "romamo/demo", lambda: cfg(), FakeClaude(), lambda: rows, NOW, Hold, dry_run=True)
     assert decision.action is Action.QUIET
     decision, _ = gate(
@@ -322,3 +388,13 @@ def test_a_hold_names_the_sessions_still_open(checkout: Git) -> None:
     decision, _ = gate(checkout, "romamo/demo", lambda: cfg(), claude, lambda: [ISSUES], NOW, on_hold)
     assert decision.action is Action.HELD
     assert decision.reason.endswith("still open: claude stop a, claude stop b")
+
+
+def test_a_hold_launches_nothing_for_an_operate_failure_or_an_incident(checkout: Git) -> None:
+    incident = Finding("INCIDENT_OPEN", "#9", "Payments are down; open 10 min", True)
+    rows = [OPERATE_FAILED, incident, *REPORT_ONLY, OPEN_PRS]
+    claude = FakeClaude()
+    decision, launched = gate(checkout, "romamo/demo", lambda: cfg(prs=True), claude, lambda: rows, NOW, on_hold)
+    assert (decision.action, decision.work, launched, claude.launched) == (Action.HELD, (), None, [])
+    decision, _ = gate(checkout, "romamo/demo", lambda: cfg(), claude, lambda: rows, NOW, Hold, dry_run=True)
+    assert (decision.action, decision.work) == (Action.LAUNCH, (OPERATE_FAILED, incident))
