@@ -16,7 +16,7 @@ repo = "romamo/shipmill"
 
 [[repos]]
 repo = "owner/other"
-incident_label = "sev"   # optional; the label that repo's incidents carry (default "incident")
+incident_label = "sev"   # optional; the label that repo's incidents carry (default: its config's)
 ```
 
 `skills/github-ship-watch/scripts/fleet.py report --fleet <file>` (stdlib, Python 3.10+, run with `uv run --no-project python` like the other ship-watch scripts) runs the ship-watch state check (`skills/github-ship-watch/scripts/watch_state.py`) for each repo and prints one table: a repo column, then each row's state, subject and detail as watch_state prints them. Rows that watch_state counts as action come first, across all repos, then the report-only rows. It exits 1 when any repo has an action row, else 0.

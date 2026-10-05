@@ -107,12 +107,12 @@ repo = "shipmill/shipmill"
 
 [[repos]]
 repo = "owner/other"
-incident_label = "sev"   # optional; the label that repo's incidents carry (default "incident")
+incident_label = "sev"   # optional; the label that repo's incidents carry (default: its config's)
 ```
 
 `scripts/fleet.py report --fleet <file>` (run it with `uv run --no-project python`, 3.10+) clones each repo afresh (blobless, in a temporary folder it removes), runs `watch_state.py` on the clone, and prints one table: the repo, then each row's state, subject, and detail as `watch_state.py` prints them. The action rows of every repo come first, then the report-only rows. Exit 0 means no repo needs action, 1 that a row is an action, 2 that a repo's check failed or the fleet file is malformed.
 
-- `--metrics` adds `metrics.py`'s measures for each repo over the same 30 days, side by side, one column per repo; "no data" stays no data
+- `--metrics` adds `metrics.py`'s measures for each repo over the same 30 days, side by side, one column per repo; "no data" stays no data. A repo's incidents carry its fleet entry's `incident_label`, else its config's `[operate] incident_label`, else `incident`: the watch and the metrics use the same label, read from the clone with `watch_state.py`'s reader
 - `--json` prints the same report as one JSON object: the repos, each with its rows, and its metrics with `--metrics`
 - A repo whose check fails (not found, no access, a gh error) gets one REPO_ERROR row naming the failed step and the error's first line; the other repos are still reported, and the run exits 2 after printing everything
 - The fleet file is refused (exit 2, naming the file and the problem) when it is missing, isn't TOML, has no `[[repos]]`, has an entry without `repo`, has a key other than `repo` and `incident_label`, names a repo not in `owner/name` form, or lists a repo twice. On Python 3.10 only the plain form above is read

@@ -36,6 +36,14 @@ bot.
   checkout, keeps the worktree while the PR is open, and removes it and its branch once
   `landed.py` confirms the merge (#110)
 
+### Fixed
+
+- `fleet.py report --metrics` measured change failure rate and time to restore with the
+  `incident` label for a repo whose fleet entry sets no `incident_label`, even when the repo's
+  config sets `[operate] incident_label`. fleet.py now reads that label from the clone with
+  `watch_state.py`'s config reader and passes it to `metrics.py`, so the metrics and the watch
+  count the same issues (#99)
+
 ## [0.14.0] - 2026-10-05
 
 ### Changed
