@@ -19,8 +19,8 @@ classifiers = [
 shipmill = "shipmill.cli:run"
 
 [project.urls]
-Repository = "https://github.com/romamo/shipmill"
-Changelog = "https://github.com/romamo/shipmill/blob/main/CHANGELOG.md"
+Repository = "https://github.com/shipmill/shipmill"
+Changelog = "https://github.com/shipmill/shipmill/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling"]

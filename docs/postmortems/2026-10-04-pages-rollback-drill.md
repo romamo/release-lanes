@@ -1,6 +1,6 @@
 # 2026-10-04: github-pages reported the wrong version for two minutes (planned rollback drill)
 
-Incident: romamo/shipmill#81
+Incident: shipmill/shipmill#81
 
 ## Summary
 
@@ -36,6 +36,6 @@ Nothing earlier was meant to: the fault was injected after the release gates on 
 
 | Action | Kind | Link |
 |---|---|---|
-| deploy.yml refuses a run whose ref isn't the tag it deploys, so a hand-started deploy can't record `ref=main` | issue | romamo/shipmill#80 |
-| A hand-closed incident doesn't read SUSPECT_CLOSE in triage_state | issue | romamo/shipmill#83 |
-| Check an environment right after its deploy instead of waiting for the next scheduled operate run | issue | romamo/shipmill#84 |
+| deploy.yml refuses a run whose ref isn't the tag it deploys, so a hand-started deploy can't record `ref=main` | issue | shipmill/shipmill#80 |
+| A hand-closed incident doesn't read SUSPECT_CLOSE in triage_state | issue | shipmill/shipmill#83 |
+| Check an environment right after its deploy instead of waiting for the next scheduled operate run | issue | shipmill/shipmill#84 |

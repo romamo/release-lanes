@@ -19,7 +19,7 @@ From a GitHub issue to a published release, run by agents and shipmill's release
 As a Claude Code plugin, which also reaches scheduled cloud sessions:
 
 ```
-/plugin marketplace add romamo/shipmill
+/plugin marketplace add shipmill/shipmill
 /plugin install shipmill@shipmill
 ```
 
@@ -79,8 +79,8 @@ Escalate in this order:
 ### Quick start
 
 ```bash
-uvx --from git+https://github.com/romamo/shipmill@v0 shipmill init --ci ci.yml
-uvx --from git+https://github.com/romamo/shipmill@v0 shipmill doctor
+uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill init --ci ci.yml
+uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill doctor
 ```
 
 `init` writes `.github/shipmill.toml` in `mode = "dry-run"` and
@@ -127,7 +127,7 @@ routine that doesn't merge, read its first runs, then decide.
 
 `.github/shipmill.toml`, read on every run. The shipmill CLI your Release workflow runs
 comes from the `tool` input of `prepare.yml` and `land.yml` (default
-`git+https://github.com/romamo/shipmill@v0`), not from the `uses:` ref, so pinning
+`git+https://github.com/shipmill/shipmill@v0`), not from the `uses:` ref, so pinning
 shipmill means setting both the `uses:` refs and `tool:`.
 
 The keys:

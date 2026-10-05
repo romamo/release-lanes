@@ -12,7 +12,7 @@ pre-releases are tagged off main, and stable releases promote a soaked rc.
 Run the tool with:
 
 ```bash
-CR="uvx --from git+https://github.com/romamo/shipmill@v0 shipmill"
+CR="uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill"
 ```
 
 Work on a branch and finish with a pull request. Never set `mode = "release"` in the

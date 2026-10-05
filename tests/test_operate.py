@@ -485,7 +485,7 @@ def test_shipmills_own_pages_environment_and_operate_caller_pass_doctor(repo: Re
     assert (pages.lane, pages.workflow, pages.health) == (
         Lane.STABLE,
         "deploy.yml",
-        "https://romamo.github.io/shipmill/health.json",
+        "https://shipmill.github.io/shipmill/health.json",
     )
     assert repo.policy.operate.rollback_after == 3
 

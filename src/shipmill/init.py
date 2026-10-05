@@ -11,7 +11,7 @@ from shipmill.errors import ReleaseError
 from shipmill.gitrepo import Git
 from shipmill.policy import Style, VersionFiles
 
-BOT_REPO = "romamo/shipmill"
+BOT_REPO = "shipmill/shipmill"
 BOT_REF = "v0"
 
 

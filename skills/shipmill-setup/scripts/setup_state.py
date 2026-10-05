@@ -50,7 +50,9 @@ CONFIG = Path(".github/shipmill.toml")
 CALLER = Path(".github/workflows/release.yml")
 SETTINGS = Path(".claude/settings.json")
 PLUGIN = "shipmill@shipmill"
-MARKETPLACE = {"source": {"source": "github", "repo": "romamo/shipmill"}, "autoUpdate": True}
+MARKETPLACE = {"source": {"source": "github", "repo": "shipmill/shipmill"}, "autoUpdate": True}
+# Where release.yml calls shipmill from: the repo, and its path before it moved to the org
+SHIPMILL_REPOS = ("shipmill/shipmill/", "romamo/shipmill/")
 LABELS = {
     "postponed": ("c5def5", "Triage decided not now; revisited after the next stable release"),
     "blocked": ("fbca04", "Waits on another issue, here or upstream"),
@@ -96,14 +98,14 @@ def policy_value(text: str, key: str) -> str | None:
 
 
 def calls_shipmill(repo_dir: Path) -> bool:
-    """release.yml calls shipmill's prepare workflow, from romamo/shipmill or, in shipmill
-    itself and its forks, from a local copy"""
+    """release.yml calls shipmill's prepare workflow, from shipmill/shipmill (or its old
+    path, romamo/shipmill) or, in shipmill itself and its forks, from a local copy"""
     caller = repo_dir / CALLER
     if not caller.is_file():
         return False
     text = caller.read_text(encoding="utf-8")
     local = repo_dir / ".github" / "workflows" / "prepare.yml"
-    return "romamo/shipmill/" in text or (
+    return any(path in text for path in SHIPMILL_REPOS) or (
         "./.github/workflows/prepare.yml" in text
         and local.is_file()
         and local.read_text(encoding="utf-8").startswith("name: shipmill prepare")

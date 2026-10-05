@@ -848,7 +848,7 @@ def arguments() -> argparse.ArgumentParser:
     parser.add_argument("--repo-dir", default=".", help="local checkout (default: cwd)")
     parser.add_argument("--releases", type=int, default=3, help="newest version tags to check")
     parser.add_argument("--grace", type=int, default=20, help="minutes a run or an upload may take")
-    parser.add_argument("--tool", default="git+https://github.com/romamo/shipmill@v0", help="where uvx gets shipmill")
+    parser.add_argument("--tool", default="git+https://github.com/shipmill/shipmill@v0", help="where uvx gets shipmill")
     parser.add_argument("--incident-label", help="the label incidents carry (default: the config's)")
     parser.add_argument("--json", action="store_true", help="JSON lines instead of a table")
     return parser

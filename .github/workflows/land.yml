@@ -27,7 +27,7 @@ on:
         required: true
       tool:
         type: string
-        default: "git+https://github.com/romamo/shipmill@v0"
+        default: "git+https://github.com/shipmill/shipmill@v0"
 
 # No workflow-level permissions: each job sets its own, except close-proposal, which takes
 # the caller's grant, so a caller that grants no `issues: write` still starts this workflow

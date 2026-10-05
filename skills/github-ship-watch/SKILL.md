@@ -45,7 +45,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | ISSUES | Under "watch and triage", run github-issue-triage on the flagged issues. Otherwise list them |
 | PRS_OPEN, BOT_OK, BOT_NONE, NO_REGISTRY | Report only |
 
-Pass `--grace` to give a slow publish more minutes before it reads NOT_PUBLISHED, and `--tool` when the shipmill bot isn't installed from `romamo/shipmill@v0`.
+Pass `--grace` to give a slow publish more minutes before it reads NOT_PUBLISHED, and `--tool` when the shipmill bot isn't installed from `shipmill/shipmill@v0`.
 
 HOLD and POSTMORTEM_DUE show for every repo with a shipmill config, since a hold stops releases too and an incident may be labelled by hand. POSTMORTEM_DUE reads the postmortems through the GitHub contents API on the default branch, so a draft counts only once merged. The operations states show only when the config declares environments (read with `tomllib`; on Python 3.10 only plain `[environments.<name>]` tables, and any other form stops the watch with a one-line message); they come from the GitHub deployments and issues `shipmill operate` writes. The incident label is `[operate] incident_label`, `incident` by default; `--incident-label` takes its place (the fleet report passes a fleet entry's label this way).
 
@@ -103,7 +103,7 @@ A fleet file lists the repos, in TOML:
 
 ```toml
 [[repos]]
-repo = "romamo/shipmill"
+repo = "shipmill/shipmill"
 
 [[repos]]
 repo = "owner/other"
@@ -121,7 +121,7 @@ incident_label = "sev"   # optional; the label that repo's incidents carry (defa
 The fleet watch is an option the user schedules, never a default. Keep the fleet file in a repo the routine clones (for example `.github/fleet.toml` in the user's ops repo), then `/schedule` a routine whose prompt is:
 
 ```text
-Clone romamo/shipmill and <the repo holding the fleet file>. Run
+Clone shipmill/shipmill and <the repo holding the fleet file>. Run
 `uv run --no-project python skills/github-ship-watch/scripts/fleet.py report --fleet <path to fleet.toml> --metrics`.
 On exit 0, report one line: "Fleet: nothing owed". Otherwise report the incidents and
 holds first, then every action row with its repo and a recommendation, then each
