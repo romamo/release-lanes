@@ -46,7 +46,7 @@ For the N most recently closed issues (default 20):
                    An issue with --incident-label closed as COMPLETED with no closer
                    isn't one either: an incident closes by hand once the environment
                    is healthy, and ship-watch's POSTMORTEM_DUE follows it up. The
-                   script can't read the shipyard config: pass [operate]
+                   script can't read the shipmill config: pass [operate]
                    incident_label here when it isn't "incident"
 
 With --wip N (a work-in-progress limit, such as [roadmap] wip once the config has it), a

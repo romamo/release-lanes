@@ -7,7 +7,7 @@ Usage: intake_state.py <owner/repo> [--config PATH] [--label opportunity]
                        [--category C]... [--json]
 
 Feedback is an open issue, or an open discussion when the repo enables Discussions, that:
-  - carries none of SKIP_LABELS (bug, roadmap, and shipyard's own labels), no --skip-label
+  - carries none of SKIP_LABELS (bug, roadmap, and shipmill's own labels), no --skip-label
     (repeatable, added to SKIP_LABELS), and not --label
   - has no triage verdict of implement, feature, duplicate, or won't fix: the verdict is
     the first bold word of the newest comment starting with --marker
@@ -40,8 +40,8 @@ For feedback and members:
 
 Each opportunity's evidence: its members, and the thumbs-up reactions on them and on the
 opportunity itself. The first line (text) or the first JSON line is the [autonomy] intake
-level from the shipyard config (.github/shipyard.toml, or its alias
-.github/release-policy.toml, in the current directory; none means the default, propose).
+level from the shipmill config (.github/shipmill.toml in the current directory; none
+means the default, propose).
 
 Exit 0 when nothing needs action, 1 when any row is NEW_FEEDBACK, ACCEPTED, NO_REASON, or
 OVERLAP, 2 on bad input (an issue with more than 100 labels, a malformed config) or a gh
@@ -66,15 +66,15 @@ try:
 except ModuleNotFoundError:  # Python 3.10: the config is read with regexes instead
     tomllib = None  # type: ignore[assignment]
 
-CONFIGS = (Path(".github/shipyard.toml"), Path(".github/release-policy.toml"))  # the config, then its alias
-INTAKE_LEVELS = ("observe", "propose")  # shipyard's autonomy: intake never acts
-# Labels whose issues are never feedback: bugs, tracking issues, and shipyard's own. Extend
+CONFIG = Path(".github/shipmill.toml")
+INTAKE_LEVELS = ("observe", "propose")  # shipmill's autonomy: intake never acts
+# Labels whose issues are never feedback: bugs, tracking issues, and shipmill's own. Extend
 # the list here for every repo, or per run with --skip-label
 SKIP_LABELS = (
     "bug",
     "roadmap",
-    "shipyard-proposal",
-    "shipyard-hold",
+    "shipmill-proposal",
+    "shipmill-hold",
     "incident",
     "release-blocker",
     "milestone-proposal",
@@ -452,10 +452,7 @@ def config_file(given: Path | None) -> Path | None:
         if not given.is_file():
             fail(f"no config at {given}")
         return given
-    found = [p for p in CONFIGS if p.is_file()]
-    if len(found) > 1:
-        fail(f"both {CONFIGS[0]} and {CONFIGS[1]} exist; keep one")
-    return found[0] if found else None
+    return CONFIG if CONFIG.is_file() else None
 
 
 def config_values(path: Path, table: str, keys: tuple[str, ...]) -> dict[str, object]:
@@ -534,7 +531,7 @@ def show(row: Item) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("repo", help="owner/name")
-    parser.add_argument("--config", type=Path, help="the shipyard config (default: .github/shipyard.toml or its alias)")
+    parser.add_argument("--config", type=Path, help="the shipmill config (default: .github/shipmill.toml)")
     parser.add_argument("--label", default="opportunity", help="the label of opportunity issues")
     parser.add_argument("--accepted-label", default="planned", help="the label the maintainer accepts with")
     parser.add_argument("--marker", default="Triage:", help="prefix of a triage comment")

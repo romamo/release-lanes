@@ -39,7 +39,7 @@ def ws() -> ModuleType:
 FLEET = """\
 # the fleet
 [[repos]]
-repo = "romamo/shipyard"
+repo = "romamo/shipmill"
 
 [[repos]]
 repo = 'owner/other'
@@ -62,14 +62,14 @@ def refusal(fl: ModuleType, path: Path) -> str:
 
 def test_the_fleet_file_lists_the_repos_in_order(fl: ModuleType, tmp_path: Path) -> None:
     assert fl.load(write(tmp_path, FLEET)) == [
-        fl.Entry("romamo/shipyard", None),
+        fl.Entry("romamo/shipmill", None),
         fl.Entry("owner/other", "sev"),
     ]
 
 
 def test_the_plain_form_reads_as_tomllib_reads_it(fl: ModuleType, tmp_path: Path) -> None:
     path = tmp_path / "fleet.toml"
-    want = {"repos": [{"repo": "romamo/shipyard"}, {"repo": "owner/other", "incident_label": "sev"}]}
+    want = {"repos": [{"repo": "romamo/shipmill"}, {"repo": "owner/other", "incident_label": "sev"}]}
     assert fl.parse_plain(FLEET, path) == want
     if fl.tomllib is not None:  # Python 3.11+
         assert fl.tomllib.loads(FLEET) == want
@@ -99,7 +99,7 @@ def test_the_plain_form_refuses_anything_else(fl: ModuleType, tmp_path: Path, te
         ('owner = "o"\n', "unknown key 'owner'"),
         ('[[repos]]\nincident_label = "sev"\n', "repos[0] has no repo"),
         ('[[repos]]\nrepo = "o/r"\npath = "~/src/r"\n', "repos[0] has an unknown key 'path'"),
-        ('[[repos]]\nrepo = "o/r"\n\n[[repos]]\nrepo = "shipyard"\n', "repos[1]: repo 'shipyard' is not in owner/name"),
+        ('[[repos]]\nrepo = "o/r"\n\n[[repos]]\nrepo = "shipmill"\n', "repos[1]: repo 'shipmill' is not in owner/name"),
         ('[[repos]]\nrepo = "o/r/x"\n', "not in owner/name form"),
         ('[[repos]]\nrepo = "o/.."\n', "not in owner/name form"),
         ('[[repos]]\nrepo = "o/r"\nincident_label = ""\n', "incident_label must be a non-empty string"),
@@ -120,12 +120,12 @@ def test_s001_3_a_missing_fleet_file_is_refused(fl: ModuleType, tmp_path: Path) 
 
 
 def test_s001_4_a_repo_listed_twice_is_refused(fl: ModuleType, tmp_path: Path) -> None:
-    path = write(tmp_path, FLEET + '\n[[repos]]\nrepo = "Romamo/Shipyard"\n')
-    assert refusal(fl, path) == f"error: {path}: lists Romamo/Shipyard twice"
+    path = write(tmp_path, FLEET + '\n[[repos]]\nrepo = "Romamo/Shipmill"\n')
+    assert refusal(fl, path) == f"error: {path}: lists Romamo/Shipmill twice"
 
 
 def test_s001_8_the_fleet_files_incident_label_is_passed_to_the_watch(fl: ModuleType, tmp_path: Path) -> None:
-    shipyard, other = fl.load(write(tmp_path, FLEET))
+    shipmill, other = fl.load(write(tmp_path, FLEET))
     checkout = tmp_path / "checkout"
     assert fl.watch_command(other, checkout) == [
         sys.executable,
@@ -137,11 +137,11 @@ def test_s001_8_the_fleet_files_incident_label_is_passed_to_the_watch(fl: Module
         "--incident-label",
         "sev",
     ]
-    assert "--incident-label" not in fl.watch_command(shipyard, checkout)
+    assert "--incident-label" not in fl.watch_command(shipmill, checkout)
 
 
 def test_s001_8_the_watch_uses_the_given_incident_label_over_the_configs(ws: ModuleType) -> None:
-    policy = Path(".github/shipyard.toml")
+    policy = Path(".github/shipmill.toml")
     text = 'mode = "release"\n\n[operate]\nincident_label = "sev1"\n'
     assert ws.config(text, policy).incident_label == "sev1"
     assert ws.config(text, policy, "sev").incident_label == "sev"
@@ -213,7 +213,7 @@ WATCH_ACTION = {"BOT_FAILED", "UNANNOUNCED", "ISSUES", "INCIDENT_OPEN"}  # the a
 
 THREE = """\
 [[repos]]
-repo = "romamo/shipyard"
+repo = "romamo/shipmill"
 
 [[repos]]
 repo = "owner/gone"
@@ -235,7 +235,7 @@ def fleet_run(
 def quiet_fake() -> Fake:
     return Fake(
         watch={
-            "romamo/shipyard": [row("HOLD", "#7", "by @amy, 2 h"), row("BOT_OK", "release.yml")],
+            "romamo/shipmill": [row("HOLD", "#7", "by @amy, 2 h"), row("BOT_OK", "release.yml")],
             "owner/other": [row("PUBLISHED", "v1.2.0", "other 1.2.0 on PyPI"), row("PRS_OPEN", "owner/other", "#4")],
         }
     )
@@ -249,17 +249,17 @@ def test_s001_1_every_repos_rows_are_named_with_actions_first(
     fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fake = quiet_fake()
-    fake.watch["romamo/shipyard"].append(row("UNANNOUNCED", "v0.11.0", "#70 (since v0.10.0)"))
+    fake.watch["romamo/shipmill"].append(row("UNANNOUNCED", "v0.11.0", "#70 (since v0.10.0)"))
     fake.watch["owner/other"].insert(0, row("INCIDENT_OPEN", "#9", "prod down, 1 h"))
     _, out = fleet_run(fl, tmp_path, capsys, fake, FLEET)
     lines = out.splitlines()
     assert lines[:2] == [
-        "romamo/shipyard UNANNOUNCED    v0.11.0          #70 (since v0.10.0)",
+        "romamo/shipmill UNANNOUNCED    v0.11.0          #70 (since v0.10.0)",
         "owner/other     INCIDENT_OPEN  #9               prod down, 1 h",
     ]
     assert lines[2:] == [
-        "romamo/shipyard HOLD           #7               by @amy, 2 h",
-        "romamo/shipyard BOT_OK         release.yml",
+        "romamo/shipmill HOLD           #7               by @amy, 2 h",
+        "romamo/shipmill BOT_OK         release.yml",
         "owner/other     PUBLISHED      v1.2.0           other 1.2.0 on PyPI",
         "owner/other     PRS_OPEN       owner/other      #4",
     ]
@@ -272,8 +272,8 @@ def test_s001_1_each_repo_is_watched_on_its_own_clone(
     fleet_run(fl, tmp_path, capsys, fake, FLEET)
     clones = [c for c in fake.calls if c[:3] == ["gh", "repo", "clone"]]
     watches = [c for c in fake.calls if c[1] == str(fl.WATCH_STATE)]
-    assert [c[3] for c in clones] == ["romamo/shipyard", "owner/other"]
-    assert [c[2] for c in watches] == ["romamo/shipyard", "owner/other"]
+    assert [c[3] for c in clones] == ["romamo/shipmill", "owner/other"]
+    assert [c[2] for c in watches] == ["romamo/shipmill", "owner/other"]
     assert [c[c.index("--repo-dir") + 1] for c in watches] == [c[4] for c in clones]
     assert not any(c[1] == str(fl.METRICS) for c in fake.calls)  # metrics only with --metrics
 
@@ -299,7 +299,7 @@ def test_s001_5_a_failed_check_is_one_repo_error_row_and_the_rest_is_reported(
         "owner/gone      REPO_ERROR     gh repo clone    "
         "GraphQL: Could not resolve to a Repository with the name 'owner/gone'. (repository)"
     )
-    assert [line.split()[0] for line in lines[1:]] == ["romamo/shipyard"] * 2 + ["owner/other"] * 2
+    assert [line.split()[0] for line in lines[1:]] == ["romamo/shipmill"] * 2 + ["owner/other"] * 2
     assert not any(c[2:3] == ["owner/gone"] and c[1] == str(fl.WATCH_STATE) for c in fake.calls)
 
 
@@ -314,7 +314,7 @@ def test_s001_5_a_failed_watch_or_metrics_is_a_repo_error_too(
     assert sum("owner/other" in line for line in out.splitlines()) == 1
 
     fake = quiet_fake()
-    fake.metrics["romamo/shipyard"] = measures("2.0 per week", "no data")
+    fake.metrics["romamo/shipmill"] = measures("2.0 per week", "no data")
     fake.failing["owner/other"] = ("metrics.py", "error: gh api graphql: rate limited")
     code, out = fleet_run(fl, tmp_path, capsys, fake, FLEET, "--json", "--metrics")
     assert code == 2
@@ -338,7 +338,7 @@ def test_s001_7_json_is_one_object_with_each_repos_rows(
     assert code == 2
     assert json.loads(out) == {
         "repos": [
-            {"repo": "romamo/shipyard", "rows": fake.watch["romamo/shipyard"]},
+            {"repo": "romamo/shipmill", "rows": fake.watch["romamo/shipmill"]},
             {"repo": "owner/gone", "rows": [row("REPO_ERROR", "gh repo clone", NOT_FOUND.splitlines()[0])]},
             {"repo": "owner/other", "rows": fake.watch["owner/other"]},
         ]
@@ -349,11 +349,11 @@ def test_s001_7_json_holds_each_repos_metrics_with_metrics(
     fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fake = quiet_fake()
-    fake.metrics = {"romamo/shipyard": measures("2.0 per week", "no data"), "owner/other": measures("no data", "1.0 h")}
+    fake.metrics = {"romamo/shipmill": measures("2.0 per week", "no data"), "owner/other": measures("no data", "1.0 h")}
     code, out = fleet_run(fl, tmp_path, capsys, fake, FLEET, "--json", "--metrics")
     assert code == 0
     found = json.loads(out)
-    assert [r["metrics"] for r in found["repos"]] == [fake.metrics["romamo/shipyard"], fake.metrics["owner/other"]]
+    assert [r["metrics"] for r in found["repos"]] == [fake.metrics["romamo/shipmill"], fake.metrics["owner/other"]]
     runs = [c for c in fake.calls if c[1] == str(fl.METRICS)]
     assert [c[c.index("--until") + 1] for c in runs] == [NOW.isoformat()] * 2  # one window for the fleet
     assert "--incident-label" not in runs[0]
@@ -365,7 +365,7 @@ def test_s001_6_metrics_sit_side_by_side_one_column_per_repo(
 ) -> None:
     fake = quiet_fake()
     fake.metrics = {
-        "romamo/shipyard": measures("1.4/week (6 deploys)", "median 1.0 h, p90 1.9 h"),
+        "romamo/shipmill": measures("1.4/week (6 deploys)", "median 1.0 h, p90 1.9 h"),
         "owner/other": measures("no data", "no data"),
     }
     code, out = fleet_run(fl, tmp_path, capsys, fake, FLEET, "--metrics")
@@ -374,7 +374,7 @@ def test_s001_6_metrics_sit_side_by_side_one_column_per_repo(
     assert len(watch.splitlines()) == 4
     assert metrics.splitlines() == [
         "Metrics: the 30 days to 2026-10-05 07:00 UTC",
-        "Measure          romamo/shipyard         owner/other",
+        "Measure          romamo/shipmill         owner/other",
         "Deploy frequency 1.4/week (6 deploys)    no data",
         "Lead time        median 1.0 h, p90 1.9 h no data",
     ]
@@ -384,16 +384,16 @@ def test_s001_6_a_repo_whose_check_failed_has_no_metrics_column(
     fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fake = quiet_fake()
-    fake.metrics = {"romamo/shipyard": measures("no data", "no data"), "owner/other": measures("no data", "no data")}
+    fake.metrics = {"romamo/shipmill": measures("no data", "no data"), "owner/other": measures("no data", "no data")}
     fake.failing["owner/gone"] = ("clone", NOT_FOUND)
     code, out = fleet_run(fl, tmp_path, capsys, fake, THREE, "--metrics")
     assert code == 2
     assert out.split("\n\n")[1].splitlines()[1:] == [
-        "Measure          romamo/shipyard owner/other",
+        "Measure          romamo/shipmill owner/other",
         "Deploy frequency no data         no data",
         "Lead time        no data         no data",
     ]
-    fake.failing = {"romamo/shipyard": ("clone", NOT_FOUND), "owner/other": ("metrics.py", "error: gh: 502")}
+    fake.failing = {"romamo/shipmill": ("clone", NOT_FOUND), "owner/other": ("metrics.py", "error: gh: 502")}
     code, out = fleet_run(fl, tmp_path, capsys, fake, FLEET, "--metrics")
     assert code == 2
     assert "Metrics" not in out  # no repo measured: no table
@@ -403,7 +403,7 @@ def test_s001_6_no_data_stays_no_data_in_json(
     fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     fake = quiet_fake()
-    fake.metrics = {"romamo/shipyard": measures("no data", "1.0 h"), "owner/other": measures("no data", "no data")}
+    fake.metrics = {"romamo/shipmill": measures("no data", "1.0 h"), "owner/other": measures("no data", "no data")}
     _, out = fleet_run(fl, tmp_path, capsys, fake, FLEET, "--metrics", "--json")
     first = json.loads(out)["repos"][0]["metrics"]["measures"][0]
     assert (first["value"], first["text"]) == (None, "no data")
@@ -468,7 +468,7 @@ def test_a_watch_that_prints_no_json_stops_the_report_with_exit_2(
     with pytest.raises(SystemExit) as refused:
         fleet_run(fl, tmp_path, capsys, fake, FLEET)
     assert refused.value.code == 2  # not a traceback's exit 1, which reads as an action row
-    assert "watch_state.py for romamo/shipyard printed 'Traceback" in str(refused.value)
+    assert "watch_state.py for romamo/shipmill printed 'Traceback" in str(refused.value)
     assert not workdirs(fake)[0].exists()
 
 
@@ -489,7 +489,7 @@ def test_an_interrupted_run_removes_its_clones(
 
 
 def test_s001_3_the_report_refuses_a_malformed_fleet_file_with_exit_2(tmp_path: Path) -> None:
-    path = write(tmp_path, '[[repos]]\nrepo = "shipyard"\n')
+    path = write(tmp_path, '[[repos]]\nrepo = "shipmill"\n')
     done = subprocess.run(
         [sys.executable, str(SCRIPTS / "fleet.py"), "report", "--fleet", str(path)],
         capture_output=True,
@@ -498,7 +498,7 @@ def test_s001_3_the_report_refuses_a_malformed_fleet_file_with_exit_2(tmp_path: 
     )
     assert done.returncode == 2
     assert done.stdout == ""
-    assert done.stderr == f"error: {path}: repos[0]: repo 'shipyard' is not in owner/name form\n"
+    assert done.stderr == f"error: {path}: repos[0]: repo 'shipmill' is not in owner/name form\n"
 
 
 # -- the skill documents the fleet --------------------------------------------------------
@@ -514,5 +514,5 @@ def test_s001_9_the_skill_documents_the_fleet_file_the_report_and_a_routine(fl: 
     assert "/schedule" in section and "fleet.py report" in section.split("/schedule", 1)[1]  # a routine runs it
     example = section.split("```toml\n", 1)[1].split("```", 1)[0]
     assert fl.parse_plain(example, Path("fleet.toml")) == {
-        "repos": [{"repo": "romamo/shipyard"}, {"repo": "owner/other", "incident_label": "sev"}]
+        "repos": [{"repo": "romamo/shipmill"}, {"repo": "owner/other", "incident_label": "sev"}]
     }

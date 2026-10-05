@@ -5,13 +5,13 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from shipyard.config import ALIAS_PATH, CONFIG_PATH
-from shipyard.doctor import CALLER, OPERATE_CALLER
-from shipyard.errors import ReleaseError
-from shipyard.gitrepo import Git
-from shipyard.policy import Style, VersionFiles
+from shipmill.config import CONFIG_PATH
+from shipmill.doctor import CALLER, OPERATE_CALLER
+from shipmill.errors import ReleaseError
+from shipmill.gitrepo import Git
+from shipmill.policy import Style, VersionFiles
 
-BOT_REPO = "romamo/shipyard"
+BOT_REPO = "romamo/shipmill"
 BOT_REF = "v0"
 
 
@@ -37,7 +37,7 @@ def detect(root: Path) -> Detected:
             version_files = VersionFiles.PYPROJECT
     changelog = root / "CHANGELOG.md"
     if not changelog.is_file():
-        raise ReleaseError("no CHANGELOG.md, whose Unreleased section shipyard releases; add one first")
+        raise ReleaseError("no CHANGELOG.md, whose Unreleased section shipmill releases; add one first")
     text = changelog.read_text(encoding="utf-8")
     if "## [Unreleased]" in text:
         style = Style.KEEP_A_CHANGELOG
@@ -72,7 +72,7 @@ def policy_text(d: Detected) -> str:
             "\n# Commands run after the version is written, before the commit; a failure stops the release\n"
             'after_stamp = ["uv lock --check"]\n'
         )
-    return f'''# shipyard reads this file on every run: https://github.com/{BOT_REPO}
+    return f'''# shipmill reads this file on every run: https://github.com/{BOT_REPO}
 name = "{d.name}"
 
 # off: do nothing; dry-run: show the release commit it would make; release: release
@@ -118,7 +118,7 @@ github_release = true
 
 # Environments a release deploys to. The workflow runs on workflow_dispatch with `tag` and
 # `environment` inputs, and its job sets `environment: ${{{{ inputs.environment }}}}`, so
-# GitHub records a deployment for each run. With from or health, run `shipyard init
+# GitHub records a deployment for each run. With from or health, run `shipmill init
 # --operate`: its workflow checks health every 10 minutes and promotes after the bake.
 # [environments.staging]
 # lane = "rc"                       # deploy every release of this lane when it lands
@@ -138,9 +138,9 @@ github_release = true
 # pattern = '{d.name} v\\d+\\.\\d+\\.\\d+'
 # replace = "{d.name} v{{version}}"
 
-# How far shipyard goes by itself: observe (report only), propose (open an issue saying what
+# How far shipmill goes by itself: observe (report only), propose (open an issue saying what
 # it would release; a person starts the lane), or act (the default). An open issue labelled
-# shipyard-hold turns every act into propose until it is closed.
+# shipmill-hold turns every act into propose until it is closed.
 # [autonomy]
 # release = "act"
 '''
@@ -150,9 +150,9 @@ def caller_text(d: Detected, ci: str) -> str:
     uses = f"{BOT_REPO}/.github/workflows"
     return f"""name: Release
 
-# shipyard: https://github.com/{BOT_REPO}. The policy in
-# .github/shipyard.toml decides what releases and when; this file only wires
-# shipyard's workflows to this repository's CI.
+# shipmill: https://github.com/{BOT_REPO}. The policy in
+# .github/shipmill.toml decides what releases and when; this file only wires
+# shipmill's workflows to this repository's CI.
 
 on:
   push:
@@ -223,8 +223,8 @@ def operate_caller_text() -> str:
     uses = f"{BOT_REPO}/.github/workflows"
     return f"""name: Operate
 
-# shipyard: https://github.com/{BOT_REPO}. Every 10 minutes shipyard operate checks the
-# health of each environment in .github/shipyard.toml, records it as GitHub deployment
+# shipmill: https://github.com/{BOT_REPO}. Every 10 minutes shipmill operate checks the
+# health of each environment in .github/shipmill.toml, records it as GitHub deployment
 # statuses, promotes a release once its source environment baked it, and rolls back an
 # environment that fails its checks, opening an incident issue. Approve a deploy that waits
 # on a proposal issue with: gh workflow run operate.yml -f approve=<environment> -f
@@ -269,28 +269,21 @@ jobs:
 @dataclass(frozen=True, slots=True)
 class Initialized:
     written: tuple[Path, ...]
-    removed: Path | None  # the alias policy file, replaced by .github/shipyard.toml under --force
 
 
 def init(root: Path, ci: str, force: bool) -> Initialized:
-    """Write .github/shipyard.toml and the caller workflow. Either policy name, or the caller,
-    already there refuses without force; with force, the files are overwritten and an alias
-    .github/release-policy.toml is removed, so the repository keeps one policy file."""
+    """Write .github/shipmill.toml and the caller workflow. Either one already there refuses
+    without force; with force, the files are overwritten."""
     d = detect(root)
     files = ((root / CONFIG_PATH, policy_text(d)), (root / CALLER, caller_text(d, ci)))
-    present = [p for p in (root / ALIAS_PATH, *(path for path, _ in files)) if p.exists()]
+    present = [path for path, _ in files if path.exists()]
     if present and not force:
         names = ", ".join(str(p.relative_to(root)) for p in present)
         raise ReleaseError(f"{names} {'exists' if len(present) == 1 else 'exist'}; pass --force to overwrite")
     for path, text in files:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
-    alias = root / ALIAS_PATH
-    removed = None
-    if alias.exists():
-        alias.unlink()
-        removed = alias
-    return Initialized(tuple(path for path, _ in files), removed)
+    return Initialized(tuple(path for path, _ in files))
 
 
 def init_operate(root: Path, force: bool) -> Path:

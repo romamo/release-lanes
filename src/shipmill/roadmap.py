@@ -4,7 +4,7 @@ opportunities, and its roadmap_state.py reads these keys with the same limits"""
 
 from dataclasses import dataclass
 
-from shipyard.config import Table
+from shipmill.config import Table
 
 WIP = 5  # the default: issues open at once across the open milestones
 CADENCE = 2  # the default: weeks between milestone due dates

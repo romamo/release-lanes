@@ -5,7 +5,7 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
-  workflow_call: # shipyard's Release workflow runs it on its release commit
+  workflow_call: # shipmill's Release workflow runs it on its release commit
     inputs:
       ref:
         type: string
@@ -39,11 +39,11 @@ jobs:
         run: |
           uvx --from actionlint-py actionlint .github/workflows/*.yml
           uv run python -c "
-          from shipyard.init import Detected, caller_text
-          from shipyard.policy import Style, VersionFiles
+          from shipmill.init import Detected, caller_text
+          from shipmill.policy import Style, VersionFiles
           print(caller_text(Detected('demo', 'main', Style.KEEP_A_CHANGELOG, VersionFiles.NONE), 'ci.yml'))
           " > "$RUNNER_TEMP/release.yml"
           uvx --from actionlint-py actionlint -ignore 'ci.yml' "$RUNNER_TEMP/release.yml"
-          uv run python -c "from shipyard.init import operate_caller_text; print(operate_caller_text())" \
+          uv run python -c "from shipmill.init import operate_caller_text; print(operate_caller_text())" \
             > "$RUNNER_TEMP/operate.yml"
           uvx --from actionlint-py actionlint "$RUNNER_TEMP/operate.yml"

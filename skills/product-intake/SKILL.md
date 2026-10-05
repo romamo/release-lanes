@@ -17,14 +17,14 @@ Feedback in, opportunities out. Many requests ask for one outcome in different w
 
 ## Autonomy
 
-`[autonomy] intake` in `.github/shipyard.toml` sets how far a pass goes; the script prints it on its first line:
+`[autonomy] intake` in `.github/shipmill.toml` sets how far a pass goes; the script prints it on its first line:
 
 | Level | A pass |
 |---|---|
 | `observe` | Reports the groups it would make and writes nothing |
 | `propose` (the default) | Opens and updates opportunity issues, comments on the requests it groups, and labels pure duplicates |
 
-There is no `act`: shipyard refuses it, since an opportunity is a proposal by nature and only the maintainer accepts or declines one. An open `shipyard-hold` changes nothing here, as intake never acts.
+There is no `act`: shipmill refuses it, since an opportunity is a proposal by nature and only the maintainer accepts or declines one. An open `shipmill-hold` changes nothing here, as intake never acts.
 
 ## Hard rules
 
@@ -53,7 +53,7 @@ There is no `act`: shipyard refuses it, since an opportunity is a proposal by na
 
 What the script decides for you, so the pass doesn't re-derive it:
 
-- **Feedback** is an open issue with no skip label and no closing triage verdict, plus each open discussion outside Announcements when Discussions are on (`--category` names the ones to count). The skip labels are `SKIP_LABELS` at the top of `intake_state.py`: `bug`, `roadmap` (a tracking issue isn't a request), and shipyard's own. `--skip-label L` (repeatable) adds to them for one run; for a label every pass should skip, add it to `SKIP_LABELS`
+- **Feedback** is an open issue with no skip label and no closing triage verdict, plus each open discussion outside Announcements when Discussions are on (`--category` names the ones to count). The skip labels are `SKIP_LABELS` at the top of `intake_state.py`: `bug`, `roadmap` (a tracking issue isn't a request), and shipmill's own. `--skip-label L` (repeatable) adds to them for one run; for a label every pass should skip, add it to `SKIP_LABELS`
 - **A member** of an opportunity is any issue or discussion its `## Evidence` section links in this repo (`#N`, `owner/repo#N`, or a github.com link). Membership is what the opportunity's body says, so editing the Evidence section is how a request joins or leaves
 - **Evidence** per opportunity: its member count, and the thumbs-up reactions on the members and on the opportunity itself, closed members included
 - **The triage marker**: a comment starting `Triage:` with the verdict in bold. Intake's own comments use `Triage: **opportunity**`, so `triage_state.py` reads a grouped request or an opportunity as triaged instead of NEW. Never put the word "implement" in one: `triage_state.py` would read it as NEEDS_PR
@@ -99,7 +99,7 @@ Under `observe`, write nothing: put each proposed group in the report with its r
 
 ### 4. The maintainer's call
 
-Accepting is the `planned` label, declining is closing the opportunity as not planned with the reason in a comment. When a reason is a rule rather than a one-off ("shipyard stays GitHub-only"), recommend recording it in the decisions log through the [design gate](../github-issue-triage/references/design-gate.md) (Recording a decision); the log entry, not the opportunity, is what later designs are checked against. Don't add the entry yourself unless the maintainer says so.
+Accepting is the `planned` label, declining is closing the opportunity as not planned with the reason in a comment. When a reason is a rule rather than a one-off ("shipmill stays GitHub-only"), recommend recording it in the decisions log through the [design gate](../github-issue-triage/references/design-gate.md) (Recording a decision); the log entry, not the opportunity, is what later designs are checked against. Don't add the entry yourself unless the maintainer says so.
 
 ### 5. Hand an accepted opportunity to triage
 
@@ -107,11 +107,11 @@ An ACCEPTED opportunity is a **feature**: under "intake and triage", run github-
 
 ## Roadmap plan
 
-Milestones are the roadmap: shipyard already releases a lane when the milestone named after the next version has no open issues (`milestone = true`), so a planned milestone is a planned release. The accepted opportunities go into milestones, each with its spec PR and build issues, and the maintainer approves each milestone's contents before it exists. Run this section after intake, or alone when the user asks about the roadmap.
+Milestones are the roadmap: shipmill already releases a lane when the milestone named after the next version has no open issues (`milestone = true`), so a planned milestone is a planned release. The accepted opportunities go into milestones, each with its spec PR and build issues, and the maintainer approves each milestone's contents before it exists. Run this section after intake, or alone when the user asks about the roadmap.
 
 ### The capacity
 
-`[roadmap]` in `.github/shipyard.toml` sets it; `doctor` validates the section and refuses unknown keys:
+`[roadmap]` in `.github/shipmill.toml` sets it; `doctor` validates the section and refuses unknown keys:
 
 ```toml
 [roadmap]
@@ -167,4 +167,4 @@ Lead with what needs the maintainer: the OPPORTUNITY_OPEN issues, strongest evid
 
 ## Improve the skill
 
-When a pass groups badly (two outcomes in one issue, a request proposed again after a decline), add the lesson to step 2. When a script misreads a state, fix `intake_state.py` or `roadmap_state.py` and add a case to shipyard's `tests/test_intake_state.py` or `tests/test_roadmap_state.py`.
+When a pass groups badly (two outcomes in one issue, a request proposed again after a decline), add the lesson to step 2. When a script misreads a state, fix `intake_state.py` or `roadmap_state.py` and add a case to shipmill's `tests/test_intake_state.py` or `tests/test_roadmap_state.py`.

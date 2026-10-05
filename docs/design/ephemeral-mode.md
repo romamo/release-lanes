@@ -1,4 +1,4 @@
-# Design: shipyard on GitHub Actions (ephemeral mode)
+# Design: shipmill on GitHub Actions (ephemeral mode)
 
 Status: parked, 2026-10-04. [agent-modes.md](agent-modes.md) is the plan: sessions run in a
 persistent Claude Code install, which has the memory, repos, and peers that decision quality
@@ -6,7 +6,7 @@ depends on. Revive this only when one of these holds: a team shares the App, the
 that hosts Claude Code can't stay on, or outside contributions need work while nobody is
 at a terminal.
 
-shipyard runs a repo from issue to release inside the repo's own GitHub Actions, as its own
+shipmill runs a repo from issue to release inside the repo's own GitHub Actions, as its own
 GitHub App. Code decides whether anything needs an agent; Claude Code runs only for
 judgment, one bounded work item per job; every fact the next run needs lives on GitHub.
 
@@ -16,7 +16,7 @@ judgment, one bounded work item per job; every fact the next run needs lives on 
 - Agents only judge: verdicts, designs, code, reviews, failure diagnosis. Code does the
   state checks, repairs the policy already decided, pushes, merges, and bookkeeping
 - Every run starts in an empty container and needs no state from earlier runs
-- Everything shipyard writes on GitHub comes from `<slug>[bot]`, so the user's own replies,
+- Everything shipmill writes on GitHub comes from `<slug>[bot]`, so the user's own replies,
   approvals, and notifications stay theirs
 - A human decision blocks one item, not the pipeline, and costs nothing while it waits
 
@@ -25,7 +25,7 @@ judgment, one bounded work item per job; every fact the next run needs lives on 
 - Agents other than Claude Code (the skills stay in the portable `SKILL.md` format, but
   only Claude Code is tested)
 - Hosts other than GitHub
-- Replacing shipyard's release workflows: they keep cutting releases by policy; this design feeds them
+- Replacing shipmill's release workflows: they keep cutting releases by policy; this design feeds them
   merged PRs and kicks it
 
 ## Overview
@@ -33,19 +33,19 @@ judgment, one bounded work item per job; every fact the next run needs lives on 
 ```
  events ─┐   schedule (*/15, backstop)   workflow_dispatch (chaining, by hand)
          ▼
- ┌──────────────────────── .github/workflows/shipyard-agents.yml ─────────────────────────┐
+ ┌──────────────────────── .github/workflows/shipmill-agents.yml ─────────────────────────┐
  │ gate (code only, ~20 s)                                                          │
- │   app token → shipyard gate → repairs done + work list (JSON output)             │
+ │   app token → shipmill gate → repairs done + work list (JSON output)             │
  │        │ empty list: the run ends here                                           │
  │        ▼                                                                         │
  │ triage ─── one Claude job: verdicts for NEW / UNBLOCKED / REVISIT issues          │
  │ implement ─ matrix, one Claude job per NEEDS_PR issue → a PR                     │
  │ review ──── matrix, one Claude job per PR that needs review → a PR review        │
  │ diagnose ── matrix, one Claude job per red run the gate couldn't classify       │
- │ land (code only) ─ shipyard land-queue: rebase, CHANGELOG union, gate, merge      │
+ │ land (code only) ─ shipmill land-queue: rebase, CHANGELOG union, gate, merge      │
  │        │ anything changed: dispatch the workflow again                           │
  └──────────────────────────────────────────────────────────────────────────────────┘
- shipyard release (.github/workflows/release.yml, unchanged) ← kicked by gate and land
+ shipmill release (.github/workflows/release.yml, unchanged) ← kicked by gate and land
 ```
 
 ### Triggers
@@ -57,7 +57,7 @@ on:
   issue_comment: { types: [created] }
   workflow_run: { workflows: [CI], types: [completed] }
   workflow_dispatch:
-concurrency: { group: shipyard-gate }   # a newer pending run replaces the older one
+concurrency: { group: shipmill-gate }   # a newer pending run replaces the older one
 ```
 
 - Events make a human's reply or a finished CI run act within a minute; the schedule is
@@ -67,19 +67,19 @@ concurrency: { group: shipyard-gate }   # a newer pending run replaces the older
 - Events caused by `<slug>[bot]` itself skip at the job's `if:`. Pushes, comments, and
   labels made with an App token do start workflows, unlike `GITHUB_TOKEN`; without the
   filter every bot comment would start a run. A stage that changed something starts the
-  next round on purpose with `gh workflow run shipyard-agents.yml`, a step in code
+  next round on purpose with `gh workflow run shipmill-agents.yml`, a step in code
 - The default concurrency behaviour fits the gate: a burst of events collapses into one
   pending run, and that run re-reads all state anyway
 
 ## The gate
 
-`shipyard gate <owner/repo> --scope <scope> --json` runs code only, from
-`uvx --from git+https://github.com/romamo/shipyard@v0`. It needs no checkout for the state
+`shipmill gate <owner/repo> --scope <scope> --json` runs code only, from
+`uvx --from git+https://github.com/romamo/shipmill@v0`. It needs no checkout for the state
 read; it uses a blobless clone (`--filter=blob:none`) only for the repairs that touch git.
 
 1. **Read.** One GraphQL pass plus a few REST calls: issues with comments and labels, open
    PRs with heads, reviews, and check rollups, recent workflow runs and jobs, tags, the
-   release policy, `.github/shipyard.toml`
+   release policy, `.github/shipmill.toml`
 2. **Classify.** The existing logic of `triage_state.py`, `watch_state.py`, and a new
    `pr_state.py`, moved into the package
 3. **Repair** what the policy already decided (below), within the scope
@@ -139,7 +139,7 @@ Every run starts empty. The gate derives each fact from GitHub:
 | Settled design rules | The decisions log in the repo |
 
 Local mode (crontab on a checkout) runs the same gate and may cache under
-`$(git rev-parse --git-common-dir)/shipyard/`. The cache only saves API calls; losing it
+`$(git rev-parse --git-common-dir)/shipmill/`. The cache only saves API calls; losing it
 changes no decision.
 
 ## Agent jobs
@@ -150,37 +150,37 @@ Each agent job has the same shape:
 - uses: actions/create-github-app-token@v3
   id: app
   with:
-    client-id: ${{ vars.SHIPYARD_APP_CLIENT_ID }}
-    private-key: ${{ secrets.SHIPYARD_APP_KEY }}
+    client-id: ${{ vars.SHIPMILL_APP_CLIENT_ID }}
+    private-key: ${{ secrets.SHIPMILL_APP_KEY }}
     permission-contents: write
     permission-pull-requests: write
     permission-issues: write
 - uses: actions/checkout@v5
   with: { token: "${{ steps.app.outputs.token }}", fetch-depth: 0, filter: "blob:none" }
-- run: uvx --from git+https://github.com/romamo/shipyard@v0 shipyard agent-env >> "$GITHUB_ENV"
+- run: uvx --from git+https://github.com/romamo/shipmill@v0 shipmill agent-env >> "$GITHUB_ENV"
   env: { GH_TOKEN: "${{ steps.app.outputs.token }}" }   # git author as <id>+<slug>[bot]
 - run: |
     npm install -g @anthropic-ai/claude-code
-    git clone --depth 1 --branch v0 https://github.com/romamo/shipyard "$RUNNER_TEMP/shipyard"
-    claude -p "/shipyard:github-issue-resolve ${{ matrix.issue }} — $(cat brief.md)" \
-      --plugin-dir "$RUNNER_TEMP/shipyard" \
-      --permission-mode dontAsk --allowedTools "$SHIPYARD_TOOLS" \
+    git clone --depth 1 --branch v0 https://github.com/romamo/shipmill "$RUNNER_TEMP/shipmill"
+    claude -p "/shipmill:github-issue-resolve ${{ matrix.issue }} — $(cat brief.md)" \
+      --plugin-dir "$RUNNER_TEMP/shipmill" \
+      --permission-mode dontAsk --allowedTools "$SHIPMILL_TOOLS" \
       --max-turns 80 --output-format json > result.json
   env:
     GH_TOKEN: ${{ steps.app.outputs.token }}
     CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
   timeout-minutes: 50
-- run: shipyard agent-report result.json >> "$GITHUB_STEP_SUMMARY"   # cost, outcome
+- run: shipmill agent-report result.json >> "$GITHUB_STEP_SUMMARY"   # cost, outcome
 ```
 
 - **Plain `claude -p`, not `claude-code-action`.** The action documents no way to act as
   our own App, and its plugin inputs add little over `--plugin-dir`
 - **Skills by explicit slash command.** In `-p` mode a plugin skill runs only when the
-  prompt names it (`/shipyard:<skill>`)
+  prompt names it (`/shipmill:<skill>`)
 - **One item per job.** The App token lasts one hour and is revoked at the job's end, so
   every job mints its own and stays under 50 minutes. Parallel work is a matrix
   (`max-parallel: 3`), not subagents inside one run; a job's failure touches one item
-- **The brief comes from code.** `shipyard brief <stage> <n>` writes the repo facts
+- **The brief comes from code.** `shipmill brief <stage> <n>` writes the repo facts
   (default branch, release phase, check commands, CHANGELOG rule, rules files,
   `decisions.py find` output) and the item's plan from its triage comment. The agent
   doesn't rediscover them
@@ -204,7 +204,7 @@ the user becomes the `needs-decision` protocol below, and the item stops there.
 
 ### Land, in code
 
-`shipyard land-queue` takes the PRs with a bot review MERGE at their current head, in
+`shipmill land-queue` takes the PRs with a bot review MERGE at their current head, in
 order (stack bases first), and for each:
 
 1. Rebase onto the default branch; union CHANGELOG conflicts; any other conflict stops
@@ -235,7 +235,7 @@ untrusted input to a model.
 
 - **Who can start work.** `trusted = ["OWNER", "MEMBER", "COLLABORATOR"]` by
   `author_association`. Untrusted authors' issues get triage verdicts (comments and
-  labels only); implement starts after a trusted human adds `shipyard:go`. Untrusted PRs
+  labels only); implement starts after a trusted human adds `shipmill:go`. Untrusted PRs
   get a review without running their code
 - **No fork code with secrets.** No `pull_request_target`; review jobs run checks only for
   heads in the repo itself
@@ -247,7 +247,7 @@ untrusted input to a model.
 
 ## Configuration
 
-The `[agents]` section of `.github/shipyard.toml` (D-4), read on every run:
+The `[agents]` section of `.github/shipmill.toml` (D-4), read on every run:
 
 ```toml
 [agents]
@@ -261,21 +261,21 @@ max_items = { triage = 10, implement = 3, review = 3, diagnose = 2 }
 max_daily_cost_usd = 20
 ```
 
-`dry-run` mirrors shipyard's release `mode`: the gate and the agents run, nothing is written to
+`dry-run` mirrors shipmill's release `mode`: the gate and the agents run, nothing is written to
 GitHub, and the job summary shows the comments, PRs, and merges it would have made.
 
 ## Setup
 
-The `shipyard-setup` skill changes from starting a `/loop` to:
+The `shipmill-setup` skill changes from starting a `/loop` to:
 
 1. Register the App with the manifest flow, with the permissions above and no webhook.
    The redirect goes to the repo's page, and the user pastes the `code` from the address
    bar (a localhost redirect isn't documented as allowed). `POST
    /app-manifests/{code}/conversions` returns the id, client id, and key within an hour
-2. Install it on the repo; set `SHIPYARD_APP_CLIENT_ID` (variable), `SHIPYARD_APP_KEY`, and
+2. Install it on the repo; set `SHIPMILL_APP_CLIENT_ID` (variable), `SHIPMILL_APP_KEY`, and
    `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`) or `ANTHROPIC_API_KEY`
 3. Under merge scope, add the App to the ruleset's bypass list for the default branch
-4. Write `shipyard-agents.yml` and the `[agents]` section in `dry-run`, in the setup PR
+4. Write `shipmill-agents.yml` and the `[agents]` section in `dry-run`, in the setup PR
 5. After the merge, run it by hand once and read the summary with the user; the user
    switches to `live`
 
@@ -283,18 +283,18 @@ The `shipyard-setup` skill changes from starting a `/loop` to:
 
 | Change | Where |
 |---|---|
-| Move the skill scripts into the package as subcommands, typed and tested | `src/shipyard/` |
+| Move the skill scripts into the package as subcommands, typed and tested | `src/shipmill/` |
 | `gate`, `pr-state`, `brief`, `land-queue`, `agent-env`, `agent-report` | new subcommands |
 | `pr_gate`: judge the newest run per check on the head (cancelled twins) | existing |
-| `changelog_guard check`: validate headings with shipyard's parser | existing |
-| `init --agents`: write `shipyard-agents.yml` and the `[agents]` section | existing `init` |
+| `changelog_guard check`: validate headings with shipmill's parser | existing |
+| `init --agents`: write `shipmill-agents.yml` and the `[agents]` section | existing `init` |
 | Headless rule and the `needs-decision` protocol | the four agent skills |
 | Remove `agents/openai.yaml`, the Codex install notes, and `<skill>/scripts` paths | skills, README, docs |
 
 ## Plan
 
 1. **Spike** (a test repo, an hour): confirm what the docs leave open, below
-2. **Gate, read-only:** App token, the workflow, `shipyard gate` in dry-run with the
+2. **Gate, read-only:** App token, the workflow, `shipmill gate` in dry-run with the
    summary table. No agent jobs yet
 3. **Repairs and land-queue,** still code only
 4. **Agent stages:** triage, then implement, review, diagnose, each behind `scope`

@@ -1,6 +1,6 @@
 name: Move the major tag
 
-# Callers pin `@v0`: after a stable release, point the major tag at it. shipyard's land
+# Callers pin `@v0`: after a stable release, point the major tag at it. shipmill's land
 # workflow starts this one with the release's tag.
 
 on:

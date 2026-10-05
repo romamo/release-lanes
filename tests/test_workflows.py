@@ -21,11 +21,11 @@ def test_only_a_push_cancels_the_settle_wait() -> None:
     # cancel its quiet-window wait, then plan skip (#6)
     group, cancel = _job_concurrency(PREPARE.read_text(), "settle")
     assert group == (
-        "${{ github.event_name == 'push' && 'shipyard-settle' || format('shipyard-settle-{0}', github.run_id) }}"
+        "${{ github.event_name == 'push' && 'shipmill-settle' || format('shipmill-settle-{0}', github.run_id) }}"
     )
     assert cancel == "true"
 
 
 def test_prepare_queues_and_never_cancels() -> None:
     group, cancel = _job_concurrency(PREPARE.read_text(), "prepare")
-    assert (group, cancel) == ("shipyard", "false")
+    assert (group, cancel) == ("shipmill", "false")

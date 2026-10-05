@@ -1,6 +1,6 @@
 ---
 name: github-ship-watch
-description: Watch a GitHub repo's issue-to-release pipeline on a loop or a schedule, and finish what its standing policy already decided. Reports a failed or stalled release bot, a release missing from PyPI, fixed issues not yet told which version shipped them, issues that triage owes, and, for a repo running shipyard operate, a failed operate run, an unhealthy environment, a promotion waiting on approval, open incidents, a closed incident with no postmortem, and a hold; then reruns a flaky release job, starts a stalled lane, posts the shipped notices, and hands new issues to github-issue-triage when asked. Drafts a due postmortem as a pull request, and runs a weekly retro when the user schedules one. Use when the user asks to "watch the repo", "keep it shipping", "babysit releases", "check the release went out", sets up /loop or /schedule for a repo, or wants one report across several repos ("watch the fleet"). Not for triaging a backlog by hand (github-issue-triage), landing PRs (github-pr-triage), or setting up shipyard (shipyard-setup).
+description: Watch a GitHub repo's issue-to-release pipeline on a loop or a schedule, and finish what its standing policy already decided. Reports a failed or stalled release bot, a release missing from PyPI, fixed issues not yet told which version shipped them, issues that triage owes, and, for a repo running shipmill operate, a failed operate run, an unhealthy environment, a promotion waiting on approval, open incidents, a closed incident with no postmortem, and a hold; then reruns a flaky release job, starts a stalled lane, posts the shipped notices, and hands new issues to github-issue-triage when asked. Drafts a due postmortem as a pull request, and runs a weekly retro when the user schedules one. Use when the user asks to "watch the repo", "keep it shipping", "babysit releases", "check the release went out", sets up /loop or /schedule for a repo, or wants one report across several repos ("watch the fleet"). Not for triaging a backlog by hand (github-issue-triage), landing PRs (github-pr-triage), or setting up shipmill (shipmill-setup).
 ---
 
 # GitHub Ship Watch
@@ -21,8 +21,8 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 2. **One repair per finding per pass.** Rerun a failed job once. If it fails again, the next pass reports it rather than looping on reruns
 3. **Read state right before acting.** Another session may be landing PRs or releasing in the same repo. Check `gh run list` before starting a lane, and follow a peer's hold (see github-pr-triage, hard rule 5)
 4. **A repo with `release-blocker` open is held on purpose.** A stalled bot behind a blocker isn't stalled: report it, don't start a lane
-5. **An open `shipyard-hold` issue stops the factory on purpose.** A person pulled the stop switch: report the hold (the HOLD row: who opened it and when), never start a lane or close the issue. A plan under the hold, or under `[autonomy] release = "propose"`, proposes instead of releasing, so it never reads as BOT_STALLED; the proposal issue is for a person to act on
-6. **The watch never deploys, promotes, or rolls back.** `shipyard operate` acts on environments under the repo's autonomy; the watch reports what operate found and repairs only a stuck operate run, as it does for the release bot. Approving a proposal is the user's call: give them the command
+5. **An open `shipmill-hold` issue stops the factory on purpose.** A person pulled the stop switch: report the hold (the HOLD row: who opened it and when), never start a lane or close the issue. A plan under the hold, or under `[autonomy] release = "propose"`, proposes instead of releasing, so it never reads as BOT_STALLED; the proposal issue is for a person to act on
+6. **The watch never deploys, promotes, or rolls back.** `shipmill operate` acts on environments under the repo's autonomy; the watch reports what operate found and repairs only a stuck operate run, as it does for the release bot. Approving a proposal is the user's call: give them the command
 
 ## The script
 
@@ -33,11 +33,11 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | INCIDENT_OPEN | Report first: the issue, how long it has been open, and whether a PR links it to close it. Recommend landing the linked hotfix PR, or writing one when none links it. Rollback is operate's (or the user's), never the watch's |
 | HOLD | Report next: the issue, who opened it, and when. Not an action (exit 0 by itself); see hard rule 5 |
 | POSTMORTEM_DUE | An incident closed as completed (not as not planned or a duplicate) and no `docs/postmortems/*.md` on the default branch names it. Draft the postmortem as a pull request ([Postmortems](#postmortems)), once per incident: an open PR that already names it means the draft waits on the maintainer, so report the PR instead |
-| OPERATE_FAILED | The latest run of the workflow calling shipyard's `operate.yml` failed. Read it; rerun a flaky or transient failure once (`gh run rerun <id> --failed`), as for BOT_FAILED. Otherwise report the failing step with the run link |
-| UNHEALTHY | An environment's newest `shipyard health` status is a failure. Report the environment, the release, and the check's error. Operate owns the rollback; the watch never deploys over it |
-| PROMOTION_DUE | A deploy waits on a person. With a proposal issue, report it with its approve command (`gh workflow run operate.yml -f approve=<environment> -f dry-run=false`; under a hold, the hold closes first). Without one, operate would promote the environment (deploy autonomy `act`), or propose it (`propose`, or a hold), but isn't running on a schedule, so no proposal issue opens: report what operate would do, why it isn't running, and the command that runs it once (or `shipyard init --operate` when no caller exists). Never run either yourself |
+| OPERATE_FAILED | The latest run of the workflow calling shipmill's `operate.yml` failed. Read it; rerun a flaky or transient failure once (`gh run rerun <id> --failed`), as for BOT_FAILED. Otherwise report the failing step with the run link |
+| UNHEALTHY | An environment's newest `shipmill health` status is a failure. Report the environment, the release, and the check's error. Operate owns the rollback; the watch never deploys over it |
+| PROMOTION_DUE | A deploy waits on a person. With a proposal issue, report it with its approve command (`gh workflow run operate.yml -f approve=<environment> -f dry-run=false`; under a hold, the hold closes first). Without one, operate would promote the environment (deploy autonomy `act`), or propose it (`propose`, or a hold), but isn't running on a schedule, so no proposal issue opens: report what operate would do, why it isn't running, and the command that runs it once (or `shipmill init --operate` when no caller exists). Never run either yourself |
 | BOT_FAILED | Read the run. If the failure is a known flaky test or a transient push or network error ([github-pr-triage's ci-failures.md](../github-pr-triage/references/ci-failures.md)), `gh run rerun <id> --failed` once. Otherwise report the failing step and its error, with the run link |
-| BOT_STALLED | A shipyard bot has a release due and nothing running. Start the lane the plan names: `gh workflow run release.yml -f lane=<lane> -f dry-run=false`. Never `lane=policy` by hand: it skips while main isn't quiet yet |
+| BOT_STALLED | A shipmill bot has a release due and nothing running. Start the lane the plan names: `gh workflow run release.yml -f lane=<lane> -f dry-run=false`. Never `lane=policy` by hand: it skips while main isn't quiet yet |
 | NOT_PUBLISHED | Find the publish run for the tag (`gh run list -w <publish workflow> --branch <tag>` or by the release's dispatch). Rerun its failed jobs once if the cause is flaky; a failed release check or build is reported, not retried |
 | PUBLISHING | Nothing; the next pass checks again |
 | PUBLISHED | Once per release, check that a clean install runs (github-pr-triage's [landing.md](../github-pr-triage/references/landing.md#ecosystems)); retry once on index lag |
@@ -45,9 +45,9 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | ISSUES | Under "watch and triage", run github-issue-triage on the flagged issues. Otherwise list them |
 | PRS_OPEN, BOT_OK, BOT_NONE, NO_REGISTRY | Report only |
 
-Pass `--grace` to give a slow publish more minutes before it reads NOT_PUBLISHED, and `--tool` when the shipyard bot isn't installed from `romamo/shipyard@v0`.
+Pass `--grace` to give a slow publish more minutes before it reads NOT_PUBLISHED, and `--tool` when the shipmill bot isn't installed from `romamo/shipmill@v0`.
 
-HOLD and POSTMORTEM_DUE show for every repo with a shipyard config, since a hold stops releases too and an incident may be labelled by hand. POSTMORTEM_DUE reads the postmortems through the GitHub contents API on the default branch, so a draft counts only once merged. The operations states show only when the config declares environments (read with `tomllib`; on Python 3.10 only plain `[environments.<name>]` tables, and any other form stops the watch with a one-line message); they come from the GitHub deployments and issues `shipyard operate` writes. The incident label is `[operate] incident_label`, `incident` by default; `--incident-label` takes its place (the fleet report passes a fleet entry's label this way).
+HOLD and POSTMORTEM_DUE show for every repo with a shipmill config, since a hold stops releases too and an incident may be labelled by hand. POSTMORTEM_DUE reads the postmortems through the GitHub contents API on the default branch, so a draft counts only once merged. The operations states show only when the config declares environments (read with `tomllib`; on Python 3.10 only plain `[environments.<name>]` tables, and any other form stops the watch with a one-line message); they come from the GitHub deployments and issues `shipmill operate` writes. The incident label is `[operate] incident_label`, `incident` by default; `--incident-label` takes its place (the fleet report passes a fleet entry's label this way).
 
 ## Report
 
@@ -55,7 +55,7 @@ One line when exit 0: "Nothing owed: bot OK, <latest tag> published and announce
 
 ## Postmortems
 
-Every closed incident gets a postmortem: a file `docs/postmortems/YYYY-MM-DD-<slug>.md` (the day the incident opened) from shipyard's [`docs/postmortems/TEMPLATE.md`](../../docs/postmortems/TEMPLATE.md), merged through a pull request; the first postmortem copies the template into the repo too. The watch drafts it; the maintainer approves it by merging, and nothing merges without the usual gates.
+Every closed incident gets a postmortem: a file `docs/postmortems/YYYY-MM-DD-<slug>.md` (the day the incident opened) from shipmill's [`docs/postmortems/TEMPLATE.md`](../../docs/postmortems/TEMPLATE.md), merged through a pull request; the first postmortem copies the template into the repo too. The watch drafts it; the maintainer approves it by merging, and nothing merges without the usual gates.
 
 1. Read the record: the incident issue and its comments (`gh issue view <n> --json title,body,createdAt,closedAt,comments`), and the deployment statuses of the environment it names (`gh api repos/<repo>/deployments?environment=<env>`, then each deployment's `statuses`) from the release before the fault to the recovery
 2. Draft from the record only: the timeline in UTC from those comments and statuses, the cause and the change that introduced it, what caught it, what would have caught it sooner, and the actions. Keep one `Incident: <owner/repo>#<n>` line per incident the postmortem covers (the issue's URL, or `#<n>` for the repo itself, reads the same); the watch reads that line. Mark anything the record doesn't show as a question for the maintainer, never a guess
@@ -80,7 +80,7 @@ The retro writes only the proposal issues and that one comment. It never edits a
 ## Running it on a schedule
 
 - In a session: `/loop 30m /github-ship-watch <owner/repo> — watch and triage`
-- In the cloud: `/schedule` a routine whose prompt clones shipyard and follows this file, as `docs/flow.md` shows. A cloud session may not load plugins from the repo's settings
+- In the cloud: `/schedule` a routine whose prompt clones shipmill and follows this file, as `docs/flow.md` shows. A cloud session may not load plugins from the repo's settings
 - Don't start a loop or a routine unasked; offer it
 
 ## Metrics
@@ -97,13 +97,13 @@ The weekly metrics post is an option the user schedules, never a default: `/sche
 
 ## Fleet
 
-A maintainer with several shipyard repos reads one report instead of one per repo, so an incident or a stalled release in one product doesn't hide among the others. The fleet report only reads: each repo's own watch pass still repairs.
+A maintainer with several shipmill repos reads one report instead of one per repo, so an incident or a stalled release in one product doesn't hide among the others. The fleet report only reads: each repo's own watch pass still repairs.
 
 A fleet file lists the repos, in TOML:
 
 ```toml
 [[repos]]
-repo = "romamo/shipyard"
+repo = "romamo/shipmill"
 
 [[repos]]
 repo = "owner/other"
@@ -121,7 +121,7 @@ incident_label = "sev"   # optional; the label that repo's incidents carry (defa
 The fleet watch is an option the user schedules, never a default. Keep the fleet file in a repo the routine clones (for example `.github/fleet.toml` in the user's ops repo), then `/schedule` a routine whose prompt is:
 
 ```text
-Clone romamo/shipyard and <the repo holding the fleet file>. Run
+Clone romamo/shipmill and <the repo holding the fleet file>. Run
 `uv run --no-project python skills/github-ship-watch/scripts/fleet.py report --fleet <path to fleet.toml> --metrics`.
 On exit 0, report one line: "Fleet: nothing owed". Otherwise report the incidents and
 holds first, then every action row with its repo and a recommendation, then each
@@ -133,4 +133,4 @@ In a session, `/loop 1h` the same report.
 
 ## Improve the skill
 
-When a pass misses something stuck, or repairs something it shouldn't have, add a state to `watch_state.py` (with a test in shipyard's `tests/test_ship_watch.py`) or a rule here.
+When a pass misses something stuck, or repairs something it shouldn't have, add a state to `watch_state.py` (with a test in shipmill's `tests/test_ship_watch.py`) or a rule here.

@@ -9,11 +9,11 @@ import tomllib
 from collections.abc import Sequence
 from pathlib import Path
 
-from shipyard.changelog import Changelog, Entry
-from shipyard.errors import ReleaseError
-from shipyard.gitrepo import Git
-from shipyard.policy import Lane, Policy, VersionFiles
-from shipyard.version import Version
+from shipmill.changelog import Changelog, Entry
+from shipmill.errors import ReleaseError
+from shipmill.gitrepo import Git
+from shipmill.policy import Lane, Policy, VersionFiles
+from shipmill.version import Version
 
 
 def project_version(root: Path) -> tuple[str, Version]:

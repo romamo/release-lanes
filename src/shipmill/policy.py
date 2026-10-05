@@ -1,4 +1,4 @@
-"""The release policy, in .github/shipyard.toml (or its alias .github/release-policy.toml):
+"""The release policy, in .github/shipmill.toml:
 which lanes a project releases on, what makes each one due, what holds it, and what a
 release rewrites and publishes"""
 
@@ -10,16 +10,16 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from shipyard import environments
-from shipyard.agents import AgentsConfig
-from shipyard.autonomy import AutonomyPolicy
-from shipyard.config import Table, read
-from shipyard.environments import Environment, OperateConfig
-from shipyard.errors import ReleaseError
-from shipyard.lanes import Lane as Lane  # re-exported: most modules name a lane through the policy
-from shipyard.roadmap import RoadmapConfig
-from shipyard.schedule import Freeze, Window
-from shipyard.version import Part
+from shipmill import environments
+from shipmill.agents import AgentsConfig
+from shipmill.autonomy import AutonomyPolicy
+from shipmill.config import Table, read
+from shipmill.environments import Environment, OperateConfig
+from shipmill.errors import ReleaseError
+from shipmill.lanes import Lane as Lane  # re-exported: most modules name a lane through the policy
+from shipmill.roadmap import RoadmapConfig
+from shipmill.schedule import Freeze, Window
+from shipmill.version import Part
 
 _MAX_QUIET = 300  # a GitHub job runs at most 6 hours; leave room for the rest of the run
 
@@ -98,7 +98,7 @@ class Policy:
 
     @property
     def incident_label(self) -> str | None:
-        """The label of the incident issues shipyard operate opens; None when no environment
+        """The label of the incident issues shipmill operate opens; None when no environment
         has a health URL, so no incident can open"""
         if not any(e.health for e in self.environments.values()):
             return None

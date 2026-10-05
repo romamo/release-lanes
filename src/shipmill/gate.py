@@ -20,9 +20,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from shipyard.agents import AgentsConfig
-from shipyard.errors import ReleaseError
-from shipyard.gitrepo import Git
+from shipmill.agents import AgentsConfig
+from shipmill.errors import ReleaseError
+from shipmill.gitrepo import Git
 
 # watch_state.py states that need an agent (its ACTION set)
 WORK = frozenset({"BOT_FAILED", "BOT_STALLED", "NOT_PUBLISHED", "UNANNOUNCED", "ISSUES"})
@@ -126,11 +126,11 @@ def decide(
 def prompt(template: str, repo: str, work: Sequence[Finding], now: dt.datetime) -> str:
     found = "\n".join(f"- {f.line()}" for f in work)
     stamp = now.isoformat(timespec="minutes")
-    return f"{template.replace('{repo}', repo)}\n\nThe shipyard gate found this at {stamp} (from code):\n{found}"
+    return f"{template.replace('{repo}', repo)}\n\nThe shipmill gate found this at {stamp} (from code):\n{found}"
 
 
 def session_name(repo: str) -> str:
-    return f"shipyard {repo}"
+    return f"shipmill {repo}"
 
 
 def parse_sessions(text: str, repo: str) -> list[Session]:
@@ -198,7 +198,7 @@ def skills_dir() -> Path:
     for candidate in (here / "skills", here.parents[1] / "skills"):
         if (candidate / "github-ship-watch").is_dir():
             return candidate
-    raise ReleaseError("this shipyard install has no skills folder; reinstall it")
+    raise ReleaseError("this shipmill install has no skills folder; reinstall it")
 
 
 def watch(repo: str, workspace: Path) -> list[Finding]:
@@ -214,7 +214,7 @@ def watch(repo: str, workspace: Path) -> list[Finding]:
 def state_dir(git: Git) -> Path:
     """Shared by every worktree of the checkout, and never committed"""
     common = Path(git.run("rev-parse", "--git-common-dir").strip())
-    return (common if common.is_absolute() else git.root / common) / "shipyard"
+    return (common if common.is_absolute() else git.root / common) / "shipmill"
 
 
 def load_launch(path: Path) -> Launch | None:

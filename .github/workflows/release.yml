@@ -1,6 +1,6 @@
 name: Release
 
-# shipyard dogfoods itself: the same wiring `shipyard init` writes, but
+# shipmill dogfoods itself: the same wiring `shipmill init` writes, but
 # calling the reusable workflows in this repository and running the tool from the checkout.
 
 on:

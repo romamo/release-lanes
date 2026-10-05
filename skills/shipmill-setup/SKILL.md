@@ -1,18 +1,18 @@
 ---
-name: shipyard-setup
-description: Set up shipyard in a repository so releases are cut by policy on lanes (dev, rc, stable, hotfix) from its hand-written CHANGELOG. Use when the user asks to add a release bot, automate releases, set up release lanes, scheduled or nightly releases, release candidates, or hotfix releases, or to move a repo onto release lanes. Also connects the agent side, so the repo triages, fixes, and lands on its own: the plugin in the repo's settings, the labels the skills read, the config's [agents] section, and where the agents run, including `shipyard gate` on launchd. Use too when the user asks to "connect a repo to shipyard" or to make it "ship by itself". Covers prerequisites, choosing lanes with the user, writing the policy, wiring CI and publishing, a dry run, and migration from hand-made or scripted releases.
+name: shipmill-setup
+description: Set up shipmill in a repository so releases are cut by policy on lanes (dev, rc, stable, hotfix) from its hand-written CHANGELOG. Use when the user asks to add a release bot, automate releases, set up release lanes, scheduled or nightly releases, release candidates, or hotfix releases, or to move a repo onto release lanes. Also connects the agent side, so the repo triages, fixes, and lands on its own: the plugin in the repo's settings, the labels the skills read, the config's [agents] section, and where the agents run, including `shipmill gate` on launchd. Use too when the user asks to "connect a repo to shipmill" or to make it "ship by itself". Covers prerequisites, choosing lanes with the user, writing the policy, wiring CI and publishing, a dry run, and migration from hand-made or scripted releases.
 ---
 
-# Set up shipyard
+# Set up shipmill
 
-shipyard cuts releases from a hand-written CHANGELOG on lanes the project's policy
+shipmill cuts releases from a hand-written CHANGELOG on lanes the project's policy
 defines. Read the project's README section "How a release works" once before starting:
 pre-releases are tagged off main, and stable releases promote a soaked rc.
 
 Run the tool with:
 
 ```bash
-CR="uvx --from git+https://github.com/romamo/shipyard@v0 shipyard"
+CR="uvx --from git+https://github.com/romamo/shipmill@v0 shipmill"
 ```
 
 Work on a branch and finish with a pull request. Never set `mode = "release"` in the
@@ -181,7 +181,7 @@ jobs:
 ```
 
 Turn an existing deploy workflow into this shape rather than writing a second one, and
-remove its own trigger on tags or pushes, so one release deploys once. shipyard starts it on
+remove its own trigger on tags or pushes, so one release deploys once. shipmill starts it on
 the tag, so the deployment GitHub records names the tag as its ref. Keep the `ref` job: GitHub
 records the run's ref, not the checked-out tag, so a run started by hand without `--ref <tag>`
 would record a branch, and the job fails it first with the command to run instead (`doctor`
@@ -199,7 +199,7 @@ the release tags, since `land` starts the workflow on the tag (enabling GitHub P
 `gh api -X POST repos/<owner>/<repo>/environments/<environment>/deployment-branch-policies -f name='v*' -f type=tag`.
 
 When an environment has `health` or `from`, also run `$CR init --operate` in step 4. It
-writes `.github/workflows/operate.yml`, which runs `shipyard operate` every 10 minutes:
+writes `.github/workflows/operate.yml`, which runs `shipmill operate` every 10 minutes:
 it checks each `health` URL (2xx within 10 s; a JSON body's `version` must name the
 deployed release), records the result as deployment statuses, and promotes a `from`
 environment once its source stayed healthy for `bake_minutes`. An environment failing
@@ -218,9 +218,7 @@ library with no environments.
 $CR init --ci <ci-file>.yml
 ```
 
-This writes `.github/shipyard.toml` (dry-run) and `.github/workflows/release.yml`. A repo
-that already has the older name, `.github/release-policy.toml`, keeps working with it; `init`
-refuses to write next to it, and `--force` replaces it with `.github/shipyard.toml`.
+This writes `.github/shipmill.toml` (dry-run) and `.github/workflows/release.yml`.
 Edit the policy to the user's choices from step 3, then add `version_lines` and
 `after_stamp` (for uv projects `["uv lock --check"]`; for a project with a docs check that
 reads the version, that command too).
@@ -249,7 +247,7 @@ or the tags are wrong; fix those, not the version.
    release commit in the run summary
 3. Run the checklist: `uv run --no-project python <skill>/scripts/setup_state.py <owner/repo>`.
    It reports releases, the `[agents]` section, the plugin in `.claude/settings.json`, and
-   the labels (`postponed`, `blocked`, `shipyard-hold`, and the blocker label). `--fix`
+   the labels (`postponed`, `blocked`, `shipmill-hold`, and the blocker label). `--fix`
    enables the plugin, keeping every other key, and creates the missing labels on GitHub
    at once; commit the settings change in a follow-up PR. A plugin turned off on purpose
    (`PLUGIN_DISABLED`) is the user's call; ask before changing it
@@ -261,20 +259,20 @@ or the tags are wrong; fix those, not the version.
    |---|---|---|
    | On demand | in the user's session, when they invoke a skill | the task is done |
    | `/loop 30m /github-ship-watch <owner/repo> — watch and triage` | in this session | the session closes |
-   | The gate (`shipyard gate` on launchd) | a new background session on this machine, only when the repo needs one, with its memory and repos | the job is removed |
+   | The gate (`shipmill gate` on launchd) | a new background session on this machine, only when the repo needs one, with its memory and repos | the job is removed |
    | A `/schedule` routine | in the cloud, with the user's computer off | the user deletes it |
 
    Recommend the gate over `/loop` for anything that runs for days: each pass is a fresh
    session, and a quiet tick makes no model call (see [The gate](#the-gate))
 
    For a routine, also ask whether it may merge: it merges only when its prompt says
-   "merge when green". Write the prompt so it clones shipyard rather than relying on the
+   "merge when green". Write the prompt so it clones shipmill rather than relying on the
    plugin, which a cloud routine may not load (docs/flow.md, Keeping it running), and offer
    to create it with `/schedule`
 
 ## The gate
 
-`shipyard gate` is code that reads the repo's state and starts a Claude Code background
+`shipmill gate` is code that reads the repo's state and starts a Claude Code background
 session (`claude --bg`) only when something needs an agent, no session it started is still
 working or waiting on the user, and the findings changed since its last launch.
 docs/design/agent-modes.md has the details.
@@ -283,7 +281,7 @@ docs/design/agent-modes.md has the details.
    merges for the first week: `/github-issue-triage {repo} triage the new issues; do not
    merge`. "merge when green" lets it land PRs; then also set `prs = true`, so open PRs
    count as work
-2. **Config.** Add the section to `.github/shipyard.toml` in a PR, and merge it before the
+2. **Config.** Add the section to `.github/shipmill.toml` in a PR, and merge it before the
    job starts:
 
    ```toml
@@ -293,16 +291,16 @@ docs/design/agent-modes.md has the details.
    retry_hours = 24   # unchanged findings start a new session after this
    ```
 3. **A dedicated checkout.** The session branches and commits where it starts, so never
-   use the user's working copy: `git worktree add --detach tmp/shipyard-gate
+   use the user's working copy: `git worktree add --detach tmp/shipmill-gate
    origin/<default>` inside the trusted checkout (a worktree outside it would need its
    own trust prompt). If `git check-ignore tmp` prints nothing, add `tmp/` to
    `.git/info/exclude`, which stays local. The gate moves the checkout to the default
    branch's head before each launch
-4. **Try it once.** `$CR --repo tmp/shipyard-gate gate <owner/repo> --dry-run` prints the
+4. **Try it once.** `$CR --repo tmp/shipmill-gate gate <owner/repo> --dry-run` prints the
    decision and changes nothing
-5. **Schedule it.** `$CR --repo tmp/shipyard-gate launchd <owner/repo> --every 15` writes
-   `~/Library/LaunchAgents/dev.shipyard.gate.<owner>.<repo>.plist`, loads it, and runs
-   it once now. Its log is under `~/Library/Logs/shipyard/`. `--remove` unloads it; on
+5. **Schedule it.** `$CR --repo tmp/shipmill-gate launchd <owner/repo> --every 15` writes
+   `~/Library/LaunchAgents/dev.shipmill.gate.<owner>.<repo>.plist`, loads it, and runs
+   it once now. Its log is under `~/Library/Logs/shipmill/`. `--remove` unloads it; on
    Linux, run the same `gate` command from a systemd timer
 6. **Hand over.** Tell the user how to see a session (`claude agents`, `claude attach
    <id>`), that a session waiting on a question holds the repo until they answer, and

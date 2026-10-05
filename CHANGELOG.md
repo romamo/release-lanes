@@ -1,11 +1,23 @@
 # Changelog
 
-All notable changes to shipyard, named release-lanes before 0.3.0. The format follows
+All notable changes to shipmill, named release-lanes before 0.3.0. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
-[Semantic Versioning](https://semver.org/). shipyard releases itself with its own
+[Semantic Versioning](https://semver.org/). shipmill releases itself with its own
 bot.
 
 ## [Unreleased]
+
+### Changed
+
+- The project is now shipmill, with no compatibility layer: the package and CLI
+  `shipmill`, the config `.github/shipmill.toml`, the labels `shipmill-hold` and the
+  other `shipmill-*` labels, the `shipmill/<tag>` work branches, the `shipmill-setup`
+  skill, the plugin `shipmill@shipmill`, and the repository `romamo/shipmill`
+
+### Removed
+
+- `.github/release-policy.toml`, the config's alias: shipmill reads only
+  `.github/shipmill.toml`, and `init --force` no longer removes the alias
 
 ## [0.12.0] - 2026-10-05
 
@@ -70,7 +82,7 @@ bot.
   accepted one goes to github-issue-triage's spec gate as a feature. Its
   `scripts/intake_state.py` reports NEW_FEEDBACK, OPPORTUNITY_OPEN, ACCEPTED, HANDED_OFF,
   DECLINED, NO_REASON, DONE, MERGED, and OVERLAP; an issue labelled `bug`, `roadmap`, or
-  one of shipyard's own labels isn't feedback, and `--skip-label` adds more. `[autonomy] intake` sets how far it
+  one of shipmill's own labels isn't feedback, and `--skip-label` adds more. `[autonomy] intake` sets how far it
   goes: `propose` (the default) or `observe`; `act` is refused, and `doctor` prints it (#69)
 - The `product-intake` skill plans the roadmap: milestones are the roadmap, and it
   proposes the next one from accepted opportunities, ranked by evidence (requests and
@@ -82,8 +94,8 @@ bot.
   UNPLANNED, PROPOSAL_OPEN, APPROVED, UNREADABLE, and NEXT. `doctor` validates
   `[roadmap]` and prints it when present (#70)
 - A deploy gets its first health check right after it succeeds, not at the next scheduled
-  `shipyard operate` run up to 10 minutes later: the deploy workflow in the README and the
-  shipyard-setup skill ends with an `operate` job that runs `gh workflow run operate.yml -f
+  `shipmill operate` run up to 10 minutes later: the deploy workflow in the README and the
+  shipmill-setup skill ends with an `operate` job that runs `gh workflow run operate.yml -f
   dry-run=false` with `actions: write`, and the 10-minute schedule stays the backstop.
   `doctor` notes when an environment's deploy workflow starts the operate caller, and warns
   when it doesn't for an environment with `from` or `health` (#84)
@@ -110,11 +122,11 @@ bot.
 - `triage_state.py` no longer reads an incident closed as completed by hand as
   SUSPECT_CLOSE: an incident closes once the environment is healthy again, and
   github-ship-watch's POSTMORTEM_DUE follows it up. The label is `incident` by default;
-  the script can't read the shipyard config, so pass `[operate] incident_label` with the
+  the script can't read the shipmill config, so pass `[operate] incident_label` with the
   new `--incident-label` when it differs (#83)
 - A deploy workflow started by hand without `--ref <tag>` recorded its deployment under the
-  branch, which names no release tag, so `shipyard operate` couldn't tell what ran there.
-  The deploy workflow in the README and the shipyard-setup skill now starts with a `ref`
+  branch, which names no release tag, so `shipmill operate` couldn't tell what ran there.
+  The deploy workflow in the README and the shipmill-setup skill now starts with a `ref`
   job that fails such a run, with the right `gh workflow run ... --ref <tag>` command, and
   `doctor` warns when an environment's deploy workflow has no step comparing `github.ref`
   with `refs/tags/<tag>` (#80)
@@ -136,7 +148,7 @@ bot.
 
 ### Added
 
-- `shipyard operate` rolls back an environment that fails `[operate] rollback_after`
+- `shipmill operate` rolls back an environment that fails `[operate] rollback_after`
   health checks in a row (default 3) to the previous tag that reached `success` there,
   under `rollback` autonomy and the hold: act dispatches, propose (or the hold) has the
   incident propose it for `operate --approve-rollback <environment>`, observe reports.
@@ -147,22 +159,22 @@ bot.
   A failed check now writes a `failure` status each time, up to `rollback_after` in a
   row, to count them. `doctor` validates `[operate]` and wants `issues: write` on the
   operate job once an environment has `health` (#31)
-- github-ship-watch reports what `shipyard operate` found, for a repo whose config has
+- github-ship-watch reports what `shipmill operate` found, for a repo whose config has
   `[environments.<name>]` tables: OPERATE_FAILED (the operate caller's latest run failed;
-  the watch reruns a flaky one once), UNHEALTHY (an environment's newest `shipyard health`
+  the watch reruns a flaky one once), UNHEALTHY (an environment's newest `shipmill health`
   status is a failure), PROMOTION_DUE (an open "Ready to promote" proposal, with its
   approve command, or a promotion operate would make or propose if it ran on a schedule),
   and INCIDENT_OPEN (an open issue labelled `[operate] incident_label`, default
-  `incident`, with its age and the PRs linked to close it). Every repo with a shipyard
-  config also gets a HOLD row for an open `shipyard-hold` issue, with who opened it and
+  `incident`, with its age and the PRs linked to close it). Every repo with a shipmill
+  config also gets a HOLD row for an open `shipmill-hold` issue, with who opened it and
   when; a hold alone doesn't make the watch exit 1. Incidents and holds lead the report,
   and the watch never deploys or rolls back itself (#33)
 - Under `release = "propose"`, the land workflow closes the lane's "Ready to release"
   issue once the release is tagged, with a comment naming the tag and the run, and says so
   when the issue proposed another version. A new `close-proposal` job takes the caller's
-  grant: add `issues: write` to the land job in `.github/workflows/release.yml` (`shipyard
+  grant: add `issues: write` to the land job in `.github/workflows/release.yml` (`shipmill
   init` writes it, and `doctor` warns under `release = "propose"` until it is there).
-  `shipyard operate` closes a "Ready to promote" or "Ready to deploy" issue once the
+  `shipmill operate` closes a "Ready to promote" or "Ready to deploy" issue once the
   environment runs its tag or a later one, whoever deployed it (#40)
 - github-ship-watch's `metrics.py` measures a repo over a window (`--days 30` by
   default) from GitHub alone: deploy frequency (successful deployments per environment,
@@ -200,13 +212,13 @@ bot.
 - The triage skills keep an implementer's or reviewer's worktree until its PR merges, not
   just until it's pushed: a revision goes back to the same agent through SendMessage, and
   an agent whose worktree was removed can't be resumed
-- `doctor` accepts the repository hosting shipyard calling its own `operate.yml` locally:
+- `doctor` accepts the repository hosting shipmill calling its own `operate.yml` locally:
   there `.github/workflows/operate.yml` is the reusable workflow, so the operate check
   reads the workflow that `uses: ./.github/workflows/operate.yml` instead. A blank line no
   longer hides what follows it: a later job's `environment:`, or a workflow input (#53)
-- `shipyard propose` and `shipyard operate` no longer open a duplicate proposal issue in
+- `shipmill propose` and `shipmill operate` no longer open a duplicate proposal issue in
   a repo with more than 500 open issues: every release or deploy proposal carries a
-  `shipyard-proposal` label, created on first use, and is found among the open issues with
+  `shipmill-proposal` label, created on first use, and is found among the open issues with
   it (refusing, rather than guessing, at 100 of them). A proposal opened before the label
   is found once by the old scan and labelled on that update.
   github-ship-watch finds proposals by the label too, falling back to its title search
@@ -217,29 +229,29 @@ bot.
 - Proposal follow-ups: `land` leaves open a release proposal for a later version than the
   one it released, as `operate` does for a deploy proposal; github-ship-watch always runs
   its title search beside the label lookup, so an unlabelled deploy proposal shows while a
-  labelled one exists; and a `shipyard-proposal` label another run created meanwhile no
+  labelled one exists; and a `shipmill-proposal` label another run created meanwhile no
   longer fails the run (#65)
 
 ## [0.9.0] - 2026-10-04
 
 ### Added
 
-- `shipyard gate <owner/repo>` starts a Claude Code background session (`claude --bg`)
+- `shipmill gate <owner/repo>` starts a Claude Code background session (`claude --bg`)
   for a repo only when its state needs one: it reads the state with code, skips while a
   session it started is still working or waits on you, skips findings unchanged since
   the last launch, and passes the findings in the prompt. The prompt, whether open PRs
   count as work, and the retry window come from a new `[agents]` section of
-  `.github/shipyard.toml`. `--refresh` moves a dedicated, detached checkout to the
+  `.github/shipmill.toml`. `--refresh` moves a dedicated, detached checkout to the
   default branch first. The wheel now bundles the skills
-- `shipyard launchd <owner/repo>` runs the gate from launchd every few minutes on a
+- `shipmill launchd <owner/repo>` runs the gate from launchd every few minutes on a
   Mac, with a PATH built from where claude, gh, git, and uvx live outside temporary
   folders. Each pass is a new session, and a quiet tick makes no model call
-- shipyard-setup connects the agent side: `setup_state.py` reports releases, the
+- shipmill-setup connects the agent side: `setup_state.py` reports releases, the
   `[agents]` section, the plugin in `.claude/settings.json`, and the labels the skills
   read, and `--fix` enables the plugin and creates the labels. The gate on launchd is a
   new choice for where agents run
-- `shipyard operate`, run every 10 minutes by the new reusable `operate.yml` through a
-  caller that `shipyard init --operate` writes: for each environment it reads the current
+- `shipmill operate`, run every 10 minutes by the new reusable `operate.yml` through a
+  caller that `shipmill init --operate` writes: for each environment it reads the current
   deployment from GitHub, checks its `health` URL (2xx within 10 s; a JSON body's `version`
   must name the deployed release), and records the result as deployment statuses, written
   only when the state changes. It promotes a `from` environment once its source has been
@@ -255,25 +267,25 @@ bot.
 
 ### Added
 
-- Environments: an `[environments.<name>]` table in `.github/shipyard.toml` names a deploy
+- Environments: an `[environments.<name>]` table in `.github/shipmill.toml` names a deploy
   `workflow` and exactly one of `lane` or `from`, plus an optional `health` URL and, with
   `from`, `bake_minutes`; a `from` chain must end at a `lane` environment. `land` starts the
   workflow of each environment whose `lane` is the release's, with `tag` and `environment`
   inputs, and lists it as `deploy.yml@staging`; `from` environments wait for promotion.
   `doctor` checks each workflow takes both inputs and that a job sets `environment:`, so
   GitHub records a deployment; `init` writes a commented example (#29)
-- `[autonomy]` in `.github/shipyard.toml` sets each stage to `observe`, `propose`, or `act`
+- `[autonomy]` in `.github/shipmill.toml` sets each stage to `observe`, `propose`, or `act`
   (`release`, `deploy.<environment>`, and `rollback`, all `act` by default), and an open
-  issue labelled `shipyard-hold` turns every `act` into `propose`. Under `release =
+  issue labelled `shipmill-hold` turns every `act` into `propose`. Under `release =
   "observe"` a due lane is only reported; under `"propose"`, or while a hold is open, the
   new `propose` job of `prepare.yml` opens or updates one "Ready to release vX on <lane>"
   issue per due lane instead of releasing. A lane started by hand still releases under
   propose; under a hold only a hotfix started by hand does. `doctor` prints the effective
   autonomy per stage and warns on an open hold. Proposing needs `issues: write` on the
-  prepare job of the calling workflow, which `shipyard init` now writes; `doctor` warns
+  prepare job of the calling workflow, which `shipmill init` now writes; `doctor` warns
   about it only once a stage is set to propose or a hold is open. Each `deploy.<name>` must
   name an environment in `[environments]`. Deploy and rollback autonomy take effect once
-  shipyard deploys (#32)
+  shipmill deploys (#32)
 
 ## [0.7.0] - 2026-10-04
 
@@ -292,26 +304,26 @@ bot.
 
 ### Added
 
-- `.github/shipyard.toml`, the one config file every shipyard layer will read: `shipyard
+- `.github/shipmill.toml`, the one config file every shipmill layer will read: `shipmill
   init` writes it, and `doctor` names the file it read. `.github/release-policy.toml` keeps
   working as an alias with the same keys, and `doctor` warns to rename it with `git mv`; a
   repo with both files fails. `init` refuses when either file exists, and `--force` replaces
-  the alias with `shipyard.toml`. ship-watch finds either file. Rename to `shipyard.toml`
-  only once the shipyard CLI your Release workflow runs (the `tool` input of `prepare.yml`
+  the alias with `shipmill.toml`. ship-watch finds either file. Rename to `shipmill.toml`
+  only once the shipmill CLI your Release workflow runs (the `tool` input of `prepare.yml`
   and `land.yml`, default `@v0`) is this release or newer (#28)
 
 ## [0.6.0] - 2026-10-04
 
 ### Added
 
-- "Where the agents run" in the README, and a last hand-over step in `shipyard-setup`
+- "Where the agents run" in the README, and a last hand-over step in `shipmill-setup`
   that asks whether the skills run on demand, on a `/loop`, or as a cloud `/schedule`
   routine, and whether a routine may merge
 
 ### Changed
 
-- The `release-lanes-setup` skill is now `shipyard-setup`: `/shipyard-setup` (or
-  `/shipyard:shipyard-setup` from the plugin) replaces `/release-lanes-setup`. A checkout
+- The `release-lanes-setup` skill is now `shipmill-setup`: `/shipmill-setup` (or
+  `/shipmill:shipmill-setup` from the plugin) replaces `/release-lanes-setup`. A checkout
   linked into `~/.agents/skills` re-runs the link loop from the README and removes the
   dangling `release-lanes-setup` link. "Set up release lanes" and "add a release bot"
   still find it
@@ -330,9 +342,9 @@ bot.
 
 ### Fixed
 
-- `doctor`'s `work branch` check asks origin for a `shipyard` branch, as `prepare` does,
+- `doctor`'s `work branch` check asks origin for a `shipmill` branch, as `prepare` does,
   instead of reading the clone's fetched refs: a shallow or single-branch clone (such as a
-  CI checkout) passed while origin had the branch, and a stale `origin/shipyard` failed
+  CI checkout) passed while origin had the branch, and a stale `origin/shipmill` failed
   after it was deleted. It warns when there is no origin or origin can't be reached
 
 ## [0.5.1] - 2026-10-04
@@ -342,7 +354,7 @@ bot.
 - A scheduled or hand-started run of the prepare workflow no longer cancels a push run
   waiting out `quiet_minutes`: only a newer push shares the settle job's concurrency
   group, and any other run gets a group of its own (#6)
-- `prepare` names a branch `shipyard` on origin that blocks the `shipyard/<tag>` work
+- `prepare` names a branch `shipmill` on origin that blocks the `shipmill/<tag>` work
   branch, instead of failing with git's raw `cannot lock ref` error, and `doctor` checks
   for it as `work branch` (#7)
 - `github-pr-triage` launches reviewer agents from the repo's root and has each confirm
@@ -387,26 +399,26 @@ bot.
 
 ### Fixed
 
-- `github-pr-triage` starts a shipyard bot by naming the lane: a hand-started
+- `github-pr-triage` starts a shipmill bot by naming the lane: a hand-started
   `lane=policy` run cancels the push run's quiet wait and then skips (#6)
 
 ## [0.3.0] - 2026-10-03
 
 ### Breaking
 
-- release-lanes is now shipyard: the package, the CLI (`shipyard init`, `shipyard doctor`,
-  and the rest), and the repository `romamo/shipyard`. In a repository already set up,
-  replace `romamo/release-lanes` with `romamo/shipyard` in `.github/workflows/release.yml`,
-  or run `shipyard init --force` and restore your policy. A release commit now waits on a
-  `shipyard/` work branch
+- release-lanes is now shipmill: the package, the CLI (`shipmill init`, `shipmill doctor`,
+  and the rest), and the repository `romamo/shipmill`. In a repository already set up,
+  replace `romamo/release-lanes` with `romamo/shipmill` in `.github/workflows/release.yml`,
+  or run `shipmill init --force` and restore your policy. A release commit now waits on a
+  `shipmill/` work branch
 
 ### Added
 
 - The GitHub workflow skills join `release-lanes-setup`: `github-issue-triage`,
   `github-issue-resolve`, and `github-pr-triage`, with the whole flow in `docs/flow.md`.
-  `github-pr-triage` starts a shipyard bot after its last merge
+  `github-pr-triage` starts a shipmill bot after its last merge
 - A Claude Code plugin and marketplace in `.claude-plugin`: `/plugin marketplace add
-  romamo/shipyard`, then `/plugin install shipyard@shipyard`. Each release sets the
+  romamo/shipmill`, then `/plugin install shipmill@shipmill`. Each release sets the
   plugin's version
 
 ## [0.2.1] - 2026-10-03
@@ -441,21 +453,21 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/romamo/shipyard/compare/v0.12.0...HEAD
-[0.12.0]: https://github.com/romamo/shipyard/compare/v0.11.0...v0.12.0
-[0.11.0]: https://github.com/romamo/shipyard/compare/v0.10.1...v0.11.0
-[0.10.1]: https://github.com/romamo/shipyard/compare/v0.10.0...v0.10.1
-[0.10.0]: https://github.com/romamo/shipyard/compare/v0.9.0...v0.10.0
-[0.9.0]: https://github.com/romamo/shipyard/compare/v0.8.0...v0.9.0
-[0.8.0]: https://github.com/romamo/shipyard/compare/v0.7.0...v0.8.0
-[0.7.0]: https://github.com/romamo/shipyard/compare/v0.6.0...v0.7.0
-[0.6.0]: https://github.com/romamo/shipyard/compare/v0.5.2...v0.6.0
-[0.5.2]: https://github.com/romamo/shipyard/compare/v0.5.1...v0.5.2
-[0.5.1]: https://github.com/romamo/shipyard/compare/v0.5.0...v0.5.1
-[0.5.0]: https://github.com/romamo/shipyard/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/romamo/shipyard/compare/v0.3.1...v0.4.0
-[0.3.1]: https://github.com/romamo/shipyard/compare/v0.3.0...v0.3.1
-[0.3.0]: https://github.com/romamo/shipyard/compare/v0.2.1...v0.3.0
-[0.2.1]: https://github.com/romamo/shipyard/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/romamo/shipyard/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/romamo/shipyard/releases/tag/v0.1.0
+[Unreleased]: https://github.com/romamo/shipmill/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/romamo/shipmill/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/romamo/shipmill/compare/v0.10.1...v0.11.0
+[0.10.1]: https://github.com/romamo/shipmill/compare/v0.10.0...v0.10.1
+[0.10.0]: https://github.com/romamo/shipmill/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/romamo/shipmill/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/romamo/shipmill/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/romamo/shipmill/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/romamo/shipmill/compare/v0.5.2...v0.6.0
+[0.5.2]: https://github.com/romamo/shipmill/compare/v0.5.1...v0.5.2
+[0.5.1]: https://github.com/romamo/shipmill/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/romamo/shipmill/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/romamo/shipmill/compare/v0.3.1...v0.4.0
+[0.3.1]: https://github.com/romamo/shipmill/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/romamo/shipmill/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/romamo/shipmill/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/romamo/shipmill/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/romamo/shipmill/releases/tag/v0.1.0

@@ -22,7 +22,7 @@ All times UTC, from the incident issue's comments and the environment's deployme
 | Time | Event |
 |---|---|
 | YYYY-MM-DD HH:MM | The release that carried the fault deployed (deployment status `success`) |
-| YYYY-MM-DD HH:MM | The first failed `shipyard health` check |
+| YYYY-MM-DD HH:MM | The first failed `shipmill health` check |
 | YYYY-MM-DD HH:MM | The incident issue opened |
 | YYYY-MM-DD HH:MM | The rollback or the fix deployed |
 | YYYY-MM-DD HH:MM | Healthy again; the incident closed |

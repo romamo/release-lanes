@@ -10,11 +10,11 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol
 
-from shipyard.errors import ReleaseError
+from shipmill.errors import ReleaseError
 
-PROPOSAL_LABEL = "shipyard-proposal"  # on every issue proposing a release or a deploy
+PROPOSAL_LABEL = "shipmill-proposal"  # on every issue proposing a release or a deploy
 OPEN_LIMIT = 100  # open issues read per label: proposals are one per lane and per environment
-_LABEL_DESCRIPTIONS = {PROPOSAL_LABEL: "Opened by shipyard: a release or deploy waiting for a person"}
+_LABEL_DESCRIPTIONS = {PROPOSAL_LABEL: "Opened by shipmill: a release or deploy waiting for a person"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,7 +216,7 @@ class GhCli:
         }
         for label in labels:
             if label not in have:
-                described = _LABEL_DESCRIPTIONS.get(label, "Opened by shipyard; holds releases while open")
+                described = _LABEL_DESCRIPTIONS.get(label, "Opened by shipmill; holds releases while open")
                 proc = self._run("label", "create", label, "--description", described)
                 if proc.returncode != 0 and "already exists" not in proc.stderr:
                     raise ReleaseError(f"gh label create {label} failed: {proc.stderr.strip()}")

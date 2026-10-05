@@ -1,4 +1,4 @@
-"""The [agents] section of the config: what `shipyard gate` starts a Claude Code session
+"""The [agents] section of the config: what `shipmill gate` starts a Claude Code session
 for, and with which prompt. The prompt carries the scope the user grants ("merge when
 green" or not), so it is a reviewed, committed decision like [autonomy]. Where the session
 runs (which machine, which scheduler) is not here: that belongs to the host"""
@@ -6,8 +6,8 @@ runs (which machine, which scheduler) is not here: that belongs to the host"""
 from dataclasses import dataclass
 from pathlib import Path
 
-from shipyard.config import ALIAS_PATH, CONFIG_PATH, Table, config_path, read
-from shipyard.errors import ReleaseError
+from shipmill.config import CONFIG_PATH, Table, config_path, read
+from shipmill.errors import ReleaseError
 
 _MAX_RETRY_HOURS = 7 * 24  # a week
 
@@ -31,7 +31,7 @@ class AgentsConfig:
     @classmethod
     def load(cls, root: Path) -> AgentsConfig:
         """The [agents] section alone: a repo may use the gate without the release keys"""
-        if not any((root / p).is_file() for p in (CONFIG_PATH, ALIAS_PATH)):
+        if not (root / CONFIG_PATH).is_file():
             raise ReleaseError(f"no {CONFIG_PATH} in {root}; add an [agents] section with a prompt to use the gate")
         path = config_path(root)
         raw = read(path)

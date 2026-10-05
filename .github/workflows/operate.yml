@@ -1,6 +1,6 @@
-name: shipyard operate
+name: shipmill operate
 
-# Called on a schedule by a repository's operate workflow (see `shipyard init --operate`).
+# Called on a schedule by a repository's operate workflow (see `shipmill init --operate`).
 # It checks the health of each environment in [environments], records it as GitHub
 # deployment statuses, and promotes a release to an environment with `from` once its source
 # baked it (or opens the issue a deploy under propose or a hold waits on). An environment
@@ -23,9 +23,9 @@ on:
         type: boolean
         default: false
       tool:
-        description: "Where uvx installs shipyard from"
+        description: "Where uvx installs shipmill from"
         type: string
-        default: "git+https://github.com/romamo/shipyard@v0"
+        default: "git+https://github.com/romamo/shipmill@v0"
 
 # No permissions here or on the job: it runs with the caller's grant, as a reusable job that
 # asks for more than its caller grants fails to start. It needs contents: read, deployments:
@@ -35,7 +35,7 @@ jobs:
   operate:
     # One operate at a time: a run that overlapped the previous one could deploy twice
     concurrency:
-      group: shipyard-operate
+      group: shipmill-operate
       cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
@@ -58,4 +58,4 @@ jobs:
           [ -n "$APPROVE" ] && args+=(--approve "$APPROVE")
           [ -n "$APPROVE_ROLLBACK" ] && args+=(--approve-rollback "$APPROVE_ROLLBACK")
           [ -n "$DRY_RUN" ] && args+=(--dry-run)
-          uvx --from "$TOOL" shipyard "${args[@]}"
+          uvx --from "$TOOL" shipmill "${args[@]}"

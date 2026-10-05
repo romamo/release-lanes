@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Report what a repo's issue-to-release pipeline still owes: the release bot, the
-recent releases, the environments shipyard operate runs, and the issue intake.
+recent releases, the environments shipmill operate runs, and the issue intake.
 
 Usage: watch_state.py <owner/repo> [--repo-dir PATH] [--releases N] [--grace MIN]
                       [--tool SPEC] [--incident-label LABEL] [--json]
 
-Release bot (a repo with .github/shipyard.toml, or its alias .github/release-policy.toml):
+Release bot (a repo with .github/shipmill.toml):
   BOT_FAILED      the bot's latest finished run failed (cancelled runs are ignored:
                   a newer push cancels the settle wait on purpose)
-  BOT_STALLED     a shipyard bot in release mode has a release due now, no run of
+  BOT_STALLED     a shipmill bot in release mode has a release due now, no run of
                   its workflow is queued or running, and none started in --grace minutes
   BOT_OK          neither; BOT_NONE when the repo has no bot (it releases by "tag X")
 
@@ -20,8 +20,8 @@ Each of the --releases newest version tags (default 3):
   UNANNOUNCED     closed issues it fixed that have no "Released in <tag>" comment
                   (github-pr-triage's shipped.py, in plan mode)
 
-Hold and postmortems (a repo with a shipyard config):
-  HOLD            an open shipyard-hold issue, with who opened it and when (reported, never
+Hold and postmortems (a repo with a shipmill config):
+  HOLD            an open shipmill-hold issue, with who opened it and when (reported, never
                   an action by itself: a person stopped the factory on purpose)
   POSTMORTEM_DUE  an issue labelled [operate] incident_label (default "incident") closed as
                   completed (not as not planned or a duplicate) that no docs/postmortems/*.md
@@ -30,10 +30,10 @@ Hold and postmortems (a repo with a shipyard config):
                   contents API, not the checkout
 
 Operations (only when the config declares environments; read from the
-deployments and issues shipyard operate writes):
-  OPERATE_FAILED  the latest finished run of the workflow that calls shipyard's operate.yml
+deployments and issues shipmill operate writes):
+  OPERATE_FAILED  the latest finished run of the workflow that calls shipmill's operate.yml
                   failed (cancelled runs are ignored)
-  UNHEALTHY       an environment's newest "shipyard health" deployment status is a failure
+  UNHEALTHY       an environment's newest "shipmill health" deployment status is a failure
   PROMOTION_DUE   an open "Ready to promote" proposal issue, with its approve command; or a
                   `from` environment operate would promote (act) or propose promoting
                   (propose, or the hold) now if it ran: its source baked a release
@@ -57,7 +57,7 @@ Intake (github-issue-triage's triage_state.py):
 Holds and incidents lead the report. Exit 0 when nothing needs action, 1 when any
 BOT_FAILED, BOT_STALLED, NOT_PUBLISHED, UNANNOUNCED, ISSUES, OPERATE_FAILED, UNHEALTHY,
 PROMOTION_DUE, INCIDENT_OPEN, or POSTMORTEM_DUE row is present, 2 on bad input or a git, gh, or uvx failure.
-Needs git, an authenticated gh, and uvx (for a shipyard bot's plan). Python 3.10+,
+Needs git, an authenticated gh, and uvx (for a shipmill bot's plan). Python 3.10+,
 standard library only.
 """
 
@@ -95,7 +95,7 @@ TRIAGE_ACTION = {
     "DONE_NOT_CLOSED",
     "SUSPECT_CLOSE",
 }
-POLICIES = (Path(".github/shipyard.toml"), Path(".github/release-policy.toml"))  # the config, then its alias
+POLICY = Path(".github/shipmill.toml")
 VERSION_TAG = re.compile(r"^v\d+\.\d+")  # skips moving major tags such as v0
 ACTION = {
     "BOT_FAILED",
@@ -111,12 +111,12 @@ ACTION = {
 }
 LEAD = ("INCIDENT_OPEN", "HOLD")  # the report starts with these, in this order
 ACTIVE = {"queued", "in_progress", "waiting", "pending", "requested"}
-HOLD_LABEL = "shipyard-hold"  # shipyard's autonomy.HOLD_LABEL
+HOLD_LABEL = "shipmill-hold"  # shipmill's autonomy.HOLD_LABEL
 INCIDENT_LABEL = "incident"  # the default of [operate] incident_label
-HEALTH_PREFIX = "shipyard health"  # starts the description of every status shipyard operate writes
+HEALTH_PREFIX = "shipmill health"  # starts the description of every status shipmill operate writes
 OPERATE_SILENT = dt.timedelta(hours=1)  # a scheduled operate runs every 10 minutes
 AUTONOMY = ("observe", "propose", "act")
-RELEASE_TAG = re.compile(r"v(\d+)\.(\d+)\.(\d+)(?:(a|b|rc)(\d+))?(?:\.dev(\d+))?")  # shipyard's version.PATTERN
+RELEASE_TAG = re.compile(r"v(\d+)\.(\d+)\.(\d+)(?:(a|b|rc)(\d+))?(?:\.dev(\d+))?")  # shipmill's version.PATTERN
 PRE_RANK = {"a": 1, "b": 2, "rc": 3}
 POSTMORTEMS = "docs/postmortems"  # one file per incident, named in an "Incident: owner/repo#N" line
 # "Incident: owner/repo#N", the issue's URL, or "#N" for the repo itself; one per line
@@ -126,10 +126,10 @@ POSTMORTEM_NAMES = re.compile(
 )
 POSTMORTEM_REASONS = {None, "", "COMPLETED"}  # closed as done; "" or None on issues closed before GitHub kept a reason
 ISSUE_LIMIT = 1000  # per label or search; no repo has that many holds, incidents, or proposals
-PROPOSAL_LABEL = "shipyard-proposal"  # shipyard's github.PROPOSAL_LABEL
+PROPOSAL_LABEL = "shipmill-proposal"  # shipmill's github.PROPOSAL_LABEL
 PROPOSAL_SEARCH = 'in:title "Ready to"'  # proposals opened before the label; the marker in the body decides
-PROPOSAL = re.compile(r"<!-- shipyard:propose deploy=(?P<env>\S+) -->")  # shipyard's operate.deploy_marker
-PROPOSED_TAG = re.compile(r"<!-- shipyard:tag=(?P<tag>\S+) -->")
+PROPOSAL = re.compile(r"<!-- shipmill:propose deploy=(?P<env>\S+) -->")  # shipmill's operate.deploy_marker
+PROPOSED_TAG = re.compile(r"<!-- shipmill:tag=(?P<tag>\S+) -->")
 OPERATE_USES = re.compile(
     r"^\s*(?:-\s*)?uses:\s*[\"']?(?:[\w.-]+/[\w.-]+/\.github/workflows/operate\.ya?ml@|\./\.github/workflows/operate\.ya?ml)",
     re.MULTILINE,
@@ -187,21 +187,18 @@ def parse_time(text: str) -> dt.datetime:
 
 
 def policy_file(repo_dir: Path) -> Path | None:
-    """The release policy shipyard reads, or None without one; both names is an error, as in shipyard"""
-    found = [p for p in POLICIES if (repo_dir / p).is_file()]
-    if len(found) > 1:
-        raise Refused(f"error: both {found[0]} and {found[1]} exist; shipyard refuses a repo with both")
-    return found[0] if found else None
+    """The release policy shipmill reads, or None without one"""
+    return POLICY if (repo_dir / POLICY).is_file() else None
 
 
 def bot_workflow(repo_dir: Path) -> tuple[str, bool] | None:
-    """The bot's workflow file and whether it is a shipyard bot, or None without a bot"""
+    """The bot's workflow file and whether it is a shipmill bot, or None without a bot"""
     policy = policy_file(repo_dir)
     if policy is None:
         return None
     workflows = repo_dir / ".github" / "workflows"
     caller = workflows / "release.yml"
-    if caller.is_file() and re.search(r"shipyard|release-lanes|\./\.github/workflows/prepare\.yml", caller.read_text()):
+    if caller.is_file() and re.search(r"shipmill|release-lanes|\./\.github/workflows/prepare\.yml", caller.read_text()):
         return "release.yml", True
     if (workflows / "release-bot.yml").is_file():
         return "release-bot.yml", False
@@ -230,12 +227,12 @@ def fetch_runs(repo: str, workflow: str) -> list[Run]:
 
 
 def planned_release(repo: str, repo_dir: Path, policy: Path, branch: str, tool: str) -> str | None:
-    """What the shipyard planner would release now on the default branch, or None"""
+    """What the shipmill planner would release now on the default branch, or None"""
     work = repo_dir / "tmp" / f"ship-watch-{os.getpid()}"
     run(["git", "worktree", "add", "-q", "--detach", str(work), f"origin/{branch}"], cwd=repo_dir)
     try:
         env = {**os.environ, "GITHUB_REPOSITORY": repo}
-        out = run(["uvx", "--from", tool, "shipyard", "plan", "--event", "schedule", "--dry-run"], cwd=work, env=env)
+        out = run(["uvx", "--from", tool, "shipmill", "plan", "--event", "schedule", "--dry-run"], cwd=work, env=env)
     finally:
         run(["git", "worktree", "remove", "--force", str(work)], cwd=repo_dir)
     decision = json.loads(out)
@@ -319,7 +316,7 @@ class Environment:
 @dataclass(frozen=True)
 class Deployment:
     id: int
-    ref: str  # a release tag, as shipyard dispatches deploys on the tag
+    ref: str  # a release tag, as shipmill dispatches deploys on the tag
     sha: str
     created: dt.datetime
 
@@ -359,7 +356,7 @@ class Issue:
 
 @dataclass(frozen=True)
 class Config:
-    """What the watch reads from the shipyard config"""
+    """What the watch reads from the shipmill config"""
 
     environments: list[Environment]
     incident_label: str
@@ -375,7 +372,7 @@ def ago(span: dt.timedelta) -> str:
 
 
 def config(text: str, policy: Path, incident_label: str | None = None) -> Config:
-    """The environments and the incident label of the config, read as shipyard reads it: with
+    """The environments and the incident label of the config, read as shipmill reads it: with
     tomllib on Python 3.11+, with the regex fallback on 3.10. A given incident_label (the
     --incident-label flag) takes the place of the config's, which is still checked"""
     if tomllib is None:
@@ -535,7 +532,7 @@ def incident_label_310(text: str, policy: Path) -> str:
 
 
 def operate_caller(repo_dir: Path) -> tuple[str, bool] | None:
-    """The workflow that calls shipyard's operate.yml and whether it runs on a schedule, or None"""
+    """The workflow that calls shipmill's operate.yml and whether it runs on a schedule, or None"""
     workflows = repo_dir / ".github" / "workflows"
     if not workflows.is_dir():
         return None
@@ -547,7 +544,7 @@ def operate_caller(repo_dir: Path) -> tuple[str, bool] | None:
 
 
 def current_deployment(deployments: list[Deployment], statuses_of: Callable[[int], list[Status]]) -> Current | None:
-    """The newest of the deployments, newest first, that reached success, as shipyard operate reads it"""
+    """The newest of the deployments, newest first, that reached success, as shipmill operate reads it"""
     for deployment in deployments:
         statuses = tuple(statuses_of(deployment.id))
         if any(s.state == "success" for s in statuses):
@@ -563,9 +560,9 @@ def operate_rows(runs: list[Run], caller: str) -> list[Row]:
 
 
 def operate_idle(caller: tuple[str, bool] | None, runs: list[Run], now: dt.datetime) -> str | None:
-    """Why no shipyard operate runs on a schedule, or None while one does"""
+    """Why no shipmill operate runs on a schedule, or None while one does"""
     if caller is None:
-        return "no workflow calls shipyard's operate.yml"
+        return "no workflow calls shipmill's operate.yml"
     name, scheduled = caller
     if not scheduled:
         return f"{name} has no schedule"
@@ -586,13 +583,13 @@ def unhealthy_row(env: str, current: Current | None, now: dt.datetime) -> Row | 
 
 def proposal_issues(labelled: list[Issue], search: Callable[[], list[Issue]]) -> list[Issue]:
     """The open proposals: by their label, and always by the title search too, for one opened
-    before the label (shipyard labels each on its next update), one issue once by number"""
+    before the label (shipmill labels each on its next update), one issue once by number"""
     seen = {i.number for i in labelled}
     return labelled + [i for i in search() if i.number not in seen]
 
 
 def proposal_rows(issues: list[Issue], caller: str, held: bool) -> list[Row]:
-    """The open proposal issues shipyard operate opens for a deploy that waits on approval"""
+    """The open proposal issues shipmill operate opens for a deploy that waits on approval"""
     rows = []
     for issue in issues:
         found = PROPOSAL.search(issue.body)
@@ -608,7 +605,7 @@ def proposal_rows(issues: list[Issue], caller: str, held: bool) -> list[Row]:
 
 
 def version_key(tag: str) -> tuple[int, int, int, int, int, int] | None:
-    """A release tag's order, as shipyard's Version sorts it (PEP 440: X.Y.Z.devN < X.Y.ZaN <
+    """A release tag's order, as shipmill's Version sorts it (PEP 440: X.Y.Z.devN < X.Y.ZaN <
     X.Y.ZbN < X.Y.ZrcN < X.Y.Z); None when the tag names no release"""
     found = RELEASE_TAG.fullmatch(tag)
     if found is None:
@@ -622,7 +619,7 @@ def version_key(tag: str) -> tuple[int, int, int, int, int, int] | None:
 
 
 def bake_start(current: Current) -> dt.datetime | None:
-    """When the current healthy stretch began, as shipyard operate counts it: from the first
+    """When the current healthy stretch began, as shipmill operate counts it: from the first
     success, but after a failed health check from the first health status that followed it;
     None while the newest check failed"""
     ours = [s for s in current.statuses if s.description.startswith(HEALTH_PREFIX)]
@@ -665,7 +662,7 @@ def unpromoted_row(
         would = f"operate would promote {source.tag} to {env.name} ({healthy})"
     else:  # propose, or act under the hold: operate opens a proposal issue
         after = f" after the {HOLD_LABEL} issues close" if held else ""
-        approve = f"approve with `shipyard operate --approve {env.name}` once it runs{after}"
+        approve = f"approve with `shipmill operate --approve {env.name}` once it runs{after}"
         would = f"operate would propose promoting {source.tag} to {env.name} ({approve}; {healthy})"
     return Row("PROMOTION_DUE", env.name, f"{would}, but {idle}; {command}")
 
@@ -773,7 +770,7 @@ def fetch_issues(repo: str, *filters: str, state: str = "open") -> list[Issue]:
 
 
 def fetch_deployments(repo: str, environment: str) -> list[Deployment]:
-    query = ["-f", f"environment={environment}", "-f", "per_page=100"]  # as shipyard operate reads them
+    query = ["-f", f"environment={environment}", "-f", "per_page=100"]  # as shipmill operate reads them
     out = run(["gh", "api", "-X", "GET", f"repos/{repo}/deployments", *query])
     found = [Deployment(int(d["id"]), d["ref"], d["sha"], parse_time(d["created_at"])) for d in json.loads(out)]
     return sorted(found, key=lambda d: d.id, reverse=True)
@@ -808,7 +805,7 @@ def operations_rows(
     if caller:
         command = f"run it once: gh workflow run {caller[0]} -f dry-run=false"
     else:
-        command = "write one with `shipyard init --operate`, then run it once"
+        command = "write one with `shipmill init --operate`, then run it once"
     proposed = {r.subject for r in proposals}
     for env in envs:
         if env.name in proposed or env.source is None:
@@ -851,7 +848,7 @@ def arguments() -> argparse.ArgumentParser:
     parser.add_argument("--repo-dir", default=".", help="local checkout (default: cwd)")
     parser.add_argument("--releases", type=int, default=3, help="newest version tags to check")
     parser.add_argument("--grace", type=int, default=20, help="minutes a run or an upload may take")
-    parser.add_argument("--tool", default="git+https://github.com/romamo/shipyard@v0", help="where uvx gets shipyard")
+    parser.add_argument("--tool", default="git+https://github.com/romamo/shipmill@v0", help="where uvx gets shipmill")
     parser.add_argument("--incident-label", help="the label incidents carry (default: the config's)")
     parser.add_argument("--json", action="store_true", help="JSON lines instead of a table")
     return parser
@@ -881,8 +878,8 @@ def main() -> int:
     if bot is None or policy is None:
         rows.append(Row("BOT_NONE", args.repo, 'no release policy: releases by "tag X"'))
     else:
-        workflow, shipyard = bot
-        due = planned_release(args.repo, repo_dir, policy, branch, args.tool) if shipyard else None
+        workflow, shipmill = bot
+        due = planned_release(args.repo, repo_dir, policy, branch, args.tool) if shipmill else None
         rows += bot_rows(fetch_runs(args.repo, workflow), due, now, grace, workflow)
 
     tags = version_tags(repo_dir)

@@ -1,9 +1,9 @@
 name: Deploy
 
-# shipyard's own deploy target: GitHub Pages at https://romamo.github.io/shipyard/. land
-# starts it on each stable tag, and shipyard operate on a rollback, with -f tag=<tag>
+# shipmill's own deploy target: GitHub Pages at https://romamo.github.io/shipmill/. land
+# starts it on each stable tag, and shipmill operate on a rollback, with -f tag=<tag>
 # -f environment=github-pages; by hand, run it on the tag too (--ref <tag>), or it fails. The site is site/ at the tag plus a health.json naming the
-# release, {"version": "X.Y.Z"}, which shipyard operate checks against the deployed tag.
+# release, {"version": "X.Y.Z"}, which shipmill operate checks against the deployed tag.
 
 on:
   workflow_dispatch:
@@ -100,7 +100,7 @@ jobs:
     permissions:
       actions: write # starts operate-self.yml
     steps:
-      - name: Start shipyard operate
+      - name: Start shipmill operate
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

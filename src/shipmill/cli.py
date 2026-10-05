@@ -1,4 +1,4 @@
-"""shipyard: release lanes driven by a hand-written CHANGELOG.
+"""shipmill: release lanes driven by a hand-written CHANGELOG.
 
   settle-minutes  how long to wait after a push for more merges
   plan            decide whether a lane releases now; JSON on stdout
@@ -26,22 +26,22 @@ import sys
 from collections.abc import Mapping
 from pathlib import Path
 
-from shipyard.agents import AgentsConfig
-from shipyard.config import ALIAS_PATH, CONFIG_PATH, config_path
-from shipyard.doctor import CALLER, OPERATE_CALLER, doctor
-from shipyard.errors import ReleaseError
-from shipyard.gate import ClaudeCli, check_checkout, gate, refresh, watch
-from shipyard.github import GhCli, GitHub
-from shipyard.gitrepo import Git
-from shipyard.init import init, init_operate
-from shipyard.land import cleanup, land, prepare
-from shipyard.launchd import DEFAULT_TOOL, build, install, remove
-from shipyard.operate import Http, UrllibHttp, approve, approve_rollback, operate, summary
-from shipyard.planner import Event, Hotfix, Planner, Proposal
-from shipyard.policy import Lane, Policy
-from shipyard.propose import close_released, propose, run_url
-from shipyard.stamp import notes, sync
-from shipyard.version import Version
+from shipmill.agents import AgentsConfig
+from shipmill.config import CONFIG_PATH, config_path
+from shipmill.doctor import CALLER, OPERATE_CALLER, doctor
+from shipmill.errors import ReleaseError
+from shipmill.gate import ClaudeCli, check_checkout, gate, refresh, watch
+from shipmill.github import GhCli, GitHub
+from shipmill.gitrepo import Git
+from shipmill.init import init, init_operate
+from shipmill.land import cleanup, land, prepare
+from shipmill.launchd import DEFAULT_TOOL, build, install, remove
+from shipmill.operate import Http, UrllibHttp, approve, approve_rollback, operate, summary
+from shipmill.planner import Event, Hotfix, Planner, Proposal
+from shipmill.policy import Lane, Policy
+from shipmill.propose import close_released, propose, run_url
+from shipmill.stamp import notes, sync
+from shipmill.version import Version
 
 
 def _outputs(path: Path | None, values: Mapping[str, str]) -> None:
@@ -82,7 +82,7 @@ def _now(text: str | None) -> dt.datetime:
 
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="shipyard", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+        prog="shipmill", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument("--repo", type=Path, default=Path.cwd(), help="the repository checkout (default: .)")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -151,15 +151,11 @@ def _parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("init", help=f"write {CONFIG_PATH} and {CALLER}")
     p.add_argument("--ci", default="ci.yml", help="the CI workflow a release commit must pass (default: ci.yml)")
-    p.add_argument(
-        "--force",
-        action="store_true",
-        help=f"overwrite existing files; an existing {ALIAS_PATH} is replaced by {CONFIG_PATH}",
-    )
+    p.add_argument("--force", action="store_true", help="overwrite existing files")
     p.add_argument(
         "--operate",
         action="store_true",
-        help=f"write only {OPERATE_CALLER}, which runs shipyard operate every 10 minutes",
+        help=f"write only {OPERATE_CALLER}, which runs shipmill operate every 10 minutes",
     )
 
     p = sub.add_parser(
@@ -178,7 +174,7 @@ def _parser() -> argparse.ArgumentParser:
     p = sub.add_parser("launchd", help="run the gate for a dedicated checkout every few minutes (macOS)")
     p.add_argument("slug", metavar="owner/name", help="the GitHub repo; --repo is its gate checkout")
     p.add_argument("--every", type=int, default=15, help="minutes between runs (default: 15)")
-    p.add_argument("--tool", default=DEFAULT_TOOL, help=f"where uvx gets shipyard (default: {DEFAULT_TOOL})")
+    p.add_argument("--tool", default=DEFAULT_TOOL, help=f"where uvx gets shipmill (default: {DEFAULT_TOOL})")
     p.add_argument("--claude-arg", action="append", default=[], help="extra flag for the session (repeatable)")
     p.add_argument("--print", action="store_true", help="print the job's plist; install nothing")
     p.add_argument("--remove", action="store_true", help="unload and delete the repo's job")
@@ -197,15 +193,13 @@ def main(argv: list[str], github: GitHub | None = None, http: Http | None = None
     hub = github or GhCli(root)
     if args.command == "init" and args.operate:
         print(f"wrote {init_operate(root, args.force).relative_to(root)}")
-        print("next: run `shipyard doctor`")
+        print("next: run `shipmill doctor`")
         return 0
     if args.command == "init":
         initialized = init(root, args.ci, args.force)
         for path in initialized.written:
             print(f"wrote {path.relative_to(root)}")
-        if initialized.removed is not None:
-            print(f"removed {initialized.removed.relative_to(root)}, which {CONFIG_PATH} replaces")
-        print("next: review the policy, then run `shipyard doctor`")
+        print("next: review the policy, then run `shipmill doctor`")
         return 0
     if args.command == "doctor":
         checks = doctor(root, github or (GhCli(root) if shutil.which("gh") else None))
@@ -352,6 +346,6 @@ def run() -> None:
     try:
         code = main(sys.argv[1:])
     except ReleaseError as exc:
-        print(f"shipyard: {exc}", file=sys.stderr)
+        print(f"shipmill: {exc}", file=sys.stderr)
         code = 2
     sys.exit(code)

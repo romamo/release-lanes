@@ -1,12 +1,12 @@
-"""How far shipyard goes by itself at each stage, from the config's [autonomy] section, and
-the stop switch: an open issue labelled shipyard-hold.
+"""How far shipmill goes by itself at each stage, from the config's [autonomy] section, and
+the stop switch: an open issue labelled shipmill-hold.
 
 - observe: plan and report only
 - propose: open or update an issue saying what it would do; a person does it
 - act: do it
 
 The hold turns every act into propose for the whole repository. Release autonomy is read by
-the planner; deploy and rollback autonomy by shipyard operate. Intake autonomy is read by the
+the planner; deploy and rollback autonomy by shipmill operate. Intake autonomy is read by the
 product-intake skill, and is observe or propose only: the maintainer's accept is its valve."""
 
 import re
@@ -15,10 +15,10 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol
 
-from shipyard.config import Table
-from shipyard.errors import ReleaseError
+from shipmill.config import Table
+from shipmill.errors import ReleaseError
 
-HOLD_LABEL = "shipyard-hold"
+HOLD_LABEL = "shipmill-hold"
 INTAKE = "intake"  # the [autonomy] key of the product-intake skill: not a StageKind, it never acts
 _ENVIRONMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 
@@ -80,7 +80,7 @@ class _Issues(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class Hold:
-    """The open shipyard-hold issues, as '#N title'; none means no hold"""
+    """The open shipmill-hold issues, as '#N title'; none means no hold"""
 
     issues: tuple[str, ...] = ()
 

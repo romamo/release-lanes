@@ -4,7 +4,7 @@ status: built
 
 ## Problem
 
-A maintainer with several shipyard repos has to run ship-watch once per repo and read each report on its own, so an incident or a stalled release in one product hides among the others. romamo/shipyard#91 asks for one report across many repos: every repo's states together, what needs the maintainer first, and the fleet's metrics side by side.
+A maintainer with several shipmill repos has to run ship-watch once per repo and read each report on its own, so an incident or a stalled release in one product hides among the others. romamo/shipmill#91 asks for one report across many repos: every repo's states together, what needs the maintainer first, and the fleet's metrics side by side.
 
 ## Behaviour
 
@@ -12,7 +12,7 @@ A fleet file lists the repos, in TOML:
 
 ```toml
 [[repos]]
-repo = "romamo/shipyard"
+repo = "romamo/shipmill"
 
 [[repos]]
 repo = "owner/other"
@@ -51,18 +51,18 @@ incident_label = "sev"   # optional; the label that repo's incidents carry (defa
 
 ## Issues
 
-- romamo/shipyard#93: S-001-3, S-001-4, S-001-8
-- romamo/shipyard#94: S-001-1, S-001-2, S-001-5, S-001-7
-- romamo/shipyard#95: S-001-6, S-001-9
+- romamo/shipmill#93: S-001-3, S-001-4, S-001-8
+- romamo/shipmill#94: S-001-1, S-001-2, S-001-5, S-001-7
+- romamo/shipmill#95: S-001-6, S-001-9
 
 ## Verification
 
-- S-001-1: `fleet.py report --fleet F` on main plus the build PRs, F listing romamo/shipyard and the nonexistent romamo/no-such-repo-s001: every row named its repo, and the action rows (shipyard's ISSUES, the REPO_ERROR) came before BOT_OK, NO_REGISTRY, and PRS_OPEN; holds
-- S-001-2: a fleet of romamo/shipyard alone exited 1 on its ISSUES action row (NEEDS_PR #93; NEW #49); exit 0 with no action row is checked in the tests only, as shipyard had action rows throughout; holds
-- S-001-3: `fleet.py report` on a missing file, a broken `[[repos]` header, a file with no repos, an entry without `repo`, an entry with a `path` key, and `repo = "shipyard"`, on Python 3.14 and 3.10: each exited 2 with `error: <file>: <problem>` on stderr and nothing on stdout; holds
-- S-001-4: a file listing romamo/shipyard and Romamo/Shipyard exited 2 with `lists Romamo/Shipyard twice` (owner and name compared ignoring case, as GitHub does); holds
-- S-001-5: the nonexistent repo gave one row, `REPO_ERROR gh repo clone GraphQL: Could not resolve to a Repository with the name 'romamo/no-such-repo-s001'. (repository)`, while romamo/shipyard's six rows were still printed, and the run exited 2; holds
-- S-001-6: `--metrics` on the same file printed shipyard's seven measures in its own column under a "Metrics: the 30 days to ..." line, and the failed repo had no column; "no data" cells checked in the tests only, as shipyard has data for every measure; holds
-- S-001-7: `--json` printed one object with both repos and their rows (shipyard's six, the failed repo's REPO_ERROR) and no metrics; `--json --metrics` added shipyard's `metrics.py --json` object and `null` for the failed repo, the same on Python 3.10.0 (`uv run --python 3.10 --isolated --no-project python`); holds
-- S-001-8: a fleet entry `repo = "romamo/shipyard"`, `incident_label = "bug"` made the watch read closed `bug` issues as incidents (POSTMORTEM_DUE rows for #83, #82, #80, ...), where the default label finds only #81, which has its postmortem; holds
+- S-001-1: `fleet.py report --fleet F` on main plus the build PRs, F listing romamo/shipmill and the nonexistent romamo/no-such-repo-s001: every row named its repo, and the action rows (shipmill's ISSUES, the REPO_ERROR) came before BOT_OK, NO_REGISTRY, and PRS_OPEN; holds
+- S-001-2: a fleet of romamo/shipmill alone exited 1 on its ISSUES action row (NEEDS_PR #93; NEW #49); exit 0 with no action row is checked in the tests only, as shipmill had action rows throughout; holds
+- S-001-3: `fleet.py report` on a missing file, a broken `[[repos]` header, a file with no repos, an entry without `repo`, an entry with a `path` key, and `repo = "shipmill"`, on Python 3.14 and 3.10: each exited 2 with `error: <file>: <problem>` on stderr and nothing on stdout; holds
+- S-001-4: a file listing romamo/shipmill and Romamo/Shipmill exited 2 with `lists Romamo/Shipmill twice` (owner and name compared ignoring case, as GitHub does); holds
+- S-001-5: the nonexistent repo gave one row, `REPO_ERROR gh repo clone GraphQL: Could not resolve to a Repository with the name 'romamo/no-such-repo-s001'. (repository)`, while romamo/shipmill's six rows were still printed, and the run exited 2; holds
+- S-001-6: `--metrics` on the same file printed shipmill's seven measures in its own column under a "Metrics: the 30 days to ..." line, and the failed repo had no column; "no data" cells checked in the tests only, as shipmill has data for every measure; holds
+- S-001-7: `--json` printed one object with both repos and their rows (shipmill's six, the failed repo's REPO_ERROR) and no metrics; `--json --metrics` added shipmill's `metrics.py --json` object and `null` for the failed repo, the same on Python 3.10.0 (`uv run --python 3.10 --isolated --no-project python`); holds
+- S-001-8: a fleet entry `repo = "romamo/shipmill"`, `incident_label = "bug"` made the watch read closed `bug` issues as incidents (POSTMORTEM_DUE rows for #83, #82, #80, ...), where the default label finds only #81, which has its postmortem; holds
 - S-001-9: `skills/github-ship-watch/SKILL.md` has a Fleet section with the fleet file (its example parses as a fleet file), the report and its flags, and a `/schedule` routine prompt that runs `fleet.py report --fleet <file> --metrics`; holds

@@ -7,9 +7,9 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from shipyard.config import Table
-from shipyard.errors import ReleaseError
-from shipyard.lanes import Lane
+from shipmill.config import Table
+from shipmill.errors import ReleaseError
+from shipmill.lanes import Lane
 
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _MAX_BAKE = 7 * 24 * 60  # a week
@@ -35,7 +35,7 @@ class Environment:
 
 @dataclass(frozen=True, slots=True)
 class OperateConfig:
-    """The [operate] section: when shipyard operate rolls an environment back, and the label
+    """The [operate] section: when shipmill operate rolls an environment back, and the label
     of the incident issue it opens, which holds releases like the blocker label"""
 
     rollback_after: int  # failed health checks in a row
