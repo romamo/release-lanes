@@ -4,14 +4,16 @@ The gate is code: it reads the repo's state through github-ship-watch's watch_st
 asks Claude Code which of its own sessions are alive, and launches a background session
 (`claude --bg`) only when there is work, no earlier session is still running or waiting on
 the user, and the work changed since the last launch. Everything it knows comes from
-GitHub and from Claude Code; the one file it writes, under the checkout's git directory,
-only keeps an unchanged state from starting a session on every tick.
+GitHub and from Claude Code; the two files it writes, under the checkout's git directory,
+keep an unchanged state from starting a session on every tick and time how long a session
+has waited on the user, so a reminder repeats only every few hours.
 """
 
 import datetime as dt
 import enum
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -24,8 +26,10 @@ from shipmill.agents import AgentsConfig
 from shipmill.autonomy import Hold
 from shipmill.errors import ReleaseError
 from shipmill.gitrepo import Git
+from shipmill.notify import Notifier, NotifyFailed
 
 RECORD = "gate.json"
+WAITING = "waiting.json"  # one entry per blocked gate session (spec 003)
 PRS_OPEN = "PRS_OPEN"  # watch_state.py's open pull requests: work only with [agents] prs = true
 
 
@@ -270,6 +274,131 @@ def save_launch(path: Path, launch: Launch) -> None:
     path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
 
 
+@dataclass(frozen=True, slots=True)
+class Wait:
+    """A blocked session's entry in waiting.json: since is the first tick that saw it
+    blocked, notified the last notification sent for it"""
+
+    since: dt.datetime
+    notified: dt.datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class Waiting:
+    """What one tick did for one blocked session; on a dry run, what it would have done"""
+
+    session: str
+    name: str
+    since: dt.datetime
+    waited_hours: int
+    notified: bool
+    stopped: bool
+    error: str | None
+
+    def line(self, dry_run: bool) -> str:
+        if self.error is not None:
+            return f"notify failed for {self.session}: {self.error}"
+        if self.notified:
+            verb = "would notify" if dry_run else "notified"
+            return f"{verb} {self.session} (waiting {self.waited_hours}h)"
+        return f"{self.session} waiting {self.waited_hours}h"
+
+    def record(self) -> dict[str, object]:
+        return {
+            "session": self.session,
+            "name": self.name,
+            "since": self.since.isoformat(),
+            "waited_hours": self.waited_hours,
+            "notified": self.notified,
+            "stopped": self.stopped,
+            "error": self.error,
+        }
+
+
+def _moment(value: object, what: str) -> dt.datetime:
+    if not isinstance(value, str):
+        raise ValueError(f"{what} must be a timestamp string")
+    moment = dt.datetime.fromisoformat(value)
+    if moment.tzinfo is None:
+        raise ValueError(f"{what} has no time zone")
+    return moment
+
+
+def load_waiting(path: Path) -> dict[str, Wait]:
+    """waiting.json, refused unless every entry is exactly {since, notified}"""
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("expected a JSON object")
+        waits: dict[str, Wait] = {}
+        for session, entry in data.items():
+            if not isinstance(entry, dict) or set(entry) != {"since", "notified"}:
+                raise ValueError(f"{session}: expected exactly since and notified")
+            notified = entry["notified"]
+            waits[session] = Wait(
+                _moment(entry["since"], f"{session}.since"),
+                None if notified is None else _moment(notified, f"{session}.notified"),
+            )
+        return waits
+    except ValueError as exc:  # json.JSONDecodeError is one
+        raise ReleaseError(f"{path} is malformed ({exc}); delete it to start over") from None
+
+
+def save_waiting(path: Path, waits: dict[str, Wait]) -> None:
+    """Written to a temporary file and moved into place, so a tick never leaves half a file"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        session: {"since": w.since.isoformat(), "notified": None if w.notified is None else w.notified.isoformat()}
+        for session, w in sorted(waits.items())
+    }
+    temp = path.with_name(f".{path.name}.tmp")
+    temp.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    os.replace(temp, path)
+
+
+def attend(
+    path: Path,
+    repo: str,
+    sessions: Sequence[Session],
+    config: Callable[[], AgentsConfig],
+    notifier: Notifier,
+    now: dt.datetime,
+    dry_run: bool,
+) -> tuple[Waiting, ...]:
+    """Spec 003's waiting step: record each blocked session's wait and notify for it, at
+    once and then every remind_hours. With none blocked it only drops the record and reads
+    nothing. A failed send is reported, never raised, and is tried again next tick"""
+    blocked = [s for s in sessions if s.blocked]
+    if not blocked:
+        if path.exists() and not dry_run:
+            path.unlink()
+        return ()
+    agents = config()  # the checkout as it stands: a busy tick never moves it
+    remind = dt.timedelta(hours=agents.remind_hours)
+    known = load_waiting(path)
+    waits: dict[str, Wait] = {}  # only the blocked sessions: any other entry is dropped
+    report = []
+    for s in blocked:
+        wait = known.get(s.id) or Wait(now, None)
+        hours = max(0, int((now - wait.since).total_seconds() // 3600))
+        due = agents.notify and (wait.notified is None or now - wait.notified >= remind)
+        error = None
+        if due and not dry_run:
+            try:
+                notifier.send(f"shipmill {repo}", f"session {s.id} waits on you ({hours}h): claude attach {s.id}")
+            except NotifyFailed as exc:
+                error = str(exc)
+            else:
+                wait = Wait(wait.since, now)
+        waits[s.id] = wait
+        report.append(Waiting(s.id, s.name, wait.since, hours, due and error is None, False, error))
+    if not dry_run:
+        save_waiting(path, waits)
+    return tuple(report)
+
+
 def check_checkout(git: Git, repo: str) -> None:
     owner, _, name = repo.partition("/")
     if not owner or not name or "/" in name:
@@ -309,31 +438,58 @@ def gate(
     findings: Callable[[], list[Finding]],
     now: dt.datetime,
     hold: Callable[[], Hold],
+    notifier: Notifier,
     refresh_checkout: bool = False,
     dry_run: bool = False,
-) -> tuple[Decision, str | None]:
+) -> tuple[Decision, str | None, tuple[Waiting, ...]]:
     """Decide, and on LAUNCH stop the finished sessions and start a new one. Returns the
-    decision and the launched session's id. A hold, then a busy session, ends the run before
-    the checkout moves, the config is read, or the state is read"""
+    decision, the launched session's id, and what the waiting step did for each blocked
+    session. A hold, then a busy session, ends the run before the checkout moves or the
+    state is read; of the two, only a blocked session reads the config"""
     check_checkout(git, repo)
     record = state_dir(git) / RECORD
     sessions = claude.sessions(git.root, repo)
+    waiting = attend(state_dir(git) / WAITING, repo, sessions, config, notifier, now, dry_run)
     stopped = held(hold(), sessions)
     if stopped is not None:
-        return stopped, None
+        return stopped, None, waiting
     pending = busy(sessions)
     if pending is not None:
-        return pending, None
+        return pending, None, waiting
     if refresh_checkout and not dry_run:
         refresh(git)
     agents = config()
     retry = dt.timedelta(hours=agents.retry_hours)
     decision = decide(findings(), sessions, load_launch(record), now, retry, agents.prs)
     if decision.action is not Action.LAUNCH or dry_run:
-        return decision, None
+        return decision, None, waiting
     for session in decision.stop:
         claude.stop(session)
     name = f"{session_name(repo)} {now:%Y-%m-%d %H:%M}"
     launched = claude.launch(git.root, name, prompt(agents.prompt, repo, decision.work, now))
     save_launch(record, Launch(fingerprint(decision.work), launched, now))
-    return decision, launched
+    return decision, launched, waiting
+
+
+def tick_record(
+    decision: Decision, launched: str | None, waiting: Sequence[Waiting], dry_run: bool
+) -> dict[str, object]:
+    """`shipmill gate --json`"""
+    return {
+        "action": decision.action.value,
+        "reason": decision.reason,
+        "work": [f.line() for f in decision.work],
+        "stopped": [] if dry_run else list(decision.stop),
+        "launched": launched,
+        "waiting": [w.record() for w in waiting],
+    }
+
+
+def tick_lines(decision: Decision, launched: str | None, waiting: Sequence[Waiting], dry_run: bool) -> list[str]:
+    """`shipmill gate`'s text: the decision, then one line per blocked session"""
+    lines = [f"{decision.action.value}: {decision.reason}"]
+    lines += [f"  {w.line(dry_run)}" for w in waiting]
+    lines += [f"  {f.line()}" for f in decision.work]
+    if launched:
+        lines.append(f"  launched {launched}: claude attach {launched}")
+    return lines

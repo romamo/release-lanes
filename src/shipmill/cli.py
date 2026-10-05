@@ -31,12 +31,13 @@ from shipmill.autonomy import Hold
 from shipmill.config import CONFIG_PATH, config_path
 from shipmill.doctor import CALLER, OPERATE_CALLER, doctor
 from shipmill.errors import ReleaseError
-from shipmill.gate import ClaudeCli, check_checkout, gate, refresh, watch
+from shipmill.gate import ClaudeCli, check_checkout, gate, refresh, tick_lines, tick_record, watch
 from shipmill.github import GhCli, GitHub
 from shipmill.gitrepo import Git
 from shipmill.init import init, init_operate
 from shipmill.land import cleanup, land, prepare
 from shipmill.launchd import DEFAULT_TOOL, build, install, remove
+from shipmill.notify import Desktop
 from shipmill.operate import Http, UrllibHttp, approve, approve_rollback, operate, summary
 from shipmill.planner import Event, Hotfix, Planner, Proposal
 from shipmill.policy import Lane, Policy
@@ -295,7 +296,7 @@ def main(argv: list[str], github: GitHub | None = None, http: Http | None = None
 
 
 def _gate(root: Path, args: argparse.Namespace) -> int:
-    decision, launched = gate(
+    decision, launched, waiting = gate(
         Git(root),
         args.slug,
         lambda: AgentsConfig.load(root),
@@ -303,24 +304,14 @@ def _gate(root: Path, args: argparse.Namespace) -> int:
         lambda: watch(args.slug, root),
         dt.datetime.now(dt.UTC),
         lambda: Hold.read(GhCli(root)),
+        Desktop.detect(),
         args.refresh,
         args.dry_run,
     )
     if args.json:
-        record = {
-            "action": decision.action.value,
-            "reason": decision.reason,
-            "work": [f.line() for f in decision.work],
-            "stopped": [] if args.dry_run else list(decision.stop),
-            "launched": launched,
-        }
-        print(json.dumps(record, indent=2))
+        print(json.dumps(tick_record(decision, launched, waiting, args.dry_run), indent=2))
         return 0
-    print(f"{decision.action.value}: {decision.reason}")
-    for finding in decision.work:
-        print(f"  {finding.line()}")
-    if launched:
-        print(f"  launched {launched}: claude attach {launched}")
+    print("\n".join(tick_lines(decision, launched, waiting, args.dry_run)))
     return 0
 
 

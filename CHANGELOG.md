@@ -16,6 +16,13 @@ bot.
 - The `[agents]` section takes `notify` (default true), `remind_hours` (1..168, default 4),
   and `max_wait_hours` (0..168, default 0), refusing a bad value naming the key; the gate
   doesn't act on them yet (#128)
+- `shipmill gate` sends a desktop notification when a session it started waits on you
+  (`osascript` on macOS, `notify-send` elsewhere), and again every `remind_hours` while it
+  waits; `notify = false` turns it off. The wait is kept in `waiting.json` next to
+  `gate.json`, a failed send prints `notify failed for <id>: <error>` without changing the
+  decision, notifying runs on held ticks too, `--dry-run` prints `would notify <id>`, and
+  `--json` lists each blocked session under `waiting`. A tick with a blocked session now
+  reads the `[agents]` section (#129)
 
 ## [0.16.0] - 2026-10-05
 

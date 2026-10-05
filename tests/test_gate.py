@@ -32,6 +32,7 @@ from shipmill.gate import (
     state_dir,
 )
 from shipmill.gitrepo import Git
+from shipmill.notify import NotifyFailed
 from shipmill.policy import Policy
 
 from .conftest import POLICY
@@ -76,6 +77,19 @@ class FakeClaude:
 
     def stop(self, session: str) -> None:
         self.stopped.append(session)
+
+
+@dataclass
+class FakeNotifier:
+    """Records each notification instead of sending it; fail makes every send fail"""
+
+    sent: list[tuple[str, str]] = field(default_factory=list)
+    fail: str | None = None
+
+    def send(self, title: str, body: str) -> None:
+        if self.fail is not None:
+            raise NotifyFailed(self.fail)
+        self.sent.append((title, body))
 
 
 @pytest.fixture
@@ -234,8 +248,8 @@ def test_the_watch_script_is_found() -> None:
 
 def test_a_launch_is_recorded_and_not_repeated(checkout: Git) -> None:
     claude = FakeClaude([bg("old", "idle", "done")])
-    decision, launched = gate(
-        checkout, "romamo/demo", lambda: cfg("/triage {repo}"), claude, lambda: [ISSUES], NOW, Hold
+    decision, launched, _ = gate(
+        checkout, "romamo/demo", lambda: cfg("/triage {repo}"), claude, lambda: [ISSUES], NOW, Hold, FakeNotifier()
     )
     assert (decision.action, launched, claude.stopped) == (Action.LAUNCH, "s1", ["old"])
     name, text = claude.launched[0]
@@ -244,8 +258,8 @@ def test_a_launch_is_recorded_and_not_repeated(checkout: Git) -> None:
 
     later = NOW + dt.timedelta(minutes=15)
     claude.listed = [bg("s1", "idle", "done")]
-    decision, launched = gate(
-        checkout, "romamo/demo", lambda: cfg("/triage {repo}"), claude, lambda: [ISSUES], later, Hold
+    decision, launched, _ = gate(
+        checkout, "romamo/demo", lambda: cfg("/triage {repo}"), claude, lambda: [ISSUES], later, Hold, FakeNotifier()
     )
     assert (decision.action, launched, len(claude.launched)) == (Action.UNCHANGED, None, 1)
 
@@ -255,14 +269,16 @@ def test_a_busy_session_skips_the_state_read(checkout: Git) -> None:
         raise AssertionError("the state read should not run")
 
     claude = FakeClaude([bg("a", "busy", "working")])
-    decision, _ = gate(checkout, "romamo/demo", lambda: cfg("/triage {repo}"), claude, unread, NOW, Hold)
+    decision, _, _ = gate(
+        checkout, "romamo/demo", lambda: cfg("/triage {repo}"), claude, unread, NOW, Hold, FakeNotifier()
+    )
     assert decision.action is Action.RUNNING
 
 
 def test_a_dry_run_launches_nothing(checkout: Git) -> None:
     claude = FakeClaude([bg("old", "idle", "done")])
-    decision, launched = gate(
-        checkout, "romamo/demo", lambda: cfg("/t"), claude, lambda: [ISSUES], NOW, Hold, dry_run=True
+    decision, launched, _ = gate(
+        checkout, "romamo/demo", lambda: cfg("/t"), claude, lambda: [ISSUES], NOW, Hold, FakeNotifier(), dry_run=True
     )
     assert (decision.action, launched, claude.launched, claude.stopped) == (Action.LAUNCH, None, [], [])
     assert not (state_dir(checkout) / RECORD).exists()
@@ -270,7 +286,7 @@ def test_a_dry_run_launches_nothing(checkout: Git) -> None:
 
 def test_a_checkout_of_another_repo_is_refused(checkout: Git) -> None:
     with pytest.raises(ReleaseError, match="not romamo/other"):
-        gate(checkout, "romamo/other", lambda: cfg("/t"), FakeClaude(), lambda: [], NOW, Hold)
+        gate(checkout, "romamo/other", lambda: cfg("/t"), FakeClaude(), lambda: [], NOW, Hold, FakeNotifier())
 
 
 def test_a_malformed_record_fails(checkout: Git) -> None:
@@ -278,15 +294,25 @@ def test_a_malformed_record_fails(checkout: Git) -> None:
     record.parent.mkdir(parents=True)
     record.write_text("{}", encoding="utf-8")
     with pytest.raises(ReleaseError, match="malformed"):
-        gate(checkout, "romamo/demo", lambda: cfg("/t"), FakeClaude(), lambda: [ISSUES], NOW, Hold)
+        gate(checkout, "romamo/demo", lambda: cfg("/t"), FakeClaude(), lambda: [ISSUES], NOW, Hold, FakeNotifier())
 
 
 def test_prs_in_the_config_make_open_prs_work(checkout: Git) -> None:
     rows = [OPEN_PRS]
-    decision, _ = gate(checkout, "romamo/demo", lambda: cfg(), FakeClaude(), lambda: rows, NOW, Hold, dry_run=True)
+    decision, _, _ = gate(
+        checkout, "romamo/demo", lambda: cfg(), FakeClaude(), lambda: rows, NOW, Hold, FakeNotifier(), dry_run=True
+    )
     assert decision.action is Action.QUIET
-    decision, _ = gate(
-        checkout, "romamo/demo", lambda: cfg(prs=True), FakeClaude(), lambda: rows, NOW, Hold, dry_run=True
+    decision, _, _ = gate(
+        checkout,
+        "romamo/demo",
+        lambda: cfg(prs=True),
+        FakeClaude(),
+        lambda: rows,
+        NOW,
+        Hold,
+        FakeNotifier(),
+        dry_run=True,
     )
     assert decision.action is Action.LAUNCH
 
@@ -372,12 +398,23 @@ def test_refresh_refuses_a_working_copy(gate_checkout: tuple[Git, Path]) -> None
         refresh(git)
 
 
-def test_a_busy_session_reads_no_config(checkout: Git) -> None:
+def test_a_working_session_reads_no_config(checkout: Git) -> None:
     def unread() -> AgentsConfig:
         raise AssertionError("the config should not be read")
 
+    claude = FakeClaude([bg("a", "busy", "working")])
+    decision, _, _ = gate(
+        checkout, "romamo/demo", unread, claude, lambda: [], NOW, Hold, FakeNotifier(), refresh_checkout=True
+    )
+    assert decision.action is Action.RUNNING
+
+
+def test_a_blocked_session_reads_the_config_without_moving_the_checkout(checkout: Git) -> None:
+    """refresh would fail on this checkout, which has no commit: a waiting tick must not move it"""
     claude = FakeClaude([bg("a", "idle", "blocked")])
-    decision, _ = gate(checkout, "romamo/demo", unread, claude, lambda: [], NOW, Hold, refresh_checkout=True)
+    decision, _, _ = gate(
+        checkout, "romamo/demo", lambda: cfg(), claude, lambda: [], NOW, Hold, FakeNotifier(), refresh_checkout=True
+    )
     assert decision.action is Action.WAITING
 
 
@@ -390,14 +427,16 @@ def test_a_hold_starts_nothing(checkout: Git) -> None:
         raise AssertionError("a hold should stop before the state read")
 
     claude = FakeClaude([bg("old", "idle", "done")])
-    decision, launched = gate(checkout, "romamo/demo", lambda: cfg(), claude, unread, NOW, on_hold)
+    decision, launched, _ = gate(checkout, "romamo/demo", lambda: cfg(), claude, unread, NOW, on_hold, FakeNotifier())
     assert (decision.action, launched, claude.launched, claude.stopped) == (Action.HELD, None, [], [])
     assert decision.reason == "held by shipmill-hold #50: no session starts"
 
 
 def test_a_hold_names_the_sessions_still_open(checkout: Git) -> None:
     claude = FakeClaude([bg("a", "busy", "working"), bg("b", "idle", "blocked"), bg("c", "idle", "done")])
-    decision, _ = gate(checkout, "romamo/demo", lambda: cfg(), claude, lambda: [ISSUES], NOW, on_hold)
+    decision, _, _ = gate(
+        checkout, "romamo/demo", lambda: cfg(), claude, lambda: [ISSUES], NOW, on_hold, FakeNotifier()
+    )
     assert decision.action is Action.HELD
     assert decision.reason.endswith("still open: claude stop a, claude stop b")
 
@@ -406,7 +445,11 @@ def test_a_hold_launches_nothing_for_an_operate_failure_or_an_incident(checkout:
     incident = Finding("INCIDENT_OPEN", "#9", "Payments are down; open 10 min", True)
     rows = [OPERATE_FAILED, incident, *REPORT_ONLY, OPEN_PRS]
     claude = FakeClaude()
-    decision, launched = gate(checkout, "romamo/demo", lambda: cfg(prs=True), claude, lambda: rows, NOW, on_hold)
+    decision, launched, _ = gate(
+        checkout, "romamo/demo", lambda: cfg(prs=True), claude, lambda: rows, NOW, on_hold, FakeNotifier()
+    )
     assert (decision.action, decision.work, launched, claude.launched) == (Action.HELD, (), None, [])
-    decision, _ = gate(checkout, "romamo/demo", lambda: cfg(), claude, lambda: rows, NOW, Hold, dry_run=True)
+    decision, _, _ = gate(
+        checkout, "romamo/demo", lambda: cfg(), claude, lambda: rows, NOW, Hold, FakeNotifier(), dry_run=True
+    )
     assert (decision.action, decision.work) == (Action.LAUNCH, (OPERATE_FAILED, incident))
