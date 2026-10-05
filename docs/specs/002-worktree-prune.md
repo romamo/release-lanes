@@ -177,4 +177,9 @@ a failing plan does.
 
 ## Issues
 
+- shipmill/shipmill#122: S-002-1, S-002-2, S-002-3, S-002-4, S-002-5, S-002-6, S-002-7, S-002-8, S-002-9, S-002-10, S-002-11
+- shipmill/shipmill#123: S-002-12, S-002-13, S-002-14
+- shipmill/shipmill#124: S-002-15, S-002-16
+- shipmill/shipmill#125: S-002-17, S-002-18
+
 ## Verification
