@@ -443,11 +443,7 @@ def refresh(git: Git) -> None:
     """Move a dedicated gate checkout to the head of origin's default branch, so the session
     reads the current [agents] section, CLAUDE.md, and skills"""
     require_dedicated(git)
-    head = git.run("ls-remote", "--symref", "origin", "HEAD")
-    found = re.search(r"^ref: refs/heads/(\S+)\s+HEAD$", head, re.MULTILINE)
-    if found is None:
-        raise ReleaseError(f"origin of {git.root} names no default branch")
-    git.run("fetch", "-q", "origin", found.group(1))
+    git.run("fetch", "-q", "origin", git.default_branch())
     git.run("checkout", "-q", "--detach", "FETCH_HEAD")
 
 

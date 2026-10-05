@@ -2,6 +2,7 @@
 
 import datetime as dt
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -95,6 +96,14 @@ class Git:
                 continue
             found.append(Tag(Version.of_tag(name), peeled or obj, dt.datetime.fromisoformat(date)))
         return sorted(found, key=lambda t: t.date)
+
+    def default_branch(self) -> str:
+        """origin's default branch, as `git ls-remote --symref origin HEAD` names it"""
+        head = self.run("ls-remote", "--symref", REMOTE, "HEAD")
+        found = re.search(r"^ref: refs/heads/(\S+)\s+HEAD$", head, re.MULTILINE)
+        if found is None:
+            raise ReleaseError(f"origin of {self.root} names no default branch")
+        return found.group(1)
 
     def remote_branch(self, branch: str) -> str | None:
         out = self.run("ls-remote", "--heads", REMOTE, f"refs/heads/{branch}").split()

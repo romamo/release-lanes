@@ -41,6 +41,7 @@ that fails, in this order, is its reason:
 | Its branch isn't the default branch | `holds the default branch` |
 | It was created 24 hours ago or earlier | `created <N>h ago` |
 | No live Claude Code session's `cwd` is the worktree or inside it | `live session <name>` |
+| No other worktree of the repository lies inside it (`git status` can't see one under an ignored path, and `git worktree remove` would delete it) | `holds worktree <path>` |
 | `git status --porcelain` in it prints nothing (untracked files count) | `uncommitted changes` |
 | Every commit on its branch landed on `origin/<default>` (below) | `<N> commit(s) not landed` |
 | No open pull request has its branch as head | `open PR #<n>` |
@@ -160,6 +161,7 @@ a failing plan does.
 - S-002-16: `shipmill gate --dry-run` removes no worktree and lists the worktrees it would prune; a prune error makes `shipmill gate` exit 2 without launching a session
 - S-002-17: `watch_state.py` reports one report-only `WORKTREE_STALE` row (agent false, not an action) per KEPT shipmill worktree older than 7 days, naming its path and reason, and none for the main checkout, the current checkout, or a worktree that is not a shipmill worktree
 - S-002-18: `skills/github-ship-watch/SKILL.md` documents the `WORKTREE_STALE` row, and `skills/shipmill-setup/SKILL.md`'s gate section documents the gate's prune and `shipmill worktrees`, and the github-issue-resolve, github-pr-triage, and github-issue-triage skills each say that the worktrees a session leaves behind once it exits are the gate's prune's to remove
+- S-002-19: a candidate worktree that holds another worktree of the repository inside it, even under an ignored path, is KEPT as `holds worktree <path>`, its path relative to the main checkout (added in #131)
 
 ## Out of scope
 
@@ -177,7 +179,7 @@ a failing plan does.
 
 ## Issues
 
-- shipmill/shipmill#122: S-002-1, S-002-2, S-002-3, S-002-4, S-002-5, S-002-6, S-002-7, S-002-8, S-002-9, S-002-10, S-002-11
+- shipmill/shipmill#122: S-002-1, S-002-2, S-002-3, S-002-4, S-002-5, S-002-6, S-002-7, S-002-8, S-002-9, S-002-10, S-002-11, S-002-19
 - shipmill/shipmill#123: S-002-12, S-002-13, S-002-14
 - shipmill/shipmill#124: S-002-15, S-002-16
 - shipmill/shipmill#125: S-002-17, S-002-18

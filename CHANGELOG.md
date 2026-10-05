@@ -28,6 +28,12 @@ bot.
   notification, and decides the rest of the tick without it, held or not (D-13); a failed
   `claude stop` exits 2 and launches nothing, and `--dry-run` prints `would stop <id>`.
   Spec 003 is built (#130)
+- `shipmill worktrees [--json]` lists every worktree of the repository as REMOVABLE, once
+  its branch provably landed on the default branch (by ancestry, patch id, or a squash of
+  its whole diff), or KEPT with the first check it fails: the main or current checkout, not
+  under `.claude/worktrees/` or `tmp/wt-*`, missing, locked, detached, on the default
+  branch, under a day old, a live Claude Code session in it, another worktree inside it,
+  uncommitted changes, commits not landed, or an open pull request. It removes nothing yet (#122)
 
 ## [0.16.0] - 2026-10-05
 

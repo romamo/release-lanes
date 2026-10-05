@@ -14,6 +14,7 @@ from shipmill.errors import ReleaseError
 
 PROPOSAL_LABEL = "shipmill-proposal"  # on every issue proposing a release or a deploy
 OPEN_LIMIT = 100  # open issues read per label: proposals are one per lane and per environment
+PULL_LIMIT = 1000  # open pull requests read at once; gh's own default is 30
 _LABEL_DESCRIPTIONS = {PROPOSAL_LABEL: "Opened by shipmill: a release or deploy waiting for a person"}
 
 
@@ -33,6 +34,12 @@ class Issue:
     @property
     def closed(self) -> bool:
         return self.closed_at is not None
+
+
+@dataclass(frozen=True, slots=True)
+class PullRequest:
+    number: int
+    head: str  # the head branch's name
 
 
 class DeploymentState(StrEnum):
@@ -131,6 +138,10 @@ class GitHub(Protocol):
 
     def workflow_runs(self, workflow: str, ref: str) -> list[WorkflowRun]:
         """The workflow's runs on the branch or tag, newest first (the newest 100)"""
+        ...
+
+    def open_pull_requests(self) -> list[PullRequest]:
+        """The open pull requests, by number (the newest PULL_LIMIT)"""
         ...
 
 
@@ -305,3 +316,22 @@ class GhCli:
         )  # fmt: skip
         runs = [WorkflowRun(int(r["id"]), str(r["status"]), _time(r["created_at"])) for r in found["workflow_runs"]]
         return sorted(runs, key=lambda r: r.id, reverse=True)
+
+    def open_pull_requests(self) -> list[PullRequest]:
+        found = json.loads(
+            self._gh(
+                "pr", "list", "--state", "open", "--json", "number,headRefName", "--limit", str(PULL_LIMIT),
+            )
+        )  # fmt: skip
+        if not isinstance(found, list):
+            raise ReleaseError(f"gh pr list printed {type(found).__name__}, not a JSON array")
+        pulls = []
+        for pr in found:
+            if (
+                not isinstance(pr, dict)
+                or not isinstance(pr.get("number"), int)
+                or not isinstance(pr.get("headRefName"), str)
+            ):
+                raise ReleaseError(f"gh pr list printed {pr!r}: a pull request needs a number and a headRefName")
+            pulls.append(PullRequest(pr["number"], pr["headRefName"]))
+        return sorted(pulls, key=lambda p: p.number)
