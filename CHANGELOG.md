@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-05
+
 ### Added
 
 - github-ship-watch reports a fleet (spec S-001): `fleet.py report --fleet <file>` runs
@@ -439,7 +441,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/romamo/shipyard/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/romamo/shipyard/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/romamo/shipyard/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/romamo/shipyard/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/romamo/shipyard/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/romamo/shipyard/compare/v0.9.0...v0.10.0
