@@ -60,7 +60,9 @@ the user's working copy, where the session would branch and commit. Each run:
    doesn't wake a new one every tick
 7. **LAUNCH**: stops this repo's finished sessions (`claude stop` keeps their
    conversation), starts `claude --bg -n "shipmill <repo> <time>" "<prompt>"` in the
-   checkout with the rows appended to the prompt, and records the launch
+   checkout with the rows appended to the prompt, each by state and subject only (an
+   issue title in a row's detail is text anyone who edits the issue controls; the session
+   reruns watch_state.py and reads it as data, not instructions), and records the launch
 
 `--dry-run` prints the decision and touches nothing. `--claude-arg` passes flags to the
 session, such as `--permission-mode`; it is the host's choice, so it stays a flag.
