@@ -7,6 +7,11 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- shipmill's own `.github/shipmill.toml` has an `[agents]` section, so `shipmill gate` triages
+  this repo's new issues and lands its green pull requests
+
 ## [0.15.0] - 2026-10-05
 
 ### Added
