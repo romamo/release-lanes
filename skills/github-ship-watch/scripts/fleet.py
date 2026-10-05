@@ -10,7 +10,7 @@ A fleet file lists the repos, in TOML:
 
   [[repos]]
   repo = "owner/other"
-  incident_label = "sev"   # optional; the label that repo's incidents carry (default "incident")
+  incident_label = "sev"   # optional; the label that repo's incidents carry (default: its config's)
 
 The file is refused (exit 2, with a message naming the file and the problem) when it is
 missing, isn't TOML, has no [[repos]], has an entry without `repo`, has a key other than
@@ -24,18 +24,24 @@ temporary folder removed afterwards) with the repo's incident_label passed as
 detail as watch_state.py prints them. The rows watch_state.py counts as action come first,
 across all repos, then the report-only rows, each group in the fleet file's order.
 
+A repo's incident label is the fleet entry's incident_label, else the [operate]
+incident_label of the clone's .github/shipmill.toml, else "incident". The watch and the
+metrics use the same one: fleet.py reads the clone's config with watch_state.py's own
+reader, so a config the watch refuses is refused for the metrics too.
+
   --metrics   adds metrics.py's measures for each repo, over the same 30 days to the
-              run's start: a second table, one column per repo, each cell the measure's
-              text as metrics.py prints it ("no data" stays "no data"). A repo whose
-              check failed has no column
+              run's start, counting the repo's incident label's issues: a second table,
+              one column per repo, each cell the measure's text as metrics.py prints it
+              ("no data" stays "no data"). A repo whose check failed has no column
   --json      the same report as one JSON object: {"repos": [{"repo", "rows": [{"state",
               "subject", "detail"}]}]}, each repo's rows in watch_state.py's order; with
               --metrics each repo also holds "metrics", metrics.py --json's object (null
               when its check failed)
 
 A repo whose check fails (the clone, watch_state.py, or metrics.py exits 2: not found, no
-access, a gh error) gets one REPO_ERROR row, its subject the step that failed and its
-detail the error's first line; the other repos are still reported.
+access, a gh error; or, with --metrics, its config's incident label can't be read) gets one
+REPO_ERROR row, its subject the step that failed and its detail the error's first line; the
+other repos are still reported.
 
 Exit 0 when no repo has an action row, 1 when any has, 2 after printing everything when a
 repo's check failed, and 2 on a malformed fleet file. Reads only: the repairs stay with
@@ -47,6 +53,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import importlib.util
 import json
 import re
 import subprocess
@@ -55,6 +62,7 @@ import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 try:
@@ -87,6 +95,21 @@ REPO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*/(?!\.+$)[A-Za-z0-9._-]+$")  # owne
 # the plain form Python 3.10 reads: a [[repos]] header or key = "string", each with an optional comment
 PLAIN_HEADER = re.compile(r"^\[\[\s*repos\s*\]\]\s*(?:#.*)?$")
 PLAIN_KEY = re.compile(r"""^([A-Za-z0-9_-]+)\s*=\s*(?:"([^"\\]*)"|'([^']*)')\s*(?:#.*)?$""")
+
+
+def script(path: Path) -> ModuleType:
+    """A sibling script as a module (its main() isn't run), loaded by path so fleet.py works from any folder"""
+    spec = importlib.util.spec_from_file_location(f"fleet_{path.stem}", path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"can't load {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses look their module up by name
+    spec.loader.exec_module(module)
+    return module
+
+
+# watch_state.py's config reader: the metrics read a repo's incident label as the watch does
+WS = script(WATCH_STATE)
 
 
 class Refused(SystemExit):
@@ -200,12 +223,20 @@ def clone_command(e: Entry, checkout: Path) -> list[str]:
     return ["gh", "repo", "clone", e.repo, str(checkout), "--", "--filter=blob:none", "--quiet"]
 
 
-def metrics_command(e: Entry, until: str) -> list[str]:
-    """metrics.py for one repo over the 30 days to until, as JSON"""
-    cmd = [sys.executable, str(METRICS), e.repo, "--json", "--until", until]
-    if e.incident_label is not None:
-        cmd += ["--incident-label", e.incident_label]
-    return cmd
+def incident_label(e: Entry, checkout: Path) -> str:
+    """The label the repo's incidents carry, decided as watch_state.py decides it: the fleet
+    entry's, else the clone's [operate] incident_label, else "incident". The config is read
+    and checked with watch_state.py's reader either way, so it refuses what the watch refuses"""
+    policy = WS.policy_file(checkout)
+    if policy is None:
+        return e.incident_label or WS.INCIDENT_LABEL
+    text = (checkout / policy).read_text(encoding="utf-8")
+    return str(WS.config(text, policy, e.incident_label).incident_label)
+
+
+def metrics_command(e: Entry, until: str, label: str) -> list[str]:
+    """metrics.py for one repo over the 30 days to until, as JSON, counting label's issues as incidents"""
+    return [sys.executable, str(METRICS), e.repo, "--json", "--until", until, "--incident-label", label]
 
 
 # -- the report ----------------------------------------------------------------------------
@@ -282,7 +313,11 @@ def check(e: Entry, runner: Runner, workdir: Path, until: str | None) -> RepoRep
     rows = watch_rows(e.repo, watched.stdout)
     if until is None:
         return RepoReport(e.repo, tuple(rows), None)
-    measured = runner(metrics_command(e, until))
+    try:
+        label = incident_label(e, checkout)
+    except WS.Refused as refused:  # watch_state.py has refused this config already; kept a row if that changes
+        return RepoReport(e.repo, (*rows, Row(REPO_ERROR, "incident label", str(refused))), None)
+    measured = runner(metrics_command(e, until, label))
     if measured.returncode != 0:
         return RepoReport(e.repo, (*rows, error_row("metrics.py", measured)), None)
     found = decoded(measured.stdout, f"metrics.py for {e.repo}")

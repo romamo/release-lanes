@@ -186,6 +186,7 @@ class Fake:
     watch: dict[str, list[dict[str, str]]] = field(default_factory=dict)  # rows by repo; exit 1 on an action
     metrics: dict[str, dict[str, Any]] = field(default_factory=dict)
     failing: dict[str, tuple[str, str]] = field(default_factory=dict)  # repo: (the step that fails, its stderr)
+    configs: dict[str, str] = field(default_factory=dict)  # repo: the .github/shipmill.toml its clone holds
     calls: list[list[str]] = field(default_factory=list)
 
     def __call__(self, cmd: Sequence[str]) -> subprocess.CompletedProcess[str]:
@@ -200,6 +201,10 @@ class Fake:
             return proc(2, err=failing[1])
         if step == "clone":
             assert Path(cmd[4]).parent.is_dir()
+            if repo in self.configs:
+                policy = Path(cmd[4]) / ".github" / "shipmill.toml"
+                policy.parent.mkdir(parents=True)
+                policy.write_text(self.configs[repo], encoding="utf-8")
             return proc(0)
         if step == "watch_state.py":
             rows = self.watch[repo]
@@ -356,8 +361,69 @@ def test_s001_7_json_holds_each_repos_metrics_with_metrics(
     assert [r["metrics"] for r in found["repos"]] == [fake.metrics["romamo/shipmill"], fake.metrics["owner/other"]]
     runs = [c for c in fake.calls if c[1] == str(fl.METRICS)]
     assert [c[c.index("--until") + 1] for c in runs] == [NOW.isoformat()] * 2  # one window for the fleet
-    assert "--incident-label" not in runs[0]
+    assert runs[0][-2:] == ["--incident-label", "incident"]  # no config in the clone: the default
     assert runs[1][-2:] == ["--incident-label", "sev"]
+
+
+def metrics_labels(fl: ModuleType, fake: Fake) -> dict[str, str]:
+    """The --incident-label each repo's metrics.py was given"""
+    runs = [c for c in fake.calls if c[1] == str(fl.METRICS)]
+    return {c[2]: c[c.index("--incident-label") + 1] for c in runs}
+
+
+OPERATE_SEV = 'mode = "release"\n\n[operate]\nincident_label = "sev"\n'
+
+
+def test_s001_8_metrics_use_the_repos_config_label_when_the_fleet_entry_has_none(
+    fl: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = quiet_fake()
+    fake.metrics = {"romamo/shipmill": measures("no data", "no data"), "owner/other": measures("no data", "no data")}
+    fake.configs = {
+        "romamo/shipmill": OPERATE_SEV,
+        "owner/other": 'mode = "release"\n[operate]\nincident_label = "p1"\n',
+    }
+    code, _ = fleet_run(fl, tmp_path, capsys, fake, FLEET, "--metrics", "--json")
+    assert code == 0
+    # romamo/shipmill has no fleet label: its config's; owner/other's fleet label "sev" wins over its config's "p1"
+    assert metrics_labels(fl, fake) == {"romamo/shipmill": "sev", "owner/other": "sev"}
+    watch = [c for c in fake.calls if c[1] == str(fl.WATCH_STATE)]
+    assert "--incident-label" not in watch[0]  # the watch reads the same config itself
+
+
+def test_s001_8_a_config_without_operate_means_incident(fl: ModuleType, tmp_path: Path, ws: ModuleType) -> None:
+    checkout = tmp_path / "checkout"
+    (checkout / ".github").mkdir(parents=True)
+    (checkout / ".github" / "shipmill.toml").write_text('mode = "release"\n', encoding="utf-8")
+    assert fl.incident_label(fl.Entry("o/r", None), checkout) == "incident"
+    assert fl.incident_label(fl.Entry("o/r", None), tmp_path / "none") == "incident"  # no config at all
+    assert fl.incident_label(fl.Entry("o/r", "sev"), tmp_path / "none") == "sev"
+    assert ws.config('mode = "release"\n', Path(".github/shipmill.toml")).incident_label == "incident"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        '[operate]\nincident_label = ""\n',  # refused by watch_state.py's reader
+        '[environments.prod]\nbake_minutes = "x"\n',  # the whole config is checked, as the watch checks it
+    ],
+)
+def test_s001_8_a_config_the_watch_refuses_is_refused_for_the_metrics_too(
+    fl: ModuleType, ws: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str], text: str
+) -> None:
+    policy = Path(".github/shipmill.toml")
+    with pytest.raises(SystemExit) as watched:
+        ws.config(text, policy)
+    fake = quiet_fake()
+    fake.metrics = {"romamo/shipmill": measures("no data", "no data"), "owner/other": measures("no data", "no data")}
+    fake.configs = {"romamo/shipmill": text}
+    code, out = fleet_run(fl, tmp_path, capsys, fake, FLEET, "--metrics", "--json")
+    assert code == 2
+    shipmill, other = json.loads(out)["repos"]
+    assert shipmill["metrics"] is None
+    assert shipmill["rows"][-1] == row("REPO_ERROR", "incident label", str(watched.value))
+    assert other["metrics"] == fake.metrics["owner/other"]  # the other repos are still reported
+    assert metrics_labels(fl, fake) == {"owner/other": "sev"}
 
 
 def test_s001_6_metrics_sit_side_by_side_one_column_per_repo(
