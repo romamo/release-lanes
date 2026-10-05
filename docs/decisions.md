@@ -91,3 +91,11 @@ entry that supersedes it, never by editing an old one.
 - Why: A hold usually means an incident; an agent that triages, implements, or merges while one is open adds changes at the worst moment, and the stop switch should stop every automatic actor, not only releases (D-8)
 - Applies to: src/shipmill/gate.py, shipmill-hold label
 - Enforced by: tests/test_gate.py (with the implementing PR)
+
+## D-12: Whoever creates a worktree removes it
+
+- Decided: 2026-10-05, in shipmill/shipmill#116
+- Rule: Whoever creates a worktree removes it once its PR merges; once the creating session has exited, shipmill gate's prune owns it and removes only what the spec's checks prove landed
+- Why: Sessions that exit before their PR merges leave worktrees and local branches no later pass touches, since each pass removes only what it created; one owner for the orphans, acting only on proof, collects them without risking unlanded work
+- Applies to: src/shipmill/gate.py, skills/*/SKILL.md, worktrees
+- Enforced by: review
