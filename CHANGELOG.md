@@ -27,6 +27,15 @@ bot.
 - The CHANGELOG's `[Unreleased]` link points at `shipmill/shipmill`, so the compare links
   each release writes from it use the org's path
 
+### Fixed
+
+- The github-issue-resolve skill no longer leaves the checkout it starts in on the fix branch,
+  where a later `shipmill plan` read the PR branch instead of main: Phase 3 creates the branch
+  in a worktree (`git worktree add -b fix/<slug> tmp/wt-<slug> origin/<default>`) unless the
+  session already runs in a linked worktree, never switches, resets, or pulls the user's
+  checkout, keeps the worktree while the PR is open, and removes it and its branch once
+  `landed.py` confirms the merge (#110)
+
 ## [0.14.0] - 2026-10-05
 
 ### Changed

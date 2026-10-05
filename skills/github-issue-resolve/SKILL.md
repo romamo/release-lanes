@@ -44,9 +44,11 @@ Pick one verdict:
 | A merged spec covers it (`specs.py find`, or the issue links one) | Read its criteria (`specs.py criteria NNN`) and continue to Phase 3; a departure from a criterion is a decision for the user |
 | Confirmed, and the fix changes a contract (a flag, a format, a default, a public API, stored state) | Run github-issue-triage's [design gate](../github-issue-triage/references/design-gate.md): `decisions.py find`, the design in the issue comment, and the user's answer first when it departs from a `D-n` entry or the spec. Then Phase 3. A decision the user settled goes in its own docs PR, or an open one that already edits the log (design-gate.md, Recording a decision) |
 
-## Phase 3: Prepare a clean branch
+## Phase 3: Prepare a clean branch in a worktree
 
-This phase prevents shipping unrelated work in the PR.
+This phase prevents shipping unrelated work in the PR, and keeps the fix off the checkout the session started in.
+
+**Never switch, reset, or pull the user's checkout.** It may hold their uncommitted work or their own branch, and a later command run there (`shipmill plan`, a test run) reads whatever branch it is on. Leave its branch and files as you found them.
 
 ```bash
 git fetch origin
@@ -57,9 +59,16 @@ git log --oneline origin/<default>..<default>
 - If the local default branch has unpushed commits, **do not branch from it**: those commits would silently ride along in the PR (and in a squash merge). Branch from the remote instead, and tell the user about the unpushed commits
 - Never include untracked files the user didn't mention; stage by explicit path
 
+Create the branch in a new worktree under the checkout and do Phases 4 to 6 there:
+
 ```bash
-git checkout -b fix/<short-slug> origin/<default>
+git worktree add -b fix/<short-slug> tmp/wt-<short-slug> origin/<default>
+cd tmp/wt-<short-slug> && uv sync    # a fresh worktree has no virtualenv
 ```
+
+Pick a path `git worktree list` doesn't show yet; `tmp/` must be ignored by git (add it to `.git/info/exclude` if the repo doesn't ignore it).
+
+Skip the worktree when the session already runs inside a linked worktree, e.g. an implementer agent dispatched by github-issue-triage: there `git rev-parse --git-dir` differs from `git rev-parse --git-common-dir`, and `git switch -c fix/<short-slug> origin/<default>` in place is safe. In the main checkout the two print the same directory.
 
 ## Phase 4: Implement
 
@@ -87,6 +96,7 @@ Report pre-existing failures as such; never claim a green suite you didn't see. 
 3. `gh pr create` with a Summary (what and why), `Fixes #<n>`, and a Test plan that lists pre-existing failures honestly
 4. Before opening, check the PR diff contains only the intended files: `gh pr diff <pr> --name-only`
 5. Comment the triage on the issue: root cause, why it was missed (if notable), and a link to the PR. Post with `--body-file`: in zsh, backticks inside a double-quoted `--body` run as commands and a glob error aborts the whole command line, so the comment silently never posts
+6. Keep the worktree while the PR is open: a review round or a rebase reuses it. Tell the user its path
 
 ## Phase 7: Merge (only when explicitly asked)
 
@@ -100,9 +110,18 @@ This skill stops at an open PR. Merging goes through the `github-pr-triage` skil
 
 Before handing over, re-confirm that `gh pr diff <pr> --name-only` shows only the intended files. After the merge, `git pull --ff-only` in the user's checkout only if they ask. It may hold their uncommitted work.
 
+After the merge, remove the Phase 3 worktree and its local branch once github-pr-triage's `scripts/landed.py --onto origin/<default> <sha>...` exits 0 for the branch's commits (for a squash merge, compare trees as its [landing.md](../github-pr-triage/references/landing.md) says):
+
+```bash
+git worktree remove tmp/wt-<short-slug>
+git branch -D fix/<short-slug>
+```
+
+Run these from the user's checkout without changing its branch. If the commits haven't landed, keep both and name the commits in the report.
+
 ## Report to the user
 
 - Verdict and root cause in one or two sentences
 - Links: issue comment, PR (and merge commit if merged)
 - Verification results, separating new tests from pre-existing failures
-- Anything left for the user: unpushed commits, divergent branches, decisions needed
+- Anything left for the user: unpushed commits, divergent branches, decisions needed, and the worktree path while the PR is open
