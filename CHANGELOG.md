@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-05
+
 ### Added
 
 - shipmill-setup's `setup_state.py` reports whether GitHub deletes a pull request's branch
@@ -532,7 +534,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/shipmill/shipmill/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/shipmill/shipmill/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/romamo/shipmill/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/romamo/shipmill/compare/v0.12.0...v0.13.0
