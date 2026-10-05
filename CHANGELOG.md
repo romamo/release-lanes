@@ -16,6 +16,8 @@ bot.
 
 ### Removed
 
+- macOS Finder's `.DS_Store` files, which the rename's commit picked up; `.gitignore` now
+  lists them
 - `.github/release-policy.toml`, the config's alias: shipmill reads only
   `.github/shipmill.toml`, and `init --force` no longer removes the alias
 
