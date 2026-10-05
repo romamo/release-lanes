@@ -9,7 +9,8 @@ from pathlib import Path
 from shipmill.config import CONFIG_PATH, Table, config_path, read
 from shipmill.errors import ReleaseError
 
-_MAX_RETRY_HOURS = 7 * 24  # a week
+_MAX_HOURS = 7 * 24  # a week
+_REMIND_HOURS = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,16 +18,28 @@ class AgentsConfig:
     prompt: str  # the session's prompt; {repo} becomes owner/name
     prs: bool  # open pull requests count as work, for a prompt that lands them
     retry_hours: int  # unchanged findings start a new session after this
+    notify: bool = True  # a desktop notification when a session waits on you
+    remind_hours: int = _REMIND_HOURS  # repeat it while the session still waits
+    max_wait_hours: int = 0  # stop a session that waited this long; 0: never
 
     @classmethod
     def parse(cls, table: Table) -> AgentsConfig:
-        table.allow("prompt", "prs", "retry_hours")
+        table.allow("prompt", "prs", "retry_hours", "notify", "remind_hours", "max_wait_hours")
         prompt = table.string("prompt").strip()
         if not prompt:
             raise ReleaseError(f"{table.where}: prompt must not be empty")
-        retry = table.integer("retry_hours", default=24, low=1, high=_MAX_RETRY_HOURS)
-        assert retry is not None  # a default was given
-        return cls(prompt=prompt, prs=table.boolean("prs", default=False), retry_hours=retry)
+        retry = table.integer("retry_hours", default=24, low=1, high=_MAX_HOURS)
+        remind = table.integer("remind_hours", default=_REMIND_HOURS, low=1, high=_MAX_HOURS)
+        max_wait = table.integer("max_wait_hours", default=0, low=0, high=_MAX_HOURS)
+        assert retry is not None and remind is not None and max_wait is not None  # defaults were given
+        return cls(
+            prompt=prompt,
+            prs=table.boolean("prs", default=False),
+            retry_hours=retry,
+            notify=table.boolean("notify", default=True),
+            remind_hours=remind,
+            max_wait_hours=max_wait,
+        )
 
     @classmethod
     def load(cls, root: Path) -> AgentsConfig:
