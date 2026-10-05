@@ -26,10 +26,10 @@ before it):
   Change failure     with deployments: issues labelled --incident-label opened in the window
   rate               / deployments. Without: --blocker-label issues opened in the window plus
                      hotfix releases / stable releases. A hotfix release is a stable X.Y.Z
-                     (Z > 0) whose tag is on a release/X.Y branch, where shipyard's hotfix
+                     (Z > 0) whose tag is on a release/X.Y branch, where shipmill's hotfix
                      lane puts it
   Time to restore    issues labelled --incident-label restored in the window: opened to the
-                     first "<env> is healthy again on" comment shipyard operate posts, or to
+                     first "<env> is healthy again on" comment shipmill operate posts, or to
                      closed, whichever is first (median); ones still open at the window's
                      end are counted aside
   Issue to release   issues whose first "Released in <tag>" notice (github-pr-triage's
@@ -67,7 +67,7 @@ from typing import Any, NoReturn
 
 STABLE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
 NOTICE = re.compile(r"^Released in \S+")  # shipped.py's marker, f"Released in {tag}"
-HEALTHY = re.compile(r"^\S+ is healthy again on ")  # shipyard operate's comment on an incident
+HEALTHY = re.compile(r"^\S+ is healthy again on ")  # shipmill operate's comment on an incident
 PAGE_INFO = "pageInfo { hasNextPage endCursor }"
 
 # What the work itself says about who made it: a PR is agent-made when its body ("body") or

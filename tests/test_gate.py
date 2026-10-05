@@ -9,9 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from shipyard.agents import AgentsConfig
-from shipyard.errors import ReleaseError
-from shipyard.gate import (
+from shipmill.agents import AgentsConfig
+from shipmill.errors import ReleaseError
+from shipmill.gate import (
     RECORD,
     Action,
     Finding,
@@ -28,8 +28,8 @@ from shipyard.gate import (
     skills_dir,
     state_dir,
 )
-from shipyard.gitrepo import Git
-from shipyard.policy import Policy
+from shipmill.gitrepo import Git
+from shipmill.policy import Policy
 
 from .conftest import POLICY
 
@@ -44,7 +44,7 @@ def cfg(text: str = "/t", prs: bool = False) -> AgentsConfig:
 
 
 def bg(id: str, status: str | None, state: str | None) -> Session:
-    return Session(id, f"shipyard romamo/demo {id}", status, state)
+    return Session(id, f"shipmill romamo/demo {id}", status, state)
 
 
 @dataclass
@@ -129,9 +129,9 @@ def test_the_prompt_carries_the_findings() -> None:
 
 def test_only_this_repos_background_sessions_count() -> None:
     rows = [
-        {"id": "a", "kind": "background", "name": "shipyard romamo/demo 2026-10-04 12:00", "status": "busy"},
-        {"id": "b", "kind": "background", "name": "shipyard romamo/demo-two 2026-10-04", "state": "working"},
-        {"id": "c", "kind": "interactive", "name": "shipyard romamo/demo", "status": "busy"},
+        {"id": "a", "kind": "background", "name": "shipmill romamo/demo 2026-10-04 12:00", "status": "busy"},
+        {"id": "b", "kind": "background", "name": "shipmill romamo/demo-two 2026-10-04", "state": "working"},
+        {"id": "c", "kind": "interactive", "name": "shipmill romamo/demo", "status": "busy"},
         {"id": "d", "kind": "background", "name": "Triage #6", "state": "done"},
     ]
     assert [s.id for s in parse_sessions(json.dumps(rows), "romamo/demo")] == ["a"]
@@ -158,7 +158,7 @@ def test_a_launch_is_recorded_and_not_repeated(checkout: Git) -> None:
     decision, launched = gate(checkout, "romamo/demo", lambda: cfg("/triage {repo}"), claude, lambda: [ISSUES], NOW)
     assert (decision.action, launched, claude.stopped) == (Action.LAUNCH, "s1", ["old"])
     name, text = claude.launched[0]
-    assert name == "shipyard romamo/demo 2026-10-04 12:00" and text.startswith("/triage romamo/demo")
+    assert name == "shipmill romamo/demo 2026-10-04 12:00" and text.startswith("/triage romamo/demo")
     assert json.loads((state_dir(checkout) / RECORD).read_text())["session"] == "s1"
 
     later = NOW + dt.timedelta(minutes=15)
@@ -204,19 +204,14 @@ def test_prs_in_the_config_make_open_prs_work(checkout: Git) -> None:
     assert decision.action is Action.LAUNCH
 
 
-def write_config(root: Path, text: str, name: str = "shipyard.toml") -> None:
+def write_config(root: Path, text: str) -> None:
     (root / ".github").mkdir(exist_ok=True)
-    (root / ".github" / name).write_text(text, encoding="utf-8")
+    (root / ".github" / "shipmill.toml").write_text(text, encoding="utf-8")
 
 
 def test_the_agents_section_loads_without_release_keys(tmp_path: Path) -> None:
     write_config(tmp_path, '[agents]\nprompt = "/github-issue-triage {repo} merge when green"\nprs = true\n')
     assert AgentsConfig.load(tmp_path) == AgentsConfig("/github-issue-triage {repo} merge when green", True, 24)
-
-
-def test_the_alias_file_works_too(tmp_path: Path) -> None:
-    write_config(tmp_path, '[agents]\nprompt = "/t"\nretry_hours = 6\n', "release-policy.toml")
-    assert AgentsConfig.load(tmp_path).retry_hours == 6
 
 
 @pytest.mark.parametrize(

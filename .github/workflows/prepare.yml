@@ -1,10 +1,10 @@
-name: shipyard prepare
+name: shipmill prepare
 
-# Called by a repository's release workflow (see `shipyard init`). On a push it
+# Called by a repository's release workflow (see `shipmill init`). On a push it
 # first waits for the batch of merges to end; then it plans, and when a lane is due it writes
 # the release commit and pushes it to a work branch for the caller's CI. In dry-run it shows
 # the release commit in the run summary and pushes nothing. When [autonomy] release is
-# propose, or an open shipyard-hold issue stops automatic releases, it opens or updates one
+# propose, or an open shipmill-hold issue stops automatic releases, it opens or updates one
 # issue per due lane instead.
 
 on:
@@ -24,9 +24,9 @@ on:
         type: string
         default: ""
       tool:
-        description: "Where uvx installs shipyard from"
+        description: "Where uvx installs shipmill from"
         type: string
-        default: "git+https://github.com/romamo/shipyard@v0"
+        default: "git+https://github.com/romamo/shipmill@v0"
     outputs:
       lane:
         value: ${{ jobs.prepare.outputs.lane }}
@@ -48,7 +48,7 @@ jobs:
   # workflow github.event_name is the caller's event
   settle:
     concurrency:
-      group: ${{ github.event_name == 'push' && 'shipyard-settle' || format('shipyard-settle-{0}', github.run_id) }}
+      group: ${{ github.event_name == 'push' && 'shipmill-settle' || format('shipmill-settle-{0}', github.run_id) }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     permissions:
@@ -65,7 +65,7 @@ jobs:
         env:
           TOOL: ${{ inputs.tool }}
         run: |
-          minutes="$(uvx --from "$TOOL" shipyard settle-minutes)"
+          minutes="$(uvx --from "$TOOL" shipmill settle-minutes)"
           echo "Waiting ${minutes} min for more pushes; a newer push cancels this run"
           sleep "$((minutes * 60))"
 
@@ -73,7 +73,7 @@ jobs:
   prepare:
     needs: settle
     concurrency:
-      group: shipyard
+      group: shipmill
       cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
@@ -111,7 +111,7 @@ jobs:
           [ -n "$DRY_RUN" ] && args+=(--dry-run)
           [ -n "$HOTFIX_PRS" ] && args+=(--hotfix-prs "$HOTFIX_PRS")
           [ -n "$HOTFIX_FROM" ] && args+=(--hotfix-from "$HOTFIX_FROM")
-          uvx --from "$TOOL" shipyard "${args[@]}"
+          uvx --from "$TOOL" shipmill "${args[@]}"
 
       - name: Write the release commit
         id: prepare
@@ -130,7 +130,7 @@ jobs:
           if [ "$MODE" = release ]; then
             args+=(--push --github-output "$GITHUB_OUTPUT")
           fi
-          uvx --from "$TOOL" shipyard "${args[@]}"
+          uvx --from "$TOOL" shipmill "${args[@]}"
           {
             echo "### $LANE $VERSION ($MODE)"
             echo
@@ -161,7 +161,7 @@ jobs:
     needs: prepare
     if: needs.prepare.outputs.action == 'propose' && needs.prepare.outputs.mode == 'release'
     concurrency:
-      group: shipyard
+      group: shipmill
       cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
@@ -179,4 +179,4 @@ jobs:
           TOOL: ${{ inputs.tool }}
           PROPOSALS: ${{ needs.prepare.outputs.proposals }}
         run: |
-          uvx --from "$TOOL" shipyard propose --proposals "$PROPOSALS" | tee -a "$GITHUB_STEP_SUMMARY"
+          uvx --from "$TOOL" shipmill propose --proposals "$PROPOSALS" | tee -a "$GITHUB_STEP_SUMMARY"

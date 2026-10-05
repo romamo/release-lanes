@@ -201,7 +201,7 @@ def test_the_maintainers_call_sets_each_opportunity_state(ist: ModuleType) -> No
                 13,
                 "- #4",
                 "Triage: **opportunity**",
-                "Out of scope: shipyard stays GitHub-only (D-6).\nMore detail.",
+                "Out of scope: shipmill stays GitHub-only (D-6).\nMore detail.",
                 state="CLOSED",
                 reason="NOT_PLANNED",
                 closed_at=closed,
@@ -215,7 +215,7 @@ def test_the_maintainers_call_sets_each_opportunity_state(ist: ModuleType) -> No
     assert found[10] == ("OPPORTUNITY_OPEN", "")
     assert found[11] == ("ACCEPTED", "hand it to triage's spec gate")
     assert found[12] == ("HANDED_OFF", "triage: feature")
-    assert found[13] == ("DECLINED", "Out of scope: shipyard stays GitHub-only (D-6).")
+    assert found[13] == ("DECLINED", "Out of scope: shipmill stays GitHub-only (D-6).")
     assert found[14] == ("NO_REASON", "closed as not planned with no comment")
     assert found[15] == ("DONE", "")
 
@@ -303,7 +303,7 @@ def test_more_than_100_labels_is_refused(ist: ModuleType) -> None:
 
 
 def test_intake_autonomy_defaults_to_propose_and_never_acts(ist: ModuleType, tmp_path: Path) -> None:
-    config = tmp_path / "shipyard.toml"
+    config = tmp_path / "shipmill.toml"
     assert ist.intake_autonomy(None) == "propose"
     config.write_text('name = "x"\n[autonomy]\nrelease = "act"\ndeploy.production = "act"\n')
     assert ist.intake_autonomy(config) == "propose"
@@ -316,7 +316,7 @@ def test_intake_autonomy_defaults_to_propose_and_never_acts(ist: ModuleType, tmp
 
 
 def test_the_310_reader_reads_plain_lines_and_refuses_the_rest(ist: ModuleType, tmp_path: Path) -> None:
-    path = tmp_path / "shipyard.toml"
+    path = tmp_path / "shipmill.toml"
     text = "[lanes.dev]\nintake = \"no\"\n[autonomy]\nintake = 'observe'\nwip = 3\non = true\n[roadmap]\nwip = 4\n"
     assert ist.config_values_310(text, path, "autonomy", ("intake", "wip", "on")) == {
         "intake": "observe",

@@ -6,18 +6,18 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from shipyard.autonomy import HOLD_LABEL, Autonomy, Hold
-from shipyard.changelog import Changelog
-from shipyard.config import ALIAS_PATH, CONFIG_PATH, config_path
-from shipyard.errors import ReleaseError
-from shipyard.github import GitHub
-from shipyard.gitrepo import REMOTE, Git
-from shipyard.land import BLOCKING_BRANCH, WORK_PREFIX, blocked
-from shipyard.policy import BumpFrom, Lane, Policy, VersionFiles
-from shipyard.stamp import project_version
+from shipmill.autonomy import HOLD_LABEL, Autonomy, Hold
+from shipmill.changelog import Changelog
+from shipmill.config import config_path
+from shipmill.errors import ReleaseError
+from shipmill.github import GitHub
+from shipmill.gitrepo import REMOTE, Git
+from shipmill.land import BLOCKING_BRANCH, WORK_PREFIX, blocked
+from shipmill.policy import BumpFrom, Lane, Policy, VersionFiles
+from shipmill.stamp import project_version
 
 CALLER = Path(".github") / "workflows" / "release.yml"
-OPERATE_CALLER = Path(".github") / "workflows" / "operate.yml"  # calls shipyard's operate.yml on a schedule
+OPERATE_CALLER = Path(".github") / "workflows" / "operate.yml"  # calls shipmill's operate.yml on a schedule
 _BOT_WORKFLOWS = ("prepare.yml", "land.yml")
 _LOCAL_USES = re.compile(r"uses:\s*\./\.github/workflows/(?P<file>[\w.-]+\.ya?ml)")
 
@@ -44,12 +44,6 @@ def doctor(root: Path, github: GitHub | None = None) -> list[Check]:
         return checks
     read = found.relative_to(root)
     add(True, "policy", f"{read}, mode {policy.mode}, lanes {', '.join(policy.lanes)}")
-    if read == ALIAS_PATH:
-        detail = (
-            f"{ALIAS_PATH} is the alias; rename it to {CONFIG_PATH} (git mv) once your Release workflow's"
-            " `tool` is this release or newer"
-        )
-        add(False, "config", detail, warn=True)
     if policy.roadmap is not None:
         add(True, "roadmap", f"{policy.roadmap}; read by the product-intake skill")
     autonomy, hold = _autonomy(policy, github, root / CALLER)
@@ -125,7 +119,7 @@ def doctor(root: Path, github: GitHub | None = None) -> list[Check]:
 
     caller = root / CALLER
     if not caller.is_file():
-        add(False, "workflow", f"no {CALLER}; `shipyard init` writes one")
+        add(False, "workflow", f"no {CALLER}; `shipmill init` writes one")
     else:
         text = caller.read_text(encoding="utf-8")
         uses_bot = all(re.search(rf"uses:\s*\S*/\.github/workflows/{name}\b", text) for name in _BOT_WORKFLOWS)
@@ -262,7 +256,7 @@ def _autonomy(policy: Policy, github: GitHub | None, caller: Path) -> tuple[list
     detail = ", ".join(levels) + f"; {other} deploy environment {default}"
     if hold.on:
         detail += f" ({hold.reason})"
-    detail += "; deploy and rollback act in shipyard operate"
+    detail += "; deploy and rollback act in shipmill operate"
     detail += f"; intake {policy.autonomy.intake} in the product-intake skill"
     checks.append(Check("PASS", "autonomy", detail))
     proposes = any(policy.autonomy.configured(stage) is Autonomy.PROPOSE for stage in policy.autonomy.stages())
@@ -291,8 +285,8 @@ def _autonomy(policy: Policy, github: GitHub | None, caller: Path) -> tuple[list
 
 
 def _operate_caller(root: Path) -> Path:
-    """The workflow that runs shipyard operate, relative to root: OPERATE_CALLER, except in the
-    repository hosting shipyard, whose .github/workflows/operate.yml is the reusable workflow
+    """The workflow that runs shipmill operate, relative to root: OPERATE_CALLER, except in the
+    repository hosting shipmill, whose .github/workflows/operate.yml is the reusable workflow
     itself; there, the first workflow calling it locally (uses: ./.github/workflows/operate.yml),
     as its Release workflow calls prepare.yml and land.yml"""
     hosted = root / OPERATE_CALLER
@@ -316,11 +310,11 @@ def _operate(policy: Policy, hold: Hold, root: Path, caller: Path) -> Check | No
         return None
     why = f"{', '.join(used)} {'uses' if len(used) == 1 else 'use'} from or health"
     if not (root / caller).is_file():
-        detail = f"{why}, but no {caller} runs shipyard operate: `shipyard init --operate` writes it"
+        detail = f"{why}, but no {caller} runs shipmill operate: `shipmill init --operate` writes it"
         return Check("WARN", "operate", detail)
     text = (root / caller).read_text(encoding="utf-8")
     if _job_grants(text, "operate.yml", "deployments") is None:
-        return Check("WARN", "operate", f"{why}, but no job in {caller} calls shipyard's operate.yml")
+        return Check("WARN", "operate", f"{why}, but no job in {caller} calls shipmill's operate.yml")
     needed = ["deployments", "actions"]
     proposes = any(policy.autonomy.configured(s) is Autonomy.PROPOSE for s in policy.autonomy.stages())
     if proposes or hold.on or policy.incident_label:
@@ -330,7 +324,7 @@ def _operate(policy: Policy, hold: Hold, root: Path, caller: Path) -> Check | No
     missing = [f"{name}: write" for name in needed if not _job_grants(text, "operate.yml", name)]
     if missing:
         return Check("WARN", "operate", f"the job in {caller} that calls operate.yml lacks {', '.join(missing)}")
-    detail = f"{caller} runs shipyard operate with {', '.join(needed)}: write"
+    detail = f"{caller} runs shipmill operate with {', '.join(needed)}: write"
     if policy.incident_label:
         held = ", ".join(lane for lane in Lane if lane in policy.blocker_lanes)
         detail += (
@@ -344,7 +338,7 @@ _JOB = re.compile(r"^  (?P<name>[\w-]+):[ \t]*(?:#.*)?$", re.MULTILINE)
 
 
 def _job_grants(text: str, workflow: str, permission: str) -> bool | None:
-    """Whether the caller's job that calls shipyard's workflow grants `<permission>: write`;
+    """Whether the caller's job that calls shipmill's workflow grants `<permission>: write`;
     None when no job calls it. A text check, not a YAML parse: a job runs to the next
     two-space key"""
     starts = [m.start() for m in _JOB.finditer(text)] + [len(text)]

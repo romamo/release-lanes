@@ -6,7 +6,7 @@ Usage: fleet.py report --fleet FILE [--metrics] [--json]
 A fleet file lists the repos, in TOML:
 
   [[repos]]
-  repo = "romamo/shipyard"
+  repo = "romamo/shipmill"
 
   [[repos]]
   repo = "owner/other"

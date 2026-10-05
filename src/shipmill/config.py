@@ -1,5 +1,5 @@
-"""The config file, .github/shipyard.toml (or its alias .github/release-policy.toml), and
-the strict reader every section parser uses: one file, one section per layer (D-4)"""
+"""The config file, .github/shipmill.toml, and the strict reader every section parser uses:
+one file, one section per layer (D-4)"""
 
 import tomllib
 from collections.abc import Mapping
@@ -7,21 +7,17 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from shipyard.errors import ReleaseError
+from shipmill.errors import ReleaseError
 
-CONFIG_PATH = Path(".github") / "shipyard.toml"
-ALIAS_PATH = Path(".github") / "release-policy.toml"  # the policy's first name; the same keys
+CONFIG_PATH = Path(".github") / "shipmill.toml"
 
 
 def config_path(root: Path) -> Path:
-    """The file shipyard reads its settings from: .github/shipyard.toml, else its alias
-    .github/release-policy.toml. A repository may not have both."""
-    found = [root / p for p in (CONFIG_PATH, ALIAS_PATH) if (root / p).is_file()]
-    if len(found) > 1:
-        raise ReleaseError(f"both {CONFIG_PATH} and {ALIAS_PATH} exist; keep one, git rm the other")
-    if not found:
-        raise ReleaseError(f"no release policy at {root / CONFIG_PATH} (or its alias {ALIAS_PATH})")
-    return found[0]
+    """The file shipmill reads its settings from: .github/shipmill.toml"""
+    path = root / CONFIG_PATH
+    if not path.is_file():
+        raise ReleaseError(f"no release policy at {path}")
+    return path
 
 
 def read(path: Path) -> Mapping[str, Any]:

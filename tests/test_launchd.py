@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from shipyard.errors import ReleaseError
-from shipyard.launchd import BASE_PATH, build, find_tool, is_temporary, label
+from shipmill.errors import ReleaseError
+from shipmill.launchd import BASE_PATH, build, find_tool, is_temporary, label
 
 
 def tools(folder: Path, *names: str) -> Path:
@@ -24,7 +24,7 @@ def nothing(folder: str) -> bool:
 
 
 def test_the_label_is_safe_and_per_repo() -> None:
-    assert label("romamo/Treaty_X") == "dev.shipyard.gate.romamo.treaty-x"
+    assert label("romamo/Treaty_X") == "dev.shipmill.gate.romamo.treaty-x"
     with pytest.raises(ReleaseError, match="owner/name"):
         label("treaty")
 
@@ -51,12 +51,12 @@ def test_the_job_runs_the_gate_with_a_stable_path(tmp_path: Path) -> None:
     checkout = tmp_path / "treaty-gate"
     job = build("romamo/treaty", checkout, 15, "git+x@v0", ["--permission-mode=auto"], tmp_path, path, nothing)
     data = plistlib.loads(job.document)
-    assert data["Label"] == job.label == "dev.shipyard.gate.romamo.treaty"
+    assert data["Label"] == job.label == "dev.shipmill.gate.romamo.treaty"
     assert data["ProgramArguments"] == [
         str(local / "uvx"),
         "--from",
         "git+x@v0",
-        "shipyard",
+        "shipmill",
         "--repo",
         str(checkout),
         "gate",
@@ -67,7 +67,7 @@ def test_the_job_runs_the_gate_with_a_stable_path(tmp_path: Path) -> None:
     ]
     assert data["StartInterval"] == 900 and data["WorkingDirectory"] == str(checkout)
     assert data["EnvironmentVariables"]["PATH"].split(os.pathsep) == [str(local), str(brew), *BASE_PATH]
-    assert job.plist == tmp_path / "Library" / "LaunchAgents" / "dev.shipyard.gate.romamo.treaty.plist"
+    assert job.plist == tmp_path / "Library" / "LaunchAgents" / "dev.shipmill.gate.romamo.treaty.plist"
     assert data["StandardOutPath"] == data["StandardErrorPath"] == str(job.log)
 
 

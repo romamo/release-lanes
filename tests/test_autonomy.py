@@ -9,15 +9,15 @@ from pathlib import Path
 
 import pytest
 
-from shipyard.autonomy import HOLD_LABEL, Autonomy, AutonomyPolicy, EnvironmentName, Hold, Stage
-from shipyard.cli import main
-from shipyard.doctor import doctor
-from shipyard.errors import ReleaseError
-from shipyard.github import OPEN_LIMIT, PROPOSAL_LABEL
-from shipyard.planner import Decision, Event, Hotfix, Proposal
-from shipyard.policy import Lane, Policy
-from shipyard.propose import Outcome, close_released, marker, propose, run_url
-from shipyard.version import Version
+from shipmill.autonomy import HOLD_LABEL, Autonomy, AutonomyPolicy, EnvironmentName, Hold, Stage
+from shipmill.cli import main
+from shipmill.doctor import doctor
+from shipmill.errors import ReleaseError
+from shipmill.github import OPEN_LIMIT, PROPOSAL_LABEL
+from shipmill.planner import Decision, Event, Hotfix, Proposal
+from shipmill.policy import Lane, Policy
+from shipmill.propose import Outcome, close_released, marker, propose, run_url
+from shipmill.version import Version
 
 from .conftest import POLICY, Repo, at_day
 from .test_lanes import plan
@@ -36,7 +36,7 @@ workflow = "deploy.yml"
 
 
 def autonomy(text: str, environments: str = ENVIRONMENTS) -> AutonomyPolicy:
-    return Policy.parse(tomllib.loads(POLICY + environments + "\n[autonomy]\n" + text), "shipyard.toml").autonomy
+    return Policy.parse(tomllib.loads(POLICY + environments + "\n[autonomy]\n" + text), "shipmill.toml").autonomy
 
 
 def set_autonomy(repo: Repo, text: str) -> None:
@@ -97,7 +97,7 @@ def test_autonomy_deploy_names_a_declared_environment() -> None:
     known = r"known: staging, production$"
     with pytest.raises(
         ReleaseError,
-        match=r"^shipyard\.toml \[autonomy\]: deploy\.qa names no environment in \[environments\]; " + known,
+        match=r"^shipmill\.toml \[autonomy\]: deploy\.qa names no environment in \[environments\]; " + known,
     ):
         autonomy('deploy.qa = "propose"\n')
     with pytest.raises(
@@ -295,7 +295,7 @@ def test_a_proposal_opened_before_the_label_is_found_once_and_labelled(repo: Rep
     decision = proposed(repo, at_day(1))
     first = propose(repo.git, repo.policy, repo.github, decision.proposals)
     old = first[0].issue
-    repo.github.labels[old] = ()  # as an earlier shipyard opened it
+    repo.github.labels[old] = ()  # as an earlier shipmill opened it
     again = propose(repo.git, repo.policy, repo.github, decision.proposals)
     assert [(d.issue, d.outcome) for d in again][0] == (old, Outcome.UPDATED)  # labelled, though unchanged
     assert repo.github.labels[old] == (PROPOSAL_LABEL,)
@@ -357,7 +357,7 @@ def test_doctor_warns_when_it_cannot_read_issues(repo: Repo) -> None:
 CALLER_TEXT = """\
 jobs:
   prepare:
-    uses: romamo/shipyard/.github/workflows/prepare.yml@v0
+    uses: romamo/shipmill/.github/workflows/prepare.yml@v0
     permissions:
       contents: write
       issues: {prepare}
@@ -475,7 +475,7 @@ def test_cli_close_proposal(repo: Repo, capsys: pytest.CaptureFixture[str]) -> N
 LAND_CALLER = """\
 jobs:
   land:
-    uses: romamo/shipyard/.github/workflows/land.yml@v0
+    uses: romamo/shipmill/.github/workflows/land.yml@v0
     permissions:
       contents: write
       actions: write
@@ -505,4 +505,4 @@ def test_land_yml_closes_the_proposal_with_the_callers_grant_only() -> None:
     assert "\npermissions:" not in text
     job = text.split("\n  close-proposal:\n", 1)[1].split("\n  cleanup:\n", 1)[0]
     assert "    permissions:" not in job and job.startswith("    needs: land\n")
-    assert 'shipyard close-proposal --lane "$LANE" --version "$VERSION"' in job
+    assert 'shipmill close-proposal --lane "$LANE" --version "$VERSION"' in job

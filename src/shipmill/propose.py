@@ -1,4 +1,4 @@
-"""Release autonomy propose: one issue per lane saying what shipyard would release, opened
+"""Release autonomy propose: one issue per lane saying what shipmill would release, opened
 once and then kept up to date, so a person can release it by starting the lane"""
 
 import re
@@ -6,15 +6,15 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
-from shipyard.autonomy import HOLD_LABEL, Autonomy
-from shipyard.changelog import Changelog, Entry
-from shipyard.doctor import CALLER
-from shipyard.errors import ReleaseError
-from shipyard.github import OPEN_LIMIT, PROPOSAL_LABEL, GitHub, Issue
-from shipyard.gitrepo import Git
-from shipyard.planner import Proposal
-from shipyard.policy import Lane, Policy
-from shipyard.version import Version
+from shipmill.autonomy import HOLD_LABEL, Autonomy
+from shipmill.changelog import Changelog, Entry
+from shipmill.doctor import CALLER
+from shipmill.errors import ReleaseError
+from shipmill.github import OPEN_LIMIT, PROPOSAL_LABEL, GitHub, Issue
+from shipmill.gitrepo import Git
+from shipmill.planner import Proposal
+from shipmill.policy import Lane, Policy
+from shipmill.version import Version
 
 
 class Outcome(StrEnum):
@@ -32,7 +32,7 @@ class Proposed:
 
 def marker(lane: Lane) -> str:
     """The hidden line that finds a lane's proposal issue again, whatever its title says"""
-    return f"<!-- shipyard:propose lane={lane} -->"
+    return f"<!-- shipmill:propose lane={lane} -->"
 
 
 def title(proposal: Proposal) -> str:
@@ -47,7 +47,7 @@ def body(policy: Policy, proposal: Proposal, entries: list[Entry]) -> str:
         how = "To release it, start the lane by hand:"
     lines = [
         marker(proposal.lane),
-        f"shipyard would release **{proposal.version.tag}** on the {proposal.lane} lane now, but {proposal.cause}.",
+        f"shipmill would release **{proposal.version.tag}** on the {proposal.lane} lane now, but {proposal.cause}.",
         "",
         f"Base: `{proposal.base}`",
         "",
@@ -95,7 +95,7 @@ def _find(github: GitHub, mark: str) -> tuple[Issue, bool] | None:
     proposals = github.open_labelled_issues(PROPOSAL_LABEL)
     if len(proposals) >= OPEN_LIMIT:  # more may be cut off: refuse rather than open a duplicate
         raise ReleaseError(
-            f"{len(proposals)} open issues carry the {PROPOSAL_LABEL} label, as many as shipyard reads;"
+            f"{len(proposals)} open issues carry the {PROPOSAL_LABEL} label, as many as shipmill reads;"
             " close the stale ones"
         )
     labelled = [i for i in proposals if mark in i.body]

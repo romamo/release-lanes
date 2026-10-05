@@ -5,15 +5,15 @@ import datetime as dt
 import time
 from dataclasses import dataclass
 
-from shipyard.environments import deployed_from
-from shipyard.errors import ReleaseError
-from shipyard.github import GitHub
-from shipyard.gitrepo import Git
-from shipyard.policy import Lane, Policy
-from shipyard.stamp import notes, stamp, sync
-from shipyard.version import Version
+from shipmill.environments import deployed_from
+from shipmill.errors import ReleaseError
+from shipmill.github import GitHub
+from shipmill.gitrepo import Git
+from shipmill.policy import Lane, Policy
+from shipmill.stamp import notes, stamp, sync
+from shipmill.version import Version
 
-WORK_PREFIX = "shipyard/"  # the branch a release commit waits on while CI runs
+WORK_PREFIX = "shipmill/"  # the branch a release commit waits on while CI runs
 # A branch named the prefix itself blocks every work branch: git can't hold both
 # refs/heads/X and refs/heads/X/...
 BLOCKING_BRANCH = WORK_PREFIX.rstrip("/")

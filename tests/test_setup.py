@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from shipyard.cli import main
-from shipyard.config import config_path
-from shipyard.doctor import doctor
-from shipyard.errors import ReleaseError
-from shipyard.init import init
-from shipyard.policy import Lane, Policy
-from shipyard.roadmap import RoadmapConfig
+from shipmill.cli import main
+from shipmill.config import config_path
+from shipmill.doctor import doctor
+from shipmill.errors import ReleaseError
+from shipmill.init import init
+from shipmill.policy import Lane, Policy
+from shipmill.roadmap import RoadmapConfig
 
 from .conftest import Repo
 
@@ -17,7 +17,7 @@ CI = """\
 name: CI
 on:
   push:
-  workflow_call: # shipyard runs it on its release commit
+  workflow_call: # shipmill runs it on its release commit
     inputs:
       ref:
         type: string
@@ -37,15 +37,14 @@ jobs: {}
 
 
 def test_init_writes_a_policy_doctor_accepts(repo: Repo) -> None:
-    (repo.root / ".github" / "shipyard.toml").unlink()
+    (repo.root / ".github" / "shipmill.toml").unlink()
     repo.write(".github/workflows/ci.yml", CI)
     initialized = init(repo.root, "ci.yml", force=False)
     written = initialized.written
     assert [p.relative_to(repo.root).as_posix() for p in written] == [
-        ".github/shipyard.toml",
+        ".github/shipmill.toml",
         ".github/workflows/release.yml",
     ]
-    assert initialized.removed is None
     policy = Policy.load(written[0])
     assert (policy.name, policy.branch, policy.style.value, policy.version_files.value) == (
         "demo",
@@ -55,54 +54,24 @@ def test_init_writes_a_policy_doctor_accepts(repo: Repo) -> None:
     )
     caller = written[1].read_text(encoding="utf-8")
     assert "uses: ./.github/workflows/ci.yml" in caller
-    assert "romamo/shipyard/.github/workflows/prepare.yml@v0" in caller
+    assert "romamo/shipmill/.github/workflows/prepare.yml@v0" in caller
     checks = {c.name: c.status for c in doctor(repo.root)}
     assert checks["policy"] == checks["workflow"] == checks["ci"] == checks["changelog"] == "PASS"
-    assert "config" not in checks  # no alias to rename
-    with pytest.raises(ReleaseError, match="shipyard.toml, .github/workflows/release.yml exist; pass --force"):
+    with pytest.raises(ReleaseError, match="shipmill.toml, .github/workflows/release.yml exist; pass --force"):
         init(repo.root, "ci.yml", force=False)
 
 
-def test_init_refuses_an_alias_policy_and_force_replaces_it(repo: Repo) -> None:
-    repo.use_alias()
-    with pytest.raises(ReleaseError, match=r"^\.github/release-policy\.toml exists; pass --force"):
-        init(repo.root, "ci.yml", force=False)
-    assert not (repo.root / ".github" / "shipyard.toml").exists()  # nothing written on a refusal
-    initialized = init(repo.root, "ci.yml", force=True)
-    assert initialized.removed == repo.root / ".github" / "release-policy.toml"
-    assert not initialized.removed.exists()
-    assert repo.policy_file == ".github/shipyard.toml"
-
-
-def test_the_policy_loads_from_either_name_but_not_both(repo: Repo) -> None:
-    assert repo.policy_file == ".github/shipyard.toml"
+def test_the_policy_loads_from_its_file(repo: Repo) -> None:
+    assert repo.policy_file == ".github/shipmill.toml"
     assert repo.policy.name == "demo"
-    repo.use_alias()
-    assert repo.policy_file == ".github/release-policy.toml"
-    assert repo.policy.name == "demo"
-    repo.write(".github/shipyard.toml", repo.read(".github/release-policy.toml"))
-    with pytest.raises(ReleaseError, match="both .github/shipyard.toml and .github/release-policy.toml exist"):
-        config_path(repo.root)
-    [check] = [c for c in doctor(repo.root) if c.name == "policy"]
-    assert check.status == "FAIL" and "both" in check.detail
-    (repo.root / ".github" / "shipyard.toml").unlink()
-    (repo.root / ".github" / "release-policy.toml").unlink()
-    with pytest.raises(ReleaseError, match="no release policy at .*shipyard.toml \\(or its alias"):
+    (repo.root / ".github" / "shipmill.toml").unlink()
+    with pytest.raises(ReleaseError, match="^no release policy at .*shipmill.toml$"):
         config_path(repo.root)
 
 
-def test_doctor_names_the_policy_file_and_warns_on_the_alias(repo: Repo) -> None:
+def test_doctor_names_the_policy_file(repo: Repo) -> None:
     checks = {c.name: c for c in doctor(repo.root)}
-    assert checks["policy"].status == "PASS" and checks["policy"].detail.startswith(".github/shipyard.toml, mode")
-    assert "config" not in checks
-    repo.use_alias()
-    checks = {c.name: c for c in doctor(repo.root)}
-    assert checks["policy"].status == "PASS"
-    assert checks["policy"].detail.startswith(".github/release-policy.toml, mode")
-    assert checks["config"].status == "WARN"
-    assert checks["config"].detail.endswith(
-        "rename it to .github/shipyard.toml (git mv) once your Release workflow's `tool` is this release or newer"
-    )
+    assert checks["policy"].status == "PASS" and checks["policy"].detail.startswith(".github/shipmill.toml, mode")
 
 
 def test_doctor_reports_what_is_missing(repo: Repo) -> None:
@@ -161,7 +130,7 @@ def test_init_writes_an_environments_example_that_parses(repo: Repo) -> None:
     end = text.index("\n\n", start)
     example = "\n".join(line.removeprefix("#").removeprefix(" ") for line in text[start:end].splitlines())
     assert "${{ inputs.environment }}" in text
-    repo.write(".github/shipyard.toml", text[:start] + example + text[end:])
+    repo.write(".github/shipmill.toml", text[:start] + example + text[end:])
     environments = Policy.load(written[0]).environments
     assert [(e.name, e.lane, e.source, e.bake_minutes) for e in environments.values()] == [
         ("staging", Lane.RC, None, 0),
@@ -391,41 +360,41 @@ def test_doctor_fails_a_branch_on_origin_that_blocks_the_work_branch(repo: Repo)
         [found] = [c for c in doctor(repo.root) if c.name == "work branch"]
         return found.status, found.detail
 
-    repo.git.run("push", "-q", "origin", "main:refs/heads/shipyard-x", "main:refs/heads/shipyard/v1.0.1")
+    repo.git.run("push", "-q", "origin", "main:refs/heads/shipmill-x", "main:refs/heads/shipmill/v1.0.1")
     repo.git.run("fetch", "-q", "origin")
     assert check()[0] == "PASS"
 
-    repo.git.run("branch", "shipyard", "main")  # local only: pushes to origin don't see it
+    repo.git.run("branch", "shipmill", "main")  # local only: pushes to origin don't see it
     assert check() == (
         "WARN",
-        "a local branch 'shipyard' would block the work branch shipyard/<tag> once pushed to origin",
+        "a local branch 'shipmill' would block the work branch shipmill/<tag> once pushed to origin",
     )
 
-    repo.git.run("push", "-q", "origin", ":refs/heads/shipyard/v1.0.1", "shipyard:refs/heads/shipyard")
+    repo.git.run("push", "-q", "origin", ":refs/heads/shipmill/v1.0.1", "shipmill:refs/heads/shipmill")
     repo.git.run("fetch", "-q", "--prune", "origin")
     assert check() == (
         "FAIL",
-        "origin has a branch 'shipyard', which blocks the work branch shipyard/<tag>; delete or rename it",
+        "origin has a branch 'shipmill', which blocks the work branch shipmill/<tag>; delete or rename it",
     )
 
 
 def test_doctor_asks_origin_not_the_clones_refs(repo: Repo) -> None:
     # A shallow clone fetches one branch, so its refs/remotes never showed origin's
-    # 'shipyard' and doctor passed; a stale origin/shipyard failed it after the branch went
+    # 'shipmill' and doctor passed; a stale origin/shipmill failed it after the branch went
     def check(root: Path) -> str:
         [found] = [c for c in doctor(root) if c.name == "work branch"]
         return found.status
 
     origin = repo.root.parent / "origin.git"
-    repo.git.run("push", "-q", "origin", "main:refs/heads/shipyard")
+    repo.git.run("push", "-q", "origin", "main:refs/heads/shipmill")
     shallow = repo.root.parent / "shallow"
     repo.git.run("clone", "-q", "--depth", "1", origin.as_uri(), str(shallow))
-    assert not (shallow / ".git" / "refs" / "remotes" / "origin" / "shipyard").exists()
+    assert not (shallow / ".git" / "refs" / "remotes" / "origin" / "shipmill").exists()
     assert check(shallow) == "FAIL"
 
     repo.git.run("fetch", "-q", "origin")
-    repo.git.run("push", "-q", str(origin), ":refs/heads/shipyard")  # leaves origin/shipyard behind
-    assert repo.git.ok("show-ref", "--verify", "-q", "refs/remotes/origin/shipyard")
+    repo.git.run("push", "-q", str(origin), ":refs/heads/shipmill")  # leaves origin/shipmill behind
+    assert repo.git.ok("show-ref", "--verify", "-q", "refs/remotes/origin/shipmill")
     assert check(repo.root) == "PASS"
 
 
@@ -436,10 +405,10 @@ def test_doctor_warns_when_it_cannot_ask_origin(repo: Repo) -> None:
 
     repo.git.run("remote", "set-url", "origin", str(repo.root.parent / "gone.git"))
     status, detail = check()
-    assert status == "WARN" and detail.startswith("can't ask origin for a branch 'shipyard': ")
+    assert status == "WARN" and detail.startswith("can't ask origin for a branch 'shipmill': ")
 
     repo.git.run("remote", "remove", "origin")
-    assert check() == ("WARN", "no 'origin' remote to ask for a branch 'shipyard'")
+    assert check() == ("WARN", "no 'origin' remote to ask for a branch 'shipmill'")
 
 
 def test_doctor_reports_the_roadmap_only_when_configured(repo: Repo) -> None:

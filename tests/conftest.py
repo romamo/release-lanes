@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from shipyard.autonomy import HOLD_LABEL
-from shipyard.config import ALIAS_PATH, CONFIG_PATH, config_path
-from shipyard.github import Deployment, DeploymentState, DeploymentStatus, Issue, Milestone, WorkflowRun
-from shipyard.gitrepo import Git
-from shipyard.policy import Policy
+from shipmill.autonomy import HOLD_LABEL
+from shipmill.config import CONFIG_PATH, config_path
+from shipmill.github import Deployment, DeploymentState, DeploymentStatus, Issue, Milestone, WorkflowRun
+from shipmill.gitrepo import Git
+from shipmill.policy import Policy
 
 POLICY = """\
 name = "demo"
@@ -92,10 +92,10 @@ def at_day(days: float, hour: int = 8) -> dt.datetime:
 @dataclass
 class FakeGitHub:
     blockers: list[str] = field(default_factory=list)
-    holds: list[str] = field(default_factory=list)  # open shipyard-hold issues, '#N title'
-    issues: dict[int, Issue] = field(default_factory=dict)  # issues shipyard opened, by number
+    holds: list[str] = field(default_factory=list)  # open shipmill-hold issues, '#N title'
+    issues: dict[int, Issue] = field(default_factory=dict)  # issues shipmill opened, by number
     edits: int = 0  # update_issue calls
-    labels: dict[int, tuple[str, ...]] = field(default_factory=dict)  # the labels of issues shipyard opened
+    labels: dict[int, tuple[str, ...]] = field(default_factory=dict)  # the labels of issues shipmill opened
     comments: dict[int, list[str]] = field(default_factory=dict)  # by issue, oldest first
     labels_read: list[str] = field(default_factory=list)
     milestones: dict[str, Milestone] = field(default_factory=dict)
@@ -206,15 +206,8 @@ class Repo:
 
     @property
     def policy_file(self) -> str:
-        """The policy file shipyard reads here, relative to the root"""
+        """The policy file shipmill reads here, relative to the root"""
         return str(config_path(self.root).relative_to(self.root))
-
-    def use_alias(self) -> None:
-        """Move the policy to its alias name on main, as a repository set up before
-        shipyard.toml has it"""
-        self.git.run("mv", str(CONFIG_PATH), str(ALIAS_PATH))
-        self.git.run("commit", "-q", "-m", "Policy under its alias name")
-        self.git.run("push", "-q", "origin", "main")
 
     def at(self, when: dt.datetime) -> None:
         """Make the next commits and tags carry this time"""

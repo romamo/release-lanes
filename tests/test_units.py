@@ -3,12 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from shipyard.changelog import Changelog, Entry
-from shipyard.errors import ReleaseError
-from shipyard.github import PROPOSAL_LABEL, GhCli
-from shipyard.policy import Lane, Policy, Style
-from shipyard.schedule import Freeze, Window
-from shipyard.version import Part, Version
+from shipmill.changelog import Changelog, Entry
+from shipmill.errors import ReleaseError
+from shipmill.github import PROPOSAL_LABEL, GhCli
+from shipmill.policy import Lane, Policy, Style
+from shipmill.schedule import Freeze, Window
+from shipmill.version import Part, Version
 
 from .conftest import POLICY
 

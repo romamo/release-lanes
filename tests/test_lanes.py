@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from shipyard.changelog import Changelog
-from shipyard.errors import ReleaseError
-from shipyard.land import cleanup, land, prepare, work_branch
-from shipyard.planner import Decision, Event, Hotfix, Planner
-from shipyard.policy import Lane, Mode, Style
-from shipyard.version import Version
+from shipmill.changelog import Changelog
+from shipmill.errors import ReleaseError
+from shipmill.land import cleanup, land, prepare, work_branch
+from shipmill.planner import Decision, Event, Hotfix, Planner
+from shipmill.policy import Lane, Mode, Style
+from shipmill.version import Version
 
 from .conftest import Repo, at_day
 
@@ -59,11 +59,7 @@ def test_nothing_pending_skips_every_lane(repo: Repo) -> None:
     assert "dev: v1.0.0 already holds main's head" in decision.reason
 
 
-@pytest.mark.parametrize("alias", [False, True], ids=["shipyard.toml", "release-policy.toml"])
-def test_rc_lane_cuts_a_detached_release(repo: Repo, alias: bool) -> None:
-    if alias:  # a repository set up before shipyard.toml releases as it did
-        repo.use_alias()
-        assert repo.policy_file == ".github/release-policy.toml"
+def test_rc_lane_cuts_a_detached_release(repo: Repo) -> None:
     repo.merge(1, "Added", "Feature A", "src/a.py", "A = 1\n")
     main_before = repo.git.remote_branch("main")
     decision = plan(repo, at_day(1))
@@ -249,7 +245,7 @@ def test_land_refuses_an_existing_tag(repo: Repo) -> None:
 
 def test_prepare_names_a_branch_that_blocks_the_work_branch(repo: Repo) -> None:
     repo.merge(1, "Added", "Feature A")
-    repo.git.run("push", "-q", "origin", "main:refs/heads/shipyard", "main:refs/heads/shipyard-x")
+    repo.git.run("push", "-q", "origin", "main:refs/heads/shipmill", "main:refs/heads/shipmill-x")
     decision = plan(repo, at_day(1))
     assert decision.version is not None and decision.lane is not None
     day = at_day(1).date()
@@ -258,11 +254,11 @@ def test_prepare_names_a_branch_that_blocks_the_work_branch(repo: Repo) -> None:
     with pytest.raises(ReleaseError) as caught:
         prepare(*args, commit=True, push=True)
     assert str(caught.value) == (
-        f"origin has a branch 'shipyard', which blocks the work branch {work}; delete or rename it"
+        f"origin has a branch 'shipmill', which blocks the work branch {work}; delete or rename it"
     )
     assert repo.git.remote_branch(work) is None
 
-    repo.git.run("push", "-q", "origin", ":refs/heads/shipyard")  # shipyard-x stays: it blocks nothing
+    repo.git.run("push", "-q", "origin", ":refs/heads/shipmill")  # shipmill-x stays: it blocks nothing
     assert prepare(*args, commit=True, push=True).pushed
     assert repo.git.remote_branch(work) is not None
 

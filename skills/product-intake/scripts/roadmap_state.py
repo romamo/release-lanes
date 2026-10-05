@@ -6,8 +6,8 @@ Usage: roadmap_state.py <owner/repo> [--config PATH] [--specs DIR] [--label oppo
                         [--accepted-label planned] [--proposal-label milestone-proposal]
                         [--today YYYY-MM-DD] [--json]
 
-Milestones are the roadmap. The capacity comes from the shipyard config's [roadmap]
-section (.github/shipyard.toml, or its alias, in the current directory): wip, the issues
+Milestones are the roadmap. The capacity comes from the shipmill config's [roadmap]
+section (.github/shipmill.toml in the current directory): wip, the issues
 open at once across the open milestones (default 5), and cadence, the weeks from one
 milestone's due date to the next (default 2).
 
@@ -22,7 +22,7 @@ milestone's due date to the next (default 2).
                  milestone doesn't exist yet or lacks an opportunity it lists (and that
                  milestone isn't closed): create it, or add them
   UNREADABLE     a proposal whose body lacks the marker line
-                 <!-- shipyard:milestone title="<title>" due="YYYY-MM-DD" -->
+                 <!-- shipmill:milestone title="<title>" due="YYYY-MM-DD" -->
   NEXT           with no proposal open or waiting to be applied, the unplanned opportunities that fit the free
                  capacity (wip less the open issues in open milestones), and the next due
                  date (the latest open milestone's due date, or today, plus cadence weeks)
@@ -69,11 +69,11 @@ from intake_state import (
     split_repo,
 )
 
-WIP, CADENCE = 5, 2  # shipyard's roadmap.WIP and roadmap.CADENCE
-LIMITS = {"wip": (1, 100), "cadence": (1, 26)}  # shipyard's RoadmapConfig ranges
+WIP, CADENCE = 5, 2  # shipmill's roadmap.WIP and roadmap.CADENCE
+LIMITS = {"wip": (1, 100), "cadence": (1, 26)}  # shipmill's RoadmapConfig ranges
 ACTION = {"OVERDUE", "WIP_OVER", "APPROVED", "UNREADABLE", "NEXT"}
 ORDER = ("WIP_OVER", "OVERDUE", "APPROVED", "UNREADABLE", "NEXT", "UNPLANNED", "PROPOSAL_OPEN", "MILESTONE")
-MARKER = re.compile(r'<!--\s*shipyard:milestone\s+title="(?P<title>[^"]+)"\s+due="(?P<due>\d{4}-\d{2}-\d{2})"\s*-->')
+MARKER = re.compile(r'<!--\s*shipmill:milestone\s+title="(?P<title>[^"]+)"\s+due="(?P<due>\d{4}-\d{2}-\d{2})"\s*-->')
 APPROVE = re.compile(r"^\s*approved?\b", re.IGNORECASE)
 SPEC_LINK = re.compile(r"docs/specs/(?P<number>\d{3,})-[a-z0-9]+(?:-[a-z0-9]+)*\.md")
 SPEC_ISSUE = re.compile(r"^\s*-\s+(?:[\w.-]+/[\w.-]+)?#\d+\b")
@@ -245,7 +245,7 @@ def plan(
             proposed.update(listed)
         if marker is None:
             if p["state"] == "OPEN" or approved(p):
-                rows.append(Row("UNREADABLE", p["number"], p["title"], "no shipyard:milestone marker line", listed))
+                rows.append(Row("UNREADABLE", p["number"], p["title"], "no shipmill:milestone marker line", listed))
                 held = True
                 proposed.update(listed)
             continue
@@ -310,7 +310,7 @@ def show(row: Row) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("repo", help="owner/name")
-    parser.add_argument("--config", type=Path, help="the shipyard config (default: .github/shipyard.toml or its alias)")
+    parser.add_argument("--config", type=Path, help="the shipmill config (default: .github/shipmill.toml)")
     parser.add_argument("--specs", type=Path, default=Path("docs/specs"), help="the specs folder")
     parser.add_argument("--label", default="opportunity", help="the label of opportunity issues")
     parser.add_argument("--accepted-label", default="planned", help="the label the maintainer accepts with")

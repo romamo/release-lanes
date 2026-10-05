@@ -65,7 +65,7 @@ def opportunity(number: int, requests: int, thumbs: int = 0, spec: str = "", **k
 
 
 def proposal(number: int, listed: str, *, marker: bool = True, **kwargs: Any) -> dict[str, Any]:
-    head = '<!-- shipyard:milestone title="0.12.0" due="2026-10-18" -->\n\n' if marker else ""
+    head = '<!-- shipmill:milestone title="0.12.0" due="2026-10-18" -->\n\n' if marker else ""
     return issue(number, f"{head}## Opportunities\n\n{listed}\n", labels=("milestone-proposal",), **kwargs)
 
 
@@ -247,7 +247,7 @@ def test_a_proposal_closed_without_approval_or_unreadable(rs: ModuleType, specs:
 
 
 def test_the_roadmap_config_defaults_and_limits(rs: ModuleType, tmp_path: Path) -> None:
-    config = tmp_path / "shipyard.toml"
+    config = tmp_path / "shipmill.toml"
     assert rs.roadmap(None) == rs.Roadmap(wip=5, cadence=2)
     config.write_text('name = "x"\n')
     assert rs.roadmap(config) == rs.Roadmap(wip=5, cadence=2)

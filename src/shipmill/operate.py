@@ -1,4 +1,4 @@
-"""shipyard operate: watch each environment in [environments] and move releases along.
+"""shipmill operate: watch each environment in [environments] and move releases along.
 
 Each run reads what runs where from GitHub's deployments, checks each environment's health
 URL, records the result as a deployment status (the health history: no state lives outside
@@ -12,7 +12,7 @@ GitHub, D-6), and then:
 Either deploy follows the environment's deploy autonomy under the hold: act dispatches its
 workflow, propose opens or updates one issue that `--approve <env>` acts on, observe only
 reports. A proposal closes once the environment runs its tag or a later one, whoever
-deployed it. shipyard deploys a tag to an environment at most once: a deployment of that tag
+deployed it. shipmill deploys a tag to an environment at most once: a deployment of that tag
 there, in any state, means it was tried, and so does a run of the environment's workflow on
 the tag (still queued, or failed before its deploy job made a deployment).
 
@@ -34,7 +34,7 @@ rollback is the one deploy exempt from deploying a tag at most once: its tag ran
 before by definition. It is still started once: a deployment of it after the bad one, or a
 run of the workflow on it since the checks began failing, means it was. Later runs comment
 on the incident instead of opening another: when the environment is healthy again, and
-when the rollback's tag fails its checks too, where shipyard stops rather than guess a
+when the rollback's tag fails its checks too, where shipmill stops rather than guess a
 second time. The planner holds the blocker lanes while an incident is open."""
 
 import datetime as dt
@@ -50,19 +50,19 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
-from shipyard.autonomy import HOLD_LABEL, Autonomy, EnvironmentName, Hold, Stage
-from shipyard.doctor import OPERATE_CALLER
-from shipyard.environments import Environment
-from shipyard.errors import ReleaseError
-from shipyard.github import Deployment, DeploymentState, DeploymentStatus, GitHub, Issue, WorkflowRun
-from shipyard.gitrepo import Tag
-from shipyard.policy import Lane, Policy
-from shipyard.propose import find_proposal, upsert
-from shipyard.version import PATTERN, TAG_PREFIX, Version
+from shipmill.autonomy import HOLD_LABEL, Autonomy, EnvironmentName, Hold, Stage
+from shipmill.doctor import OPERATE_CALLER
+from shipmill.environments import Environment
+from shipmill.errors import ReleaseError
+from shipmill.github import Deployment, DeploymentState, DeploymentStatus, GitHub, Issue, WorkflowRun
+from shipmill.gitrepo import Tag
+from shipmill.policy import Lane, Policy
+from shipmill.propose import find_proposal, upsert
+from shipmill.version import PATTERN, TAG_PREFIX, Version
 
 HEALTH_TIMEOUT = 10.0  # seconds
 MISSED_GRACE = dt.timedelta(minutes=30)  # land dispatches right after tagging; give that deploy time to show
-STATUS_PREFIX = "shipyard health"  # starts the description of every status shipyard writes
+STATUS_PREFIX = "shipmill health"  # starts the description of every status shipmill writes
 _BODY_LIMIT = 64 * 1024
 _DESCRIPTION_LIMIT = 140  # GitHub's limit on a status description
 _EXCERPT_LIMIT = 300  # characters of a failing health body an incident quotes
@@ -91,7 +91,7 @@ class Http(Protocol):
 
 class UrllibHttp:
     def get(self, url: str, timeout: float) -> HttpResponse:
-        request = urllib.request.Request(url, headers={"User-Agent": "shipyard-operate"})
+        request = urllib.request.Request(url, headers={"User-Agent": "shipmill-operate"})
         start = time.monotonic()
         try:
             with urllib.request.urlopen(request, timeout=timeout) as answer:
@@ -183,7 +183,7 @@ def named_version(body: str) -> str | None:
 
 
 def tag_of(deployment: Deployment, tags: Sequence[Tag]) -> Version | None:
-    """The release a deployment runs: its ref when that is a release tag (shipyard dispatches
+    """The release a deployment runs: its ref when that is a release tag (shipmill dispatches
     deploys on the tag), else the newest release tag on its ref when the ref is a sha"""
     ref = deployment.ref.removeprefix("refs/tags/")
     if ref.startswith(TAG_PREFIX) and PATTERN.fullmatch(ref[len(TAG_PREFIX) :]):
@@ -264,24 +264,24 @@ def observe(github: GitHub, http: Http, env: Environment, tags: Sequence[Tag], n
 class IncidentState(StrEnum):
     FAILING = "failing"  # no rollback made: none to make, or rollback autonomy is observe
     PROPOSED = "proposed"  # a rollback waits on --approve-rollback
-    ROLLED_BACK = "rolled-back"  # shipyard started the rollback
+    ROLLED_BACK = "rolled-back"  # shipmill started the rollback
     STOPPED = "stopped"  # the rollback's tag fails its checks too: no second rollback
     HEALTHY = "healthy"  # healthy again, on the bad tag or the rollback's
 
 
 _INCIDENT = re.compile(
-    r"<!-- shipyard:incident env=(?P<env>\S+) tag=(?P<tag>\S+) to=(?P<to>\S+) state=(?P<state>\S+) -->"
+    r"<!-- shipmill:incident env=(?P<env>\S+) tag=(?P<tag>\S+) to=(?P<to>\S+) state=(?P<state>\S+) -->"
 )
 
 
 def incident_line(env: str, tag: Version, to: Version | None, state: IncidentState) -> str:
     """The hidden line that finds an environment's incident again, and keeps its state"""
-    return f"<!-- shipyard:incident env={env} tag={tag.tag} to={to.tag if to else '-'} state={state} -->"
+    return f"<!-- shipmill:incident env={env} tag={tag.tag} to={to.tag if to else '-'} state={state} -->"
 
 
 @dataclass(frozen=True, slots=True)
 class Incident:
-    """An incident issue shipyard opened: the environment, its bad tag, the rollback's tag"""
+    """An incident issue shipmill opened: the environment, its bad tag, the rollback's tag"""
 
     issue: Issue
     env: str
@@ -291,7 +291,7 @@ class Incident:
 
     @classmethod
     def read(cls, issue: Issue) -> Incident | None:
-        """None for an issue with the label that shipyard didn't open"""
+        """None for an issue with the label that shipmill didn't open"""
         found = _INCIDENT.search(issue.body)
         if found is None:
             return None
@@ -313,7 +313,7 @@ class Incident:
 
 
 def incidents(policy: Policy, github: GitHub) -> list[Incident]:
-    """The incidents shipyard opened, open and closed, newest first"""
+    """The incidents shipmill opened, open and closed, newest first"""
     found = (Incident.read(i) for i in github.labelled_issues(policy.operate.incident_label))
     return [i for i in found if i is not None]
 
@@ -324,7 +324,7 @@ def incident_title(env: str, tag: Version) -> str:
 
 def _last_good(github: GitHub, seen: Observed, tags: Sequence[Tag]) -> Version | None:
     """The tag of the newest deployment before the current one that reached success there,
-    on another tag, whose last health check (if shipyard wrote one) didn't fail"""
+    on another tag, whose last health check (if shipmill wrote one) didn't fail"""
     assert seen.current is not None and seen.tag is not None  # only a checked deployment rolls back
     for deployment in seen.deployments:
         tag = tag_of(deployment, tags)
@@ -418,7 +418,7 @@ def incident_body(policy: Policy, seen: Observed, rollback: Rollback, now: dt.da
         "",
         f"While this issue is open, the {lanes} lanes don't release: the `{policy.operate.incident_label}`"
         " label holds them like the blocker label. Close it once resolved, by hand or with a hotfix pull"
-        f" request's \"Fixes #N\". shipyard comments here when {env} is healthy again, and doesn't roll back"
+        f" request's \"Fixes #N\". shipmill comments here when {env} is healthy again, and doesn't roll back"
         " a second time if the rollback fails its checks too.",
     ]
     return "\n".join(lines) + "\n"
@@ -462,7 +462,7 @@ def _incident(
         return None
     if incident is not None and incident.issue.closed:
         return (
-            f"incident #{incident.number} for {incident.tag.tag} was closed while it failed; shipyard opens"
+            f"incident #{incident.number} for {incident.tag.tag} was closed while it failed; shipmill opens"
             " another only if it fails again after recovering"
         )
     if incident is None:
@@ -495,7 +495,7 @@ def _incident(
         return f"incident #{incident.number}: the rollback to {seen.tag.tag} fails too; waiting for a person"
     if not dry_run:
         stop = (
-            f"{seen.tag.tag}, the rollback, fails its health checks too ({seen.probe.detail}). shipyard doesn't"
+            f"{seen.tag.tag}, the rollback, fails its health checks too ({seen.probe.detail}). shipmill doesn't"
             f" roll {env} back a second time: a second automatic guess is worse than waiting for a person."
         )
         github.comment_issue(incident.number, stop)
@@ -628,11 +628,11 @@ def _started(github: GitHub, env: Environment, tag: Version, since: dt.datetime)
 
 
 def deploy_marker(env: str) -> str:
-    return f"<!-- shipyard:propose deploy={env} -->"
+    return f"<!-- shipmill:propose deploy={env} -->"
 
 
 def _tag_line(tag: Version) -> str:
-    return f"<!-- shipyard:tag={tag.tag} -->"
+    return f"<!-- shipmill:tag={tag.tag} -->"
 
 
 def proposal_title(env: Environment, wanted: Wanted) -> str:
@@ -649,7 +649,7 @@ def proposal_body(env: Environment, wanted: Wanted, cause: str) -> str:
         [
             deploy_marker(env.name),
             _tag_line(wanted.tag),
-            f"shipyard would deploy **{wanted.tag.tag}** to {env.name} now ({wanted.why}), but {cause}.",
+            f"shipmill would deploy **{wanted.tag.tag}** to {env.name} now ({wanted.why}), but {cause}.",
             "",
             how,
             "",
@@ -663,7 +663,7 @@ def proposal_body(env: Environment, wanted: Wanted, cause: str) -> str:
     )
 
 
-_TAG_LINE = re.compile(r"<!-- shipyard:tag=(?P<tag>\S+) -->")
+_TAG_LINE = re.compile(r"<!-- shipmill:tag=(?P<tag>\S+) -->")
 
 
 def _close_deployed(github: GitHub, seen: Observed, dry_run: bool) -> str | None:
@@ -745,13 +745,13 @@ def operate(
         elif (tried := seen.tried(wanted.tag)) is not None:
             states = github.deployment_statuses(tried.id)
             state = states[-1].state if states else DeploymentState.PENDING
-            actions.append(f"{wanted.tag.tag} was deployed here already ({state}); shipyard doesn't deploy it again")
+            actions.append(f"{wanted.tag.tag} was deployed here already ({state}); shipmill doesn't deploy it again")
         elif (started := _started(github, seen.env, wanted.tag, wanted.since)) is not None:
             # a deploy job makes its deployment only when it starts, after the jobs it needs and
             # a wait for a runner: until then the run is the only sign the tag was dispatched
             actions.append(
                 f"{seen.env.workflow} already ran with {wanted.tag.tag} ({started.status}, run {started.id});"
-                " shipyard doesn't deploy it again"
+                " shipmill doesn't deploy it again"
             )
         else:
             waits = True
@@ -846,7 +846,7 @@ def summary(reports: Sequence[Report], dry_run: bool) -> str:
     if not reports:
         return "No [environments] in the config: nothing to operate.\n"
     lines = [
-        f"### shipyard operate{' (dry run)' if dry_run else ''}",
+        f"### shipmill operate{' (dry run)' if dry_run else ''}",
         "",
         "| Environment | Tag | Health | Action |",
         "|---|---|---|---|",

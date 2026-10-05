@@ -1,31 +1,31 @@
 #!/usr/bin/env python3
-"""Report what a repo still needs before the shipyard skills can triage, land, and
+"""Report what a repo still needs before the shipmill skills can triage, land, and
 release it on their own, and with --fix make the parts that need no decision.
 
 Usage: setup_state.py <owner/repo> [--repo-dir PATH] [--fix] [--json]
 
-Releases (.github/shipyard.toml, or its alias .github/release-policy.toml):
-  RELEASE_MISSING  no config with release keys: shipyard-setup's steps 1 to 5
-  RELEASE_FOREIGN  a config, but .github/workflows/release.yml doesn't call shipyard's
+Releases (.github/shipmill.toml):
+  RELEASE_MISSING  no config with release keys: shipmill-setup's steps 1 to 5
+  RELEASE_FOREIGN  a config, but .github/workflows/release.yml doesn't call shipmill's
                    workflows
   RELEASE_OFF      mode = "off"
   RELEASE_DRY_RUN  mode = "dry-run": run the Release workflow by hand, then the user
                    sets mode = "release"
   RELEASE_READY    mode = "release"
 
-Agents (the config's [agents] section, read by `shipyard gate`):
+Agents (the config's [agents] section, read by `shipmill gate`):
   AGENTS_MISSING   no [agents] section: the gate has no prompt. Fine when agents run
                    only on demand
   AGENTS_OK        a section with a prompt
 
 Plugin (.claude/settings.json, so every session in the repo loads the skills):
-  PLUGIN_MISSING   shipyard@shipyard is not enabled; --fix adds the marketplace and
+  PLUGIN_MISSING   shipmill@shipmill is not enabled; --fix adds the marketplace and
                    enables it, keeping every other key
   PLUGIN_DISABLED  enabledPlugins sets it to false on purpose; --fix leaves it
   PLUGIN_OK        enabled
 
-Labels (the triage skills and shipyard read them):
-  LABELS_MISSING   some of postponed, blocked, shipyard-hold, and the config's
+Labels (the triage skills and shipmill read them):
+  LABELS_MISSING   some of postponed, blocked, shipmill-hold, and the config's
                    blocker_label (default release-blocker) don't exist; --fix creates
                    them on GitHub
   LABELS_OK        all exist
@@ -46,16 +46,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NoReturn
 
-CONFIG = Path(".github/shipyard.toml")
-ALIAS = Path(".github/release-policy.toml")
+CONFIG = Path(".github/shipmill.toml")
 CALLER = Path(".github/workflows/release.yml")
 SETTINGS = Path(".claude/settings.json")
-PLUGIN = "shipyard@shipyard"
-MARKETPLACE = {"source": {"source": "github", "repo": "romamo/shipyard"}, "autoUpdate": True}
+PLUGIN = "shipmill@shipmill"
+MARKETPLACE = {"source": {"source": "github", "repo": "romamo/shipmill"}, "autoUpdate": True}
 LABELS = {
     "postponed": ("c5def5", "Triage decided not now; revisited after the next stable release"),
     "blocked": ("fbca04", "Waits on another issue, here or upstream"),
-    "shipyard-hold": ("000000", "While open, no lane releases except a hotfix started by hand"),
+    "shipmill-hold": ("000000", "While open, no lane releases except a hotfix started by hand"),
 }
 BLOCKER = ("b60205", "Holds the release lanes the policy names until closed")
 DONE = {"RELEASE_READY", "AGENTS_OK", "PLUGIN_OK", "LABELS_OK"}
@@ -87,10 +86,8 @@ def fail(message: str) -> NoReturn:
 
 
 def config_file(repo_dir: Path) -> Path | None:
-    found = [repo_dir / p for p in (CONFIG, ALIAS) if (repo_dir / p).is_file()]
-    if len(found) > 1:
-        fail(f"both {CONFIG} and {ALIAS} exist; keep one, git rm the other")
-    return found[0] if found else None
+    path = repo_dir / CONFIG
+    return path if path.is_file() else None
 
 
 def policy_value(text: str, key: str) -> str | None:
@@ -98,18 +95,18 @@ def policy_value(text: str, key: str) -> str | None:
     return found.group(1) if found else None
 
 
-def calls_shipyard(repo_dir: Path) -> bool:
-    """release.yml calls shipyard's prepare workflow, from romamo/shipyard or, in shipyard
+def calls_shipmill(repo_dir: Path) -> bool:
+    """release.yml calls shipmill's prepare workflow, from romamo/shipmill or, in shipmill
     itself and its forks, from a local copy"""
     caller = repo_dir / CALLER
     if not caller.is_file():
         return False
     text = caller.read_text(encoding="utf-8")
     local = repo_dir / ".github" / "workflows" / "prepare.yml"
-    return "romamo/shipyard/" in text or (
+    return "romamo/shipmill/" in text or (
         "./.github/workflows/prepare.yml" in text
         and local.is_file()
-        and local.read_text(encoding="utf-8").startswith("name: shipyard prepare")
+        and local.read_text(encoding="utf-8").startswith("name: shipmill prepare")
     )
 
 
@@ -117,25 +114,25 @@ def release_row(repo_dir: Path) -> Row:
     config = config_file(repo_dir)
     mode = policy_value(config.read_text(encoding="utf-8"), "mode") if config else None
     if config is None or mode is None:
-        return Row("RELEASE_MISSING", f"no release keys in {CONFIG}: shipyard-setup steps 1 to 5")
-    if not calls_shipyard(repo_dir):
-        return Row("RELEASE_FOREIGN", f"{CALLER} doesn't call shipyard's workflows")
+        return Row("RELEASE_MISSING", f"no release keys in {CONFIG}: shipmill-setup steps 1 to 5")
+    if not calls_shipmill(repo_dir):
+        return Row("RELEASE_FOREIGN", f"{CALLER} doesn't call shipmill's workflows")
     if mode == "release":
         return Row("RELEASE_READY", "mode = release")
     if mode == "dry-run":
         return Row("RELEASE_DRY_RUN", "run the Release workflow by hand, then set mode = release")
     if mode == "off":
-        return Row("RELEASE_OFF", "mode = off: shipyard never releases")
+        return Row("RELEASE_OFF", "mode = off: shipmill never releases")
     fail(f"{config}: mode must be off, dry-run, or release, got {mode!r}")
 
 
 def agents_row(repo_dir: Path) -> Row:
-    """Presence only; `shipyard gate` and the release config loader validate the section"""
+    """Presence only; `shipmill gate` and the release config loader validate the section"""
     config = config_file(repo_dir)
     text = config.read_text(encoding="utf-8") if config else ""
     section = re.search(r"^\[agents\][^\n]*\n(.*?)(?=^\[|\Z)", text, re.MULTILINE | re.DOTALL)
     if section is None or not re.search(r"^prompt\s*=", section.group(1), re.MULTILINE):
-        return Row("AGENTS_MISSING", f"no [agents] prompt in {CONFIG}: needed only for `shipyard gate`")
+        return Row("AGENTS_MISSING", f"no [agents] prompt in {CONFIG}: needed only for `shipmill gate`")
     return Row("AGENTS_OK", "[agents] has a prompt")
 
 
@@ -167,10 +164,10 @@ def plugin_row(settings: dict[str, Any]) -> Row:
 
 
 def enable_plugin(settings: dict[str, Any]) -> dict[str, Any]:
-    """The settings with the shipyard marketplace known and the plugin on. An existing
+    """The settings with the shipmill marketplace known and the plugin on. An existing
     marketplace entry (a fork, a local path) is kept"""
     merged = dict(settings)
-    merged["extraKnownMarketplaces"] = {"shipyard": MARKETPLACE, **settings.get("extraKnownMarketplaces", {})}
+    merged["extraKnownMarketplaces"] = {"shipmill": MARKETPLACE, **settings.get("extraKnownMarketplaces", {})}
     merged["enabledPlugins"] = {**settings.get("enabledPlugins", {}), PLUGIN: True}
     return merged
 
@@ -189,7 +186,7 @@ def wanted_labels(repo_dir: Path) -> dict[str, tuple[str, str]]:
 def labels_row(missing: list[str]) -> Row:
     if missing:
         return Row("LABELS_MISSING", ", ".join(missing))
-    return Row("LABELS_OK", "postponed, blocked, shipyard-hold, and the blocker label exist")
+    return Row("LABELS_OK", "postponed, blocked, shipmill-hold, and the blocker label exist")
 
 
 def existing_labels(repo: str) -> set[str]:

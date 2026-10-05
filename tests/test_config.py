@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from shipyard.agents import AgentsConfig
-from shipyard.errors import ReleaseError
-from shipyard.policy import Policy
+from shipmill.agents import AgentsConfig
+from shipmill.errors import ReleaseError
+from shipmill.policy import Policy
 
 from .conftest import POLICY
 
@@ -131,78 +131,78 @@ CASES: dict[str, list[Change]] = {
 
 
 MESSAGES: dict[str, str] = {
-    "top unknown key": "shipyard.toml: unknown keys ['colour']; allowed: ['after_stamp', 'agents', 'autonomy', 'bot', 'branch', 'bump', 'changelog', 'environments', 'gates', 'lanes', 'mode', 'name', 'operate', 'publish', 'roadmap', 'version_files', 'version_lines']",
-    "top name required": "shipyard.toml: name is required",
-    "top name a string": "shipyard.toml: name must be a string, got 1",
-    "top mode enum": "shipyard.toml: mode must be one of ['off', 'dry-run', 'release'], got 'on'",
-    "top version_files enum": "shipyard.toml: version_files must be one of ['pyproject', 'none'], got 'setup'",
-    "top after_stamp a list": "shipyard.toml: after_stamp must be a list of strings, got 'x'",
-    "top after_stamp non-empty strings": "shipyard.toml: after_stamp must be a list of non-empty strings",
-    "top after_stamp empty command": "shipyard.toml: after_stamp holds an empty command",
-    "changelog unknown key": "shipyard.toml [changelog]: unknown keys ['colour']; allowed: ['path', 'style']",
-    "changelog style enum": "shipyard.toml [changelog]: style must be one of ['keep-a-changelog', 'dash'], got 'plain'",
-    "changelog required": "shipyard.toml: changelog is required",
-    "changelog a table": "shipyard.toml: changelog must be a table, got 1",
-    "changelog path a string": "shipyard.toml [changelog]: path must be a string, got 1",
-    "bump unknown key": "shipyard.toml [bump]: unknown keys ['colour']; allowed: ['from', 'major', 'minor', 'patch']",
-    "bump from enum": "shipyard.toml [bump]: from must be one of ['headings', 'paths'], got 'titles'",
-    "bump heading twice": "shipyard.toml: [bump] lists heading 'Added' twice",
-    "bump no headings": "shipyard.toml: [bump] from = 'headings' needs major, minor, or patch lists",
-    "bump headings a list": "shipyard.toml [bump]: patch must be a list of strings, got 'Fixed'",
-    "bump paths unknown key": "shipyard.toml [bump]: unknown keys ['major', 'minor', 'patch']; allowed: ['from', 'minor_paths']",
-    "bump paths required": "shipyard.toml [bump]: minor_paths is required",
-    "bump paths empty": "shipyard.toml: [bump] from = 'paths' needs a non-empty minor_paths",
-    "gates unknown key": "shipyard.toml [gates]: unknown keys ['colour']; allowed: ['blocker_label', 'blocker_lanes', 'freeze', 'freeze_lanes']",
-    "gates blocker_lanes enums": "shipyard.toml [gates]: blocker_lanes holds values outside ['dev', 'rc', 'stable', 'hotfix']",
-    "gates freeze strings": "shipyard.toml [gates]: freeze must be a list of strings, got 1",
-    "gates a table": "shipyard.toml: gates must be a table, got 1",
-    "publish unknown key": "shipyard.toml [publish]: unknown keys ['colour']; allowed: ['release_title', 'tag_message']",
-    "publish tag_message a string": "shipyard.toml [publish]: tag_message must be a string, got 1",
-    "bot unknown key": "shipyard.toml [bot]: unknown keys ['colour']; allowed: ['email', 'name']",
-    "bot email a string": "shipyard.toml [bot]: email must be a string, got 1",
-    "lanes unknown lane": "shipyard.toml [lanes]: unknown keys ['beta']; allowed: ['dev', 'hotfix', 'rc', 'stable']",
-    "lanes stable promotes without rc": "shipyard.toml: lanes.stable promotes from rc, but lanes.rc is not enabled",
-    "lanes none": "shipyard.toml: [lanes] enables no lane",
-    "lane hotfix unknown key": "shipyard.toml [lanes] [hotfix]: unknown keys ['schedule']; allowed: ['dispatch', 'github_release']",
-    "lane dev unknown key": "shipyard.toml [lanes] [dev]: unknown keys ['marker']; allowed: ['dispatch', 'github_release', 'milestone', 'quiet_minutes', 'schedule']",
-    "lane quiet range": "shipyard.toml [lanes] [dev]: quiet_minutes must be in 0..300, got 301",
-    "lane quiet not a bool": "shipyard.toml [lanes] [dev]: quiet_minutes must be an integer, got True",
-    "lane promote_from": "shipyard.toml [lanes] [stable]: promote_from is 'rc' or absent, got 'dev'",
-    "lane soak without promote": "shipyard.toml [lanes] [stable]: min_soak_days needs promote_from = 'rc'",
-    "lane marker": "shipyard.toml [lanes] [rc]: marker is a, b, or rc, got 'c'",
-    "lane dispatch": "shipyard.toml [lanes] [stable]: dispatch names a file in .github/workflows, got '../x.yml'",
-    "lane milestone a bool": "shipyard.toml [lanes] [dev]: milestone must be true or false, got 1",
-    "lane a table": "shipyard.toml [lanes]: dev must be a table, got 1",
-    "version_lines unknown key": "shipyard.toml [[version_lines]][0]: unknown keys ['colour']; allowed: ['file', 'pattern', 'replace']",
-    "version_lines pattern": "shipyard.toml [[version_lines]][0].pattern: missing ), unterminated subpattern at position 5",
-    "version_lines array of tables": "shipyard.toml: version_lines must be an array of tables, [[version_lines]]",
-    "environments unknown key": "shipyard.toml [environments] [staging]: unknown keys ['region']; allowed: ['bake_minutes', 'from', 'health', 'lane', 'workflow']",
-    "environments a table": "shipyard.toml [environments]: staging must be a table, got 1",
-    "environments the section a table": "shipyard.toml: environments must be a table, got 1",
-    "operate unknown key": "shipyard.toml [operate]: unknown keys ['rollback']; allowed: ['incident_label', 'rollback_after']",
-    "operate range": "shipyard.toml [operate]: rollback_after must be in 1..20, got 0",
-    "operate integer": "shipyard.toml [operate]: rollback_after must be an integer, got '3'",
-    "operate empty label": "shipyard.toml [operate]: incident_label must not be empty",
-    "operate a table": "shipyard.toml: operate must be a table, got 1",
-    "autonomy unknown key": "shipyard.toml [autonomy]: unknown keys ['releases']; allowed: ['deploy', 'intake', 'release', 'rollback']",
-    "autonomy level": "shipyard.toml [autonomy]: release must be one of ['observe', 'propose', 'act'], got 'auto'",
-    "autonomy level a string": "shipyard.toml [autonomy]: rollback must be one of ['observe', 'propose', 'act'], got True",
-    "autonomy deploy a table": "shipyard.toml [autonomy]: deploy is a table of environments, such as deploy.production = 'propose'",
-    "autonomy deploy level": "shipyard.toml [autonomy] [deploy]: staging must be one of ['observe', 'propose', 'act'], got 'yes'",
+    "top unknown key": "shipmill.toml: unknown keys ['colour']; allowed: ['after_stamp', 'agents', 'autonomy', 'bot', 'branch', 'bump', 'changelog', 'environments', 'gates', 'lanes', 'mode', 'name', 'operate', 'publish', 'roadmap', 'version_files', 'version_lines']",
+    "top name required": "shipmill.toml: name is required",
+    "top name a string": "shipmill.toml: name must be a string, got 1",
+    "top mode enum": "shipmill.toml: mode must be one of ['off', 'dry-run', 'release'], got 'on'",
+    "top version_files enum": "shipmill.toml: version_files must be one of ['pyproject', 'none'], got 'setup'",
+    "top after_stamp a list": "shipmill.toml: after_stamp must be a list of strings, got 'x'",
+    "top after_stamp non-empty strings": "shipmill.toml: after_stamp must be a list of non-empty strings",
+    "top after_stamp empty command": "shipmill.toml: after_stamp holds an empty command",
+    "changelog unknown key": "shipmill.toml [changelog]: unknown keys ['colour']; allowed: ['path', 'style']",
+    "changelog style enum": "shipmill.toml [changelog]: style must be one of ['keep-a-changelog', 'dash'], got 'plain'",
+    "changelog required": "shipmill.toml: changelog is required",
+    "changelog a table": "shipmill.toml: changelog must be a table, got 1",
+    "changelog path a string": "shipmill.toml [changelog]: path must be a string, got 1",
+    "bump unknown key": "shipmill.toml [bump]: unknown keys ['colour']; allowed: ['from', 'major', 'minor', 'patch']",
+    "bump from enum": "shipmill.toml [bump]: from must be one of ['headings', 'paths'], got 'titles'",
+    "bump heading twice": "shipmill.toml: [bump] lists heading 'Added' twice",
+    "bump no headings": "shipmill.toml: [bump] from = 'headings' needs major, minor, or patch lists",
+    "bump headings a list": "shipmill.toml [bump]: patch must be a list of strings, got 'Fixed'",
+    "bump paths unknown key": "shipmill.toml [bump]: unknown keys ['major', 'minor', 'patch']; allowed: ['from', 'minor_paths']",
+    "bump paths required": "shipmill.toml [bump]: minor_paths is required",
+    "bump paths empty": "shipmill.toml: [bump] from = 'paths' needs a non-empty minor_paths",
+    "gates unknown key": "shipmill.toml [gates]: unknown keys ['colour']; allowed: ['blocker_label', 'blocker_lanes', 'freeze', 'freeze_lanes']",
+    "gates blocker_lanes enums": "shipmill.toml [gates]: blocker_lanes holds values outside ['dev', 'rc', 'stable', 'hotfix']",
+    "gates freeze strings": "shipmill.toml [gates]: freeze must be a list of strings, got 1",
+    "gates a table": "shipmill.toml: gates must be a table, got 1",
+    "publish unknown key": "shipmill.toml [publish]: unknown keys ['colour']; allowed: ['release_title', 'tag_message']",
+    "publish tag_message a string": "shipmill.toml [publish]: tag_message must be a string, got 1",
+    "bot unknown key": "shipmill.toml [bot]: unknown keys ['colour']; allowed: ['email', 'name']",
+    "bot email a string": "shipmill.toml [bot]: email must be a string, got 1",
+    "lanes unknown lane": "shipmill.toml [lanes]: unknown keys ['beta']; allowed: ['dev', 'hotfix', 'rc', 'stable']",
+    "lanes stable promotes without rc": "shipmill.toml: lanes.stable promotes from rc, but lanes.rc is not enabled",
+    "lanes none": "shipmill.toml: [lanes] enables no lane",
+    "lane hotfix unknown key": "shipmill.toml [lanes] [hotfix]: unknown keys ['schedule']; allowed: ['dispatch', 'github_release']",
+    "lane dev unknown key": "shipmill.toml [lanes] [dev]: unknown keys ['marker']; allowed: ['dispatch', 'github_release', 'milestone', 'quiet_minutes', 'schedule']",
+    "lane quiet range": "shipmill.toml [lanes] [dev]: quiet_minutes must be in 0..300, got 301",
+    "lane quiet not a bool": "shipmill.toml [lanes] [dev]: quiet_minutes must be an integer, got True",
+    "lane promote_from": "shipmill.toml [lanes] [stable]: promote_from is 'rc' or absent, got 'dev'",
+    "lane soak without promote": "shipmill.toml [lanes] [stable]: min_soak_days needs promote_from = 'rc'",
+    "lane marker": "shipmill.toml [lanes] [rc]: marker is a, b, or rc, got 'c'",
+    "lane dispatch": "shipmill.toml [lanes] [stable]: dispatch names a file in .github/workflows, got '../x.yml'",
+    "lane milestone a bool": "shipmill.toml [lanes] [dev]: milestone must be true or false, got 1",
+    "lane a table": "shipmill.toml [lanes]: dev must be a table, got 1",
+    "version_lines unknown key": "shipmill.toml [[version_lines]][0]: unknown keys ['colour']; allowed: ['file', 'pattern', 'replace']",
+    "version_lines pattern": "shipmill.toml [[version_lines]][0].pattern: missing ), unterminated subpattern at position 5",
+    "version_lines array of tables": "shipmill.toml: version_lines must be an array of tables, [[version_lines]]",
+    "environments unknown key": "shipmill.toml [environments] [staging]: unknown keys ['region']; allowed: ['bake_minutes', 'from', 'health', 'lane', 'workflow']",
+    "environments a table": "shipmill.toml [environments]: staging must be a table, got 1",
+    "environments the section a table": "shipmill.toml: environments must be a table, got 1",
+    "operate unknown key": "shipmill.toml [operate]: unknown keys ['rollback']; allowed: ['incident_label', 'rollback_after']",
+    "operate range": "shipmill.toml [operate]: rollback_after must be in 1..20, got 0",
+    "operate integer": "shipmill.toml [operate]: rollback_after must be an integer, got '3'",
+    "operate empty label": "shipmill.toml [operate]: incident_label must not be empty",
+    "operate a table": "shipmill.toml: operate must be a table, got 1",
+    "autonomy unknown key": "shipmill.toml [autonomy]: unknown keys ['releases']; allowed: ['deploy', 'intake', 'release', 'rollback']",
+    "autonomy level": "shipmill.toml [autonomy]: release must be one of ['observe', 'propose', 'act'], got 'auto'",
+    "autonomy level a string": "shipmill.toml [autonomy]: rollback must be one of ['observe', 'propose', 'act'], got True",
+    "autonomy deploy a table": "shipmill.toml [autonomy]: deploy is a table of environments, such as deploy.production = 'propose'",
+    "autonomy deploy level": "shipmill.toml [autonomy] [deploy]: staging must be one of ['observe', 'propose', 'act'], got 'yes'",
     "autonomy deploy environment name": "an environment name is letters, digits, '.', '_', or '-'; got 'pro duction'",
-    "autonomy deploy unknown environment": "shipyard.toml [autonomy]: deploy.qa names no environment in [environments]; known: staging",
-    "autonomy a table": "shipyard.toml: autonomy must be a table, got 1",
-    "agents unknown key": "shipyard.toml [agents]: unknown keys ['when']; allowed: ['prompt', 'prs', 'retry_hours']",
-    "agents prompt required": "shipyard.toml [agents]: prompt is required",
-    "agents prompt empty": "shipyard.toml [agents]: prompt must not be empty",
-    "agents retry range": "shipyard.toml [agents]: retry_hours must be in 1..168, got 0",
-    "agents prs a bool": "shipyard.toml [agents]: prs must be true or false, got 'yes'",
-    "agents a table": "shipyard.toml: agents must be a table, got 1",
-    "roadmap unknown key": "shipyard.toml [roadmap]: unknown keys ['velocity']; allowed: ['cadence', 'wip']",
-    "roadmap wip range": "shipyard.toml [roadmap]: wip must be in 1..100, got 0",
-    "roadmap cadence an integer": "shipyard.toml [roadmap]: cadence must be an integer, got '2w'",
-    "roadmap cadence range": "shipyard.toml [roadmap]: cadence must be in 1..26, got 27",
-    "roadmap a table": "shipyard.toml: roadmap must be a table, got 1",
+    "autonomy deploy unknown environment": "shipmill.toml [autonomy]: deploy.qa names no environment in [environments]; known: staging",
+    "autonomy a table": "shipmill.toml: autonomy must be a table, got 1",
+    "agents unknown key": "shipmill.toml [agents]: unknown keys ['when']; allowed: ['prompt', 'prs', 'retry_hours']",
+    "agents prompt required": "shipmill.toml [agents]: prompt is required",
+    "agents prompt empty": "shipmill.toml [agents]: prompt must not be empty",
+    "agents retry range": "shipmill.toml [agents]: retry_hours must be in 1..168, got 0",
+    "agents prs a bool": "shipmill.toml [agents]: prs must be true or false, got 'yes'",
+    "agents a table": "shipmill.toml: agents must be a table, got 1",
+    "roadmap unknown key": "shipmill.toml [roadmap]: unknown keys ['velocity']; allowed: ['cadence', 'wip']",
+    "roadmap wip range": "shipmill.toml [roadmap]: wip must be in 1..100, got 0",
+    "roadmap cadence an integer": "shipmill.toml [roadmap]: cadence must be an integer, got '2w'",
+    "roadmap cadence range": "shipmill.toml [roadmap]: cadence must be in 1..26, got 27",
+    "roadmap a table": "shipmill.toml: roadmap must be a table, got 1",
 }
 
 
@@ -213,7 +213,7 @@ def test_each_case_has_its_message() -> None:
 @pytest.mark.parametrize("name", CASES)
 def test_the_config_refuses_with_the_same_words(name: str) -> None:
     with pytest.raises(ReleaseError) as caught:
-        Policy.parse(tomllib.loads(apply(POLICY, CASES[name])), "shipyard.toml")
+        Policy.parse(tomllib.loads(apply(POLICY, CASES[name])), "shipmill.toml")
     assert str(caught.value) == MESSAGES[name]
 
 
@@ -224,7 +224,7 @@ def refusal(load: Callable[[], object]) -> str:
 
 
 def test_the_file_is_read_with_the_same_words(tmp_path: Path) -> None:
-    path = tmp_path / ".github" / "shipyard.toml"
+    path = tmp_path / ".github" / "shipmill.toml"
     assert refusal(lambda: Policy.load(path)) == f"no release policy at {path}"
     path.parent.mkdir()
     path.write_text("name demo\n", encoding="utf-8")
@@ -236,9 +236,9 @@ def test_the_file_is_read_with_the_same_words(tmp_path: Path) -> None:
 
 def test_the_agents_section_alone_is_read_with_the_same_words(tmp_path: Path) -> None:
     assert refusal(lambda: AgentsConfig.load(tmp_path)) == (
-        f"no .github/shipyard.toml in {tmp_path}; add an [agents] section with a prompt to use the gate"
+        f"no .github/shipmill.toml in {tmp_path}; add an [agents] section with a prompt to use the gate"
     )
-    path = tmp_path / ".github" / "release-policy.toml"
+    path = tmp_path / ".github" / "shipmill.toml"
     path.parent.mkdir()
     path.write_text("name demo\n", encoding="utf-8")
     assert refusal(lambda: AgentsConfig.load(tmp_path)) == (
@@ -249,8 +249,8 @@ def test_the_agents_section_alone_is_read_with_the_same_words(tmp_path: Path) ->
         f"{path} has no [agents] section; add one with a prompt to use the gate"
     )
     path.write_text("agents = 1\n", encoding="utf-8")
-    assert refusal(lambda: AgentsConfig.load(tmp_path)) == "release-policy.toml: agents must be a table, got 1"
+    assert refusal(lambda: AgentsConfig.load(tmp_path)) == "shipmill.toml: agents must be a table, got 1"
     path.write_text('[agents]\nprompt = "/t"\nwhen = 1\n', encoding="utf-8")
     assert refusal(lambda: AgentsConfig.load(tmp_path)) == (
-        "release-policy.toml [agents]: unknown keys ['when']; allowed: ['prompt', 'prs', 'retry_hours']"
+        "shipmill.toml [agents]: unknown keys ['when']; allowed: ['prompt', 'prs', 'retry_hours']"
     )

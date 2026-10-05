@@ -1,4 +1,4 @@
-"""A launchd job that runs `shipyard gate` for one repo on a Mac: the host side of the
+"""A launchd job that runs `shipmill gate` for one repo on a Mac: the host side of the
 gate. The repo side, what the session does, is the config's [agents] section.
 
 launchd starts jobs with a minimal PATH, so the job carries one built from where claude,
@@ -15,11 +15,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from shipyard.errors import ReleaseError
+from shipmill.errors import ReleaseError
 
 TOOLS = ("claude", "gh", "git", "uvx")
 BASE_PATH = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
-DEFAULT_TOOL = "git+https://github.com/romamo/shipyard@v0"
+DEFAULT_TOOL = "git+https://github.com/romamo/shipmill@v0"
 _TEMP_ROOTS = ("/tmp/", "/private/tmp/", "/var/folders/", "/private/var/folders/")
 
 
@@ -35,7 +35,7 @@ def label(repo: str) -> str:
     owner, _, name = repo.partition("/")
     if not owner or not name or "/" in name:
         raise ReleaseError(f"repo must be owner/name, got {repo!r}")
-    return "dev.shipyard.gate." + re.sub(r"[^a-z0-9.-]", "-", f"{owner}.{name}".lower())
+    return "dev.shipmill.gate." + re.sub(r"[^a-z0-9.-]", "-", f"{owner}.{name}".lower())
 
 
 def is_temporary(folder: str) -> bool:
@@ -75,8 +75,8 @@ def build(
         raise ReleaseError(f"the interval must be 5..1440 minutes, got {interval_minutes}")
     found = [find_tool(t, path, skip) for t in TOOLS]
     name = label(repo)
-    log = home / "Library" / "Logs" / "shipyard" / f"{name}.log"
-    args = [str(found[TOOLS.index("uvx")]), "--from", tool, "shipyard", "--repo", str(checkout), "gate", repo]
+    log = home / "Library" / "Logs" / "shipmill" / f"{name}.log"
+    args = [str(found[TOOLS.index("uvx")]), "--from", tool, "shipmill", "--repo", str(checkout), "gate", repo]
     args += ["--refresh"]
     for extra in claude_args:
         args += ["--claude-arg", extra]
@@ -104,7 +104,7 @@ def _launchctl(*args: str, check: bool = True) -> subprocess.CompletedProcess[st
 
 def _require_mac() -> None:
     if sys.platform != "darwin":
-        raise ReleaseError("launchd runs on macOS; on Linux, run `shipyard gate` from a systemd timer or cron")
+        raise ReleaseError("launchd runs on macOS; on Linux, run `shipmill gate` from a systemd timer or cron")
 
 
 def install(job: Job) -> None:

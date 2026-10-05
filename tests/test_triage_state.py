@@ -575,7 +575,7 @@ def test_a_build_issue_is_blocked_until_its_dependency_closes(ts: ModuleType) ->
 
 
 def test_an_untriaged_issue_reads_new_whatever_its_body_depends_on(ts: ModuleType) -> None:
-    # romamo/shipyard#49 says "Depends on #48." in its body and was never triaged: once #48
+    # romamo/shipmill#49 says "Depends on #48." in its body and was never triaged: once #48
     # merged it read UNBLOCKED ("resume"), skipping the triage it is still owed
     item = issue(body="Depends on #48. The other session takes it once #48 lands.\n")
     for state in ("OPEN", "CLOSED", "MERGED"):

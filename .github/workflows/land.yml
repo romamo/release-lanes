@@ -1,4 +1,4 @@
-name: shipyard land
+name: shipmill land
 
 # Called after the caller's CI ran on the release commit. When CI passed it lands the
 # release: main (a stable release on an unmoved main), release/X.Y (a hotfix), or the tag
@@ -27,7 +27,7 @@ on:
         required: true
       tool:
         type: string
-        default: "git+https://github.com/romamo/shipyard@v0"
+        default: "git+https://github.com/romamo/shipmill@v0"
 
 # No workflow-level permissions: each job sets its own, except close-proposal, which takes
 # the caller's grant, so a caller that grants no `issues: write` still starts this workflow
@@ -36,7 +36,7 @@ jobs:
   land:
     if: inputs.ci-result == 'success'
     concurrency:
-      group: shipyard
+      group: shipmill
       cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
@@ -60,7 +60,7 @@ jobs:
           SHA: ${{ inputs.sha }}
           BASE: ${{ inputs.base }}
         run: |
-          uvx --from "$TOOL" shipyard land --lane "$LANE" --version "$VERSION" --sha "$SHA" --base "$BASE" \
+          uvx --from "$TOOL" shipmill land --lane "$LANE" --version "$VERSION" --sha "$SHA" --base "$BASE" \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
   # Closes the lane's "Ready to release" issue, with the tag and this run. It sets no
@@ -85,7 +85,7 @@ jobs:
           LANE: ${{ inputs.lane }}
           VERSION: ${{ inputs.version }}
         run: |
-          uvx --from "$TOOL" shipyard close-proposal --lane "$LANE" --version "$VERSION" | tee -a "$GITHUB_STEP_SUMMARY"
+          uvx --from "$TOOL" shipmill close-proposal --lane "$LANE" --version "$VERSION" | tee -a "$GITHUB_STEP_SUMMARY"
 
   cleanup:
     needs: land
@@ -104,4 +104,4 @@ jobs:
         env:
           TOOL: ${{ inputs.tool }}
           VERSION: ${{ inputs.version }}
-        run: uvx --from "$TOOL" shipyard cleanup --version "$VERSION"
+        run: uvx --from "$TOOL" shipmill cleanup --version "$VERSION"

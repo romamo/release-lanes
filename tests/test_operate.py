@@ -1,4 +1,4 @@
-"""shipyard operate (#30): health checks recorded as deployment statuses, promotion after an
+"""shipmill operate (#30): health checks recorded as deployment statuses, promotion after an
 unbroken bake, a missed lane deploy, autonomy and the hold, --approve, and the operate caller;
 rollback and incidents (#31)"""
 
@@ -10,13 +10,13 @@ from pathlib import Path
 
 import pytest
 
-from shipyard.autonomy import HOLD_LABEL
-from shipyard.cli import main
-from shipyard.doctor import OPERATE_CALLER, doctor
-from shipyard.errors import ReleaseError
-from shipyard.github import PROPOSAL_LABEL, Deployment, DeploymentState, Issue
-from shipyard.init import BOT_REF, BOT_REPO, init_operate, operate_caller_text
-from shipyard.operate import (
+from shipmill.autonomy import HOLD_LABEL
+from shipmill.cli import main
+from shipmill.doctor import OPERATE_CALLER, doctor
+from shipmill.errors import ReleaseError
+from shipmill.github import PROPOSAL_LABEL, Deployment, DeploymentState, Issue
+from shipmill.init import BOT_REF, BOT_REPO, init_operate, operate_caller_text
+from shipmill.operate import (
     STATUS_PREFIX,
     HttpResponse,
     Report,
@@ -31,9 +31,9 @@ from shipyard.operate import (
     shown_url,
     tag_of,
 )
-from shipyard.planner import Decision, Event, Planner
-from shipyard.policy import Lane
-from shipyard.version import Version
+from shipmill.planner import Decision, Event, Planner
+from shipmill.policy import Lane
+from shipmill.version import Version
 
 from .conftest import POLICY, T0, FakeGitHub, Repo
 
@@ -411,11 +411,11 @@ def test_init_operate_writes_the_caller_and_doctor_wants_it_only_when_used(repo:
     assert operate_check() is None  # D-9: no from, no health, no warning
     configure(repo)
     status, detail = operate_check() or ("", "")
-    assert status == "WARN" and "`shipyard init --operate` writes it" in detail
+    assert status == "WARN" and "`shipmill init --operate` writes it" in detail
     init_operate(repo.root, force=False)
     assert operate_check() == (
         "PASS",
-        f"{OPERATE_CALLER} runs shipyard operate with deployments, actions, issues: write; rolls back after 3"
+        f"{OPERATE_CALLER} runs shipmill operate with deployments, actions, issues: write; rolls back after 3"
         " failed checks in a row and opens an incident labelled 'incident', which holds rc, stable",
     )
     with pytest.raises(ReleaseError, match="exists; pass --force"):
@@ -428,17 +428,17 @@ def test_init_operate_writes_the_caller_and_doctor_wants_it_only_when_used(repo:
     assert operate_check() == lacks_issues  # a health URL: a failing environment opens an incident
     unchecked = re.sub(r'health = ".*"\n', "", POLICY + ENVIRONMENTS)
     repo.write(repo.policy_file, unchecked)  # promoted, but no health URL: no incident can open
-    assert operate_check() == ("PASS", f"{OPERATE_CALLER} runs shipyard operate with deployments, actions: write")
+    assert operate_check() == ("PASS", f"{OPERATE_CALLER} runs shipmill operate with deployments, actions: write")
     repo.write(repo.policy_file, unchecked + '\n[autonomy]\ndeploy.production = "propose"\n')  # a deploy opens one
     assert operate_check() == lacks_issues
 
 
-SHIPYARD = Path(__file__).parent.parent  # this repository, which hosts shipyard's workflows
+SHIPMILL = Path(__file__).parent.parent  # this repository, which hosts shipmill's workflows
 LOCAL_CALLER = ".github/workflows/operate-self.yml"
 
 
 def test_doctor_accepts_the_bot_repo_calling_its_own_operate_yml_locally(repo: Repo) -> None:
-    """In the repository hosting shipyard, operate.yml is the reusable workflow, so its caller
+    """In the repository hosting shipmill, operate.yml is the reusable workflow, so its caller
     has another name and calls it as ./.github/workflows/operate.yml (#53)"""
 
     def operate_check() -> tuple[str, str] | None:
@@ -446,34 +446,34 @@ def test_doctor_accepts_the_bot_repo_calling_its_own_operate_yml_locally(repo: R
         return found.get("operate")
 
     configure(repo)
-    repo.write(str(OPERATE_CALLER), (SHIPYARD / OPERATE_CALLER).read_text(encoding="utf-8"))
-    uncalled = f"staging, production use from or health, but no job in {OPERATE_CALLER} calls shipyard's operate.yml"
+    repo.write(str(OPERATE_CALLER), (SHIPMILL / OPERATE_CALLER).read_text(encoding="utf-8"))
+    uncalled = f"staging, production use from or health, but no job in {OPERATE_CALLER} calls shipmill's operate.yml"
     assert operate_check() == ("WARN", uncalled)
     local = operate_caller_text().replace(f"{BOT_REPO}/.github/workflows/operate.yml@{BOT_REF}", f"./{OPERATE_CALLER}")
     assert f"uses: ./{OPERATE_CALLER}\n" in local
     repo.write(LOCAL_CALLER, local)
     rolls_back = (
-        "runs shipyard operate with deployments, actions, issues: write; rolls back after 3 failed checks in a row"
+        "runs shipmill operate with deployments, actions, issues: write; rolls back after 3 failed checks in a row"
         " and opens an incident labelled 'incident', which holds rc, stable"
     )
     assert operate_check() == ("PASS", f"{LOCAL_CALLER} {rolls_back}")
     repo.write(LOCAL_CALLER, local.replace("      issues: write", "      issues: read"))
     assert operate_check() == ("WARN", f"the job in {LOCAL_CALLER} that calls operate.yml lacks issues: write")
-    # a repository not hosting shipyard: its own operate.yml is the caller, whatever else calls it
+    # a repository not hosting shipmill: its own operate.yml is the caller, whatever else calls it
     repo.write(str(OPERATE_CALLER), operate_caller_text())
     assert operate_check() == ("PASS", f"{OPERATE_CALLER} {rolls_back}")
 
 
-def test_shipyards_own_pages_environment_and_operate_caller_pass_doctor(repo: Repo) -> None:
+def test_shipmills_own_pages_environment_and_operate_caller_pass_doctor(repo: Repo) -> None:
     """This repository's config and workflows, checked in a scratch repository so doctor asks
     no real remote"""
-    for path in (SHIPYARD / ".github").rglob("*"):
+    for path in (SHIPMILL / ".github").rglob("*"):
         if path.is_file():
-            repo.write(str(path.relative_to(SHIPYARD)), path.read_text(encoding="utf-8"))
+            repo.write(str(path.relative_to(SHIPMILL)), path.read_text(encoding="utf-8"))
     checks = {c.name: (c.status, c.detail) for c in doctor(repo.root, repo.github)}
     assert checks["operate"] == (
         "PASS",
-        f"{LOCAL_CALLER} runs shipyard operate with deployments, actions, issues: write; rolls back after 3 failed"
+        f"{LOCAL_CALLER} runs shipmill operate with deployments, actions, issues: write; rolls back after 3 failed"
         " checks in a row and opens an incident labelled 'incident', which holds stable",
     )
     assert checks["environment"] == (
@@ -485,7 +485,7 @@ def test_shipyards_own_pages_environment_and_operate_caller_pass_doctor(repo: Re
     assert (pages.lane, pages.workflow, pages.health) == (
         Lane.STABLE,
         "deploy.yml",
-        "https://romamo.github.io/shipyard/health.json",
+        "https://romamo.github.io/shipmill/health.json",
     )
     assert repo.policy.operate.rollback_after == 3
 
@@ -493,7 +493,7 @@ def test_shipyards_own_pages_environment_and_operate_caller_pass_doctor(repo: Re
 def test_the_deploy_workflow_reports_the_tag_as_the_version_operate_checks() -> None:
     """health.json names the tag without its v, which operate's version rule accepts; the
     drill's fault names another version"""
-    text = (SHIPYARD / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
+    text = (SHIPMILL / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
     assert 'version="${TAG#v}"' in text and 'version="0.0.0-simulated-failure"' in text
     assert '"$ENVIRONMENT" != "github-pages"' in text
     assert '"$GITHUB_REF" != "refs/tags/$TAG"' in text  # a run off the tag fails (#80)
@@ -510,7 +510,7 @@ def test_the_deploy_workflow_reports_the_tag_as_the_version_operate_checks() -> 
 
 def test_operate_yml_runs_one_at_a_time_and_takes_the_callers_grant() -> None:
     text = (Path(__file__).parent.parent / ".github" / "workflows" / "operate.yml").read_text()
-    assert re.search(r"^    concurrency:\n      group: shipyard-operate\n      cancel-in-progress: false$", text, re.M)
+    assert re.search(r"^    concurrency:\n      group: shipmill-operate\n      cancel-in-progress: false$", text, re.M)
     assert not re.search(r"^\s*permissions:", text, re.MULTILINE)
     assert 'cron: "*/10 * * * *"' in operate_caller_text()
 
@@ -559,7 +559,7 @@ def test_three_failed_checks_roll_back_to_the_last_good_tag_and_open_one_inciden
     assert repo.github.dispatched == [ROLLBACK]
     issue = incident(repo)
     assert issue.title == "Incident: production fails its health checks on v1.1.0rc1"
-    assert "<!-- shipyard:incident env=production tag=v1.1.0rc1 to=v1.0.0 state=rolled-back -->" in issue.body
+    assert "<!-- shipmill:incident env=production tag=v1.1.0rc1 to=v1.0.0 state=rolled-back -->" in issue.body
     assert "**production** failed 3 health checks in a row on **v1.1.0rc1**, since 2026-10-05 00:00 UTC" in issue.body
     assert f"- Health check: `{PRODUCTION}`" in issue.body
     assert "- Last check: HTTP 503" in issue.body
@@ -680,7 +680,7 @@ def test_observe_opens_the_incident_and_only_says_what_it_would_roll_back(failin
 
 @dataclass
 class RefusingIssues(FakeGitHub):
-    """GitHub refusing the first issue shipyard opens, as for a job without issues: write"""
+    """GitHub refusing the first issue shipmill opens, as for a job without issues: write"""
 
     refused: bool = False
 

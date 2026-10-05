@@ -1,9 +1,9 @@
 name: Operate
 
-# shipyard dogfoods itself: the caller `shipyard init --operate` writes, but calling the
+# shipmill dogfoods itself: the caller `shipmill init --operate` writes, but calling the
 # reusable operate.yml in this repository (whose name it takes) and running the tool from the
-# checkout. Every 10 minutes shipyard operate checks the health of each environment in
-# .github/shipyard.toml, records it as GitHub deployment statuses, and rolls back an
+# checkout. Every 10 minutes shipmill operate checks the health of each environment in
+# .github/shipmill.toml, records it as GitHub deployment statuses, and rolls back an
 # environment that fails its checks, opening an incident issue. Approve a deploy that waits
 # on a proposal issue with: gh workflow run operate-self.yml -f approve=<environment> -f
 # dry-run=false; a proposed rollback with -f approve-rollback=<environment> instead

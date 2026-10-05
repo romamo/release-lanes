@@ -5,7 +5,7 @@ One issue per proposed milestone, labelled `milestone-proposal`, written to a fi
 Title: `Roadmap: milestone {title}, due {YYYY-MM-DD}`
 
 ```markdown
-<!-- shipyard:milestone title="{title}" due="{YYYY-MM-DD}" -->
+<!-- shipmill:milestone title="{title}" due="{YYYY-MM-DD}" -->
 
 The next milestone, from the accepted opportunities that fit the free capacity: {free} of `wip` {wip} open issues, due {cadence} weeks after {the latest open milestone | today}.
 

@@ -7,13 +7,13 @@ import json
 from dataclasses import dataclass, field
 from enum import StrEnum
 
-from shipyard.autonomy import Autonomy, Hold, Stage
-from shipyard.changelog import Changelog, Entry
-from shipyard.errors import ReleaseError
-from shipyard.github import GitHub
-from shipyard.gitrepo import Git, Tag
-from shipyard.policy import PRIORITY, BumpFrom, Lane, LaneRule, Mode, Policy
-from shipyard.version import ZERO, Part, Version
+from shipmill.autonomy import Autonomy, Hold, Stage
+from shipmill.changelog import Changelog, Entry
+from shipmill.errors import ReleaseError
+from shipmill.github import GitHub
+from shipmill.gitrepo import Git, Tag
+from shipmill.policy import PRIORITY, BumpFrom, Lane, LaneRule, Mode, Policy
+from shipmill.version import ZERO, Part, Version
 
 
 class Event(StrEnum):
@@ -30,12 +30,12 @@ class Hotfix:
 
 @dataclass(frozen=True, slots=True)
 class Proposal:
-    """A due release shipyard doesn't make by itself, and why: a person starts the lane"""
+    """A due release shipmill doesn't make by itself, and why: a person starts the lane"""
 
     lane: Lane
     version: Version
     base: str
-    cause: str  # "release autonomy is propose", or "held by shipyard-hold #N"
+    cause: str  # "release autonomy is propose", or "held by shipmill-hold #N"
 
     def as_dict(self) -> dict[str, str]:
         return {"lane": self.lane.value, "version": str(self.version), "base": self.base, "cause": self.cause}
@@ -268,7 +268,7 @@ class Planner:
                 if freeze.holds(self.now):
                     return f"frozen {freeze.first}..{freeze.last}"
         if lane in self.policy.blocker_lanes:
-            # an open incident (shipyard operate opens one when it rolls back) holds the same
+            # an open incident (shipmill operate opens one when it rolls back) holds the same
             # lanes the blocker label does, until a person or a hotfix's "Fixes #N" closes it
             for label in (self.policy.blocker_label, self.policy.incident_label):
                 if label and (blockers := self.github.open_issues(label)):

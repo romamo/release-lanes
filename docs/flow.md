@@ -10,7 +10,7 @@ Three skills cover the path from a new issue to a published release, and a fourt
 | `github-pr-triage` | Landing: review, CI gate, rebase, merge, and the release |
 | `github-ship-watch` | The routine: a stuck release run, a missing upload, unannounced fixes, waiting issues |
 
-Before the first release, a new package goes through `shipyard-setup`: package checks, CI and publish wiring, and shipyard's release policy. In a repo that runs shipyard (`.github/shipyard.toml`, or its alias `.github/release-policy.toml`), shipyard tags; the skills here only start its Release workflow and never tag by hand. The `oss-package-engineer` skill is retired: its release path is github-pr-triage's "tag X" or shipyard, and its package checks live in shipyard-setup.
+Before the first release, a new package goes through `shipmill-setup`: package checks, CI and publish wiring, and shipmill's release policy. In a repo that runs shipmill (`.github/shipmill.toml`), shipmill tags; the skills here only start its Release workflow and never tag by hand. The `oss-package-engineer` skill is retired: its release path is github-pr-triage's "tag X" or shipmill, and its package checks live in shipmill-setup.
 
 Start each one with its slash command or with plain wording. The words you use set how far it goes. Below, `<owner/repo>` is the GitHub repo, `<X>` the version to release, and `<prev>` the previous tag.
 
@@ -80,9 +80,9 @@ The bump, registry, and install commands per ecosystem (Python, Node, Rust, Go, 
 
 `github-ship-watch` is the routine: each pass checks the release runs, the newest releases, and the issue intake, finishes what the policy already decided (a stalled lane, a flaky release job, the shipped notices), and hands flagged issues to triage when asked.
 
-- `shipyard gate` on launchd: a new background session on this machine only when the repo needs one, with the prompt from the config's `[agents]` section; quiet ticks make no model call (shipyard-setup, The gate)
+- `shipmill gate` on launchd: a new background session on this machine only when the repo needs one, with the prompt from the config's `[agents]` section; quiet ticks make no model call (shipmill-setup, The gate)
 - `/loop 30m /github-ship-watch <owner/repo> — watch and triage`: every 30 minutes in this session
-- `/schedule`: a cloud routine, with the prompt below that clones shipyard
+- `/schedule`: a cloud routine, with the prompt below that clones shipmill
 - Status only: `python3 $S/github-ship-watch/scripts/watch_state.py <owner/repo>` (exit 1 when anything needs action)
 
 To enable the plugin in every local session of a repo, commit this to its `.claude/settings.json`:
@@ -90,17 +90,17 @@ To enable the plugin in every local session of a repo, commit this to its `.clau
 ```json
 {
   "extraKnownMarketplaces": {
-    "shipyard": { "source": { "source": "github", "repo": "romamo/shipyard" }, "autoUpdate": true }
+    "shipmill": { "source": { "source": "github", "repo": "romamo/shipmill" }, "autoUpdate": true }
   },
-  "enabledPlugins": { "shipyard@shipyard": true }
+  "enabledPlugins": { "shipmill@shipmill": true }
 }
 ```
 
 A cloud routine may not apply a repo's plugin keys ([plugins for organizations](https://code.claude.com/docs/en/plugins/org.md) lists where each surface reads them), so give the routine a prompt that doesn't depend on them:
 
 ```
-Clone https://github.com/romamo/shipyard into tmp/shipyard (or pull it if present), then follow
-tmp/shipyard/skills/github-ship-watch/SKILL.md for <owner/repo> — watch and triage
+Clone https://github.com/romamo/shipmill into tmp/shipmill (or pull it if present), then follow
+tmp/shipmill/skills/github-ship-watch/SKILL.md for <owner/repo> — watch and triage
 ```
 
 ## Safeguards
