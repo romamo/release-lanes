@@ -24,6 +24,8 @@ bot.
   and the plugin's marketplace is `shipmill/shipmill`. GitHub redirects the old path; the
   setup checklist still counts a `release.yml` that calls `romamo/shipmill`. shipmill's own
   Pages site, and its health URL, moved to `https://shipmill.github.io/shipmill/`
+- The CHANGELOG's `[Unreleased]` link points at `shipmill/shipmill`, so the compare links
+  each release writes from it use the org's path
 
 ## [0.14.0] - 2026-10-05
 
@@ -482,7 +484,7 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/romamo/shipmill/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.14.0...HEAD
 [0.14.0]: https://github.com/romamo/shipmill/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/romamo/shipmill/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/romamo/shipmill/compare/v0.11.0...v0.12.0
