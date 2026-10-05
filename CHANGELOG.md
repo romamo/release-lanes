@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-05
+
 ### Changed
 
 - The project is now shipmill, with no compatibility layer: the package and CLI
@@ -455,7 +457,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/romamo/shipmill/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/romamo/shipmill/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/romamo/shipmill/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/romamo/shipmill/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/romamo/shipmill/compare/v0.10.1...v0.11.0
 [0.10.1]: https://github.com/romamo/shipmill/compare/v0.10.0...v0.10.1
