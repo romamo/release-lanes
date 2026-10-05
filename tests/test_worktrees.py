@@ -271,7 +271,7 @@ def test_s002_7_uncommitted_changes_keep_a_worktree(repo: Checkout) -> None:
         assert reasons[path] == "uncommitted changes", path
 
 
-def test_s002_7_a_worktree_holding_another_worktree_is_kept(repo: Checkout) -> None:
+def test_s002_19_a_worktree_holding_another_worktree_is_kept(repo: Checkout) -> None:
     """git worktree remove deletes a worktree nested under an ignored path with its work,
     and the outer one's git status never shows it"""
     (repo.root / ".gitignore").write_text("tmp/\n", encoding="utf-8")
