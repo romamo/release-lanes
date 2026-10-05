@@ -271,6 +271,22 @@ def test_s002_7_uncommitted_changes_keep_a_worktree(repo: Checkout) -> None:
         assert reasons[path] == "uncommitted changes", path
 
 
+def test_s002_7_a_worktree_holding_another_worktree_is_kept(repo: Checkout) -> None:
+    """git worktree remove deletes a worktree nested under an ignored path with its work,
+    and the outer one's git status never shows it"""
+    (repo.root / ".gitignore").write_text("tmp/\n", encoding="utf-8")
+    repo.commit(repo.root, {".gitignore": "tmp/\n"}, "Ignore tmp")
+    repo.push_main()
+    outer = repo.add("tmp/wt-outer", "-b", "outer")
+    inner = outer / "tmp/wt-inner"
+    repo.git().run("worktree", "add", "-q", "-b", "inner", str(inner), "origin/main")
+    repo.age(inner, OLD)
+    (inner / "work.txt").write_text("unsaved\n", encoding="utf-8")
+    reasons = repo.reasons()
+    assert reasons["tmp/wt-outer"] == "holds worktree tmp/wt-outer/tmp/wt-inner"
+    assert reasons["tmp/wt-outer/tmp/wt-inner"] == "uncommitted changes"
+
+
 def test_s002_8_commits_not_on_the_default_branch_keep_a_worktree(repo: Checkout) -> None:
     open_ = repo.add("tmp/wt-open", "-b", "open")
     repo.commit(open_, {"feature.py": "A = 1\n"}, "Feature")

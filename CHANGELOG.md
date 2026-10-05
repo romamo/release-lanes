@@ -32,8 +32,8 @@ bot.
   its branch provably landed on the default branch (by ancestry, patch id, or a squash of
   its whole diff), or KEPT with the first check it fails: the main or current checkout, not
   under `.claude/worktrees/` or `tmp/wt-*`, missing, locked, detached, on the default
-  branch, under a day old, a live Claude Code session in it, uncommitted changes, commits
-  not landed, or an open pull request. It removes nothing yet (#122)
+  branch, under a day old, a live Claude Code session in it, another worktree inside it,
+  uncommitted changes, commits not landed, or an open pull request. It removes nothing yet (#122)
 
 ## [0.16.0] - 2026-10-05
 

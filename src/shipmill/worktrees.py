@@ -312,6 +312,9 @@ def _reason(ctx: _Context, tree: Worktree, path: Path, age: dt.timedelta | None)
     for session in ctx.live:
         if _inside(session.cwd, path):
             return f"live session {session.name}"
+    for other in ctx.roots:
+        if path in other.parents:  # git status here can't see it, and git worktree remove deletes it
+            return f"holds worktree {os.path.relpath(other, ctx.main)}"
     if Git(path).run("status", "--porcelain", "--untracked-files=all").strip():
         return "uncommitted changes"
     unlanded = ctx.landing.unlanded(tree.branch)
