@@ -22,7 +22,7 @@ from shipmill.gitrepo import REMOTE, Git
 FLOOR = dt.timedelta(hours=24)  # a younger worktree may belong to a session that hasn't committed yet
 WINDOW = 500  # non-merge commits of origin/<default> searched for a patch id, as landed.py's --depth
 EXCLUDE = "CHANGELOG.md"  # its conflicts are often resolved by hand, so a second patch id leaves it out
-LOOSE = ("--", ".", f":!{EXCLUDE}")
+LOOSE = ("--", ":(top)", f":(top,exclude){EXCLUDE}")  # from the top, as --repo may name a subdirectory
 DIFF = ("--no-color", "--no-ext-diff")
 HEADS = "refs/heads/"
 

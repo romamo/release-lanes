@@ -289,6 +289,19 @@ def test_s002_8_commits_not_on_the_default_branch_keep_a_worktree(repo: Checkout
     assert reasons["tmp/wt-notes"] == "1 commit(s) not landed"  # CHANGELOG.md only: no id without it
 
 
+def test_s002_8_a_repo_flag_naming_a_subdirectory_still_compares_whole_commits(repo: Checkout) -> None:
+    """--repo defaults to the working directory, which may be a subdirectory of the checkout;
+    the patch ids without CHANGELOG.md must still cover the whole tree, not that subdirectory"""
+    (repo.root / "sub").mkdir()
+    repo.commit(repo.root, {"sub/x.py": "X = 1\n"}, "Sub")
+    repo.push_main()
+    feat = repo.add("tmp/wt-feat", "-b", "feat")
+    repo.commit(feat, {"sub/x.py": "X = 2\n", "top.py": "T = 1\n"}, "Both")
+    repo.commit(repo.root, {"sub/x.py": "X = 2\n"}, "Only the subdirectory's half")
+    repo.push_main()
+    assert repo.reasons(repo.root / "sub")["tmp/wt-feat"] == "1 commit(s) not landed"
+
+
 def test_s002_8_a_commit_only_on_the_local_default_branch_has_not_landed(repo: Checkout) -> None:
     feat = repo.add("tmp/wt-feat", "-b", "feat")
     sha = repo.commit(feat, {"feature.py": "A = 1\n"}, "Feature")
