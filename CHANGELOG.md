@@ -13,6 +13,9 @@ bot.
   optional `max_wait_hours`, with D-13: a hold doesn't keep the gate from stopping a stuck
   session (#119)
 - Spec 003's build issues: #128 to #130 (#119)
+- The `[agents]` section takes `notify` (default true), `remind_hours` (1..168, default 4),
+  and `max_wait_hours` (0..168, default 0), refusing a bad value naming the key; the gate
+  doesn't act on them yet (#128)
 
 ## [0.16.0] - 2026-10-05
 

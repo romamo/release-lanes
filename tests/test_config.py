@@ -2,6 +2,8 @@
 """Every refusal of the config file, byte for byte: each section is read through one
 strict Table, and these messages are what a user sees when their config is wrong"""
 
+import subprocess
+import sys
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
@@ -9,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from shipmill.agents import AgentsConfig
+from shipmill.config import Table
 from shipmill.errors import ReleaseError
 from shipmill.policy import Policy
 
@@ -192,7 +195,7 @@ MESSAGES: dict[str, str] = {
     "autonomy deploy environment name": "an environment name is letters, digits, '.', '_', or '-'; got 'pro duction'",
     "autonomy deploy unknown environment": "shipmill.toml [autonomy]: deploy.qa names no environment in [environments]; known: staging",
     "autonomy a table": "shipmill.toml: autonomy must be a table, got 1",
-    "agents unknown key": "shipmill.toml [agents]: unknown keys ['when']; allowed: ['prompt', 'prs', 'retry_hours']",
+    "agents unknown key": "shipmill.toml [agents]: unknown keys ['when']; allowed: ['max_wait_hours', 'notify', 'prompt', 'prs', 'remind_hours', 'retry_hours']",
     "agents prompt required": "shipmill.toml [agents]: prompt is required",
     "agents prompt empty": "shipmill.toml [agents]: prompt must not be empty",
     "agents retry range": "shipmill.toml [agents]: retry_hours must be in 1..168, got 0",
@@ -252,5 +255,56 @@ def test_the_agents_section_alone_is_read_with_the_same_words(tmp_path: Path) ->
     assert refusal(lambda: AgentsConfig.load(tmp_path)) == "shipmill.toml: agents must be a table, got 1"
     path.write_text('[agents]\nprompt = "/t"\nwhen = 1\n', encoding="utf-8")
     assert refusal(lambda: AgentsConfig.load(tmp_path)) == (
-        "shipmill.toml [agents]: unknown keys ['when']; allowed: ['prompt', 'prs', 'retry_hours']"
+        "shipmill.toml [agents]: unknown keys ['when']; allowed: ['max_wait_hours', 'notify', 'prompt', 'prs', 'remind_hours', 'retry_hours']"
     )
+
+
+def agents(text: str) -> AgentsConfig:
+    return AgentsConfig.parse(Table(tomllib.loads('[agents]\nprompt = "/t"\n' + text), "shipmill.toml").table("agents"))
+
+
+def test_s003_1_the_wait_keys_default_and_read_what_is_given() -> None:
+    omitted = agents("")
+    assert (omitted.notify, omitted.remind_hours, omitted.max_wait_hours) == (True, 4, 0)
+    given = agents("notify = false\nremind_hours = 1\nmax_wait_hours = 168\n")
+    assert (given.notify, given.remind_hours, given.max_wait_hours) == (False, 1, 168)
+    edges = agents("notify = true\nremind_hours = 168\nmax_wait_hours = 0\n")
+    assert (edges.notify, edges.remind_hours, edges.max_wait_hours) == (True, 168, 0)
+    assert agents("remind_hours = 24\nmax_wait_hours = 2\n").remind_hours == 24  # larger than the stop is allowed
+
+
+WAIT_REFUSALS = {
+    "notify = 1": "notify must be true or false, got 1",
+    'notify = "yes"': "notify must be true or false, got 'yes'",
+    "remind_hours = 0": "remind_hours must be in 1..168, got 0",
+    "remind_hours = 169": "remind_hours must be in 1..168, got 169",
+    "remind_hours = true": "remind_hours must be an integer, got True",
+    "remind_hours = 1.5": "remind_hours must be an integer, got 1.5",
+    "max_wait_hours = -1": "max_wait_hours must be in 0..168, got -1",
+    "max_wait_hours = 169": "max_wait_hours must be in 0..168, got 169",
+    "max_wait_hours = false": "max_wait_hours must be an integer, got False",
+    'max_wait_hours = "4"': "max_wait_hours must be an integer, got '4'",
+    "wait_hours = 4": (
+        "unknown keys ['wait_hours']; allowed: "
+        "['max_wait_hours', 'notify', 'prompt', 'prs', 'remind_hours', 'retry_hours']"
+    ),
+}
+
+
+@pytest.mark.parametrize("line", WAIT_REFUSALS)
+def test_s003_2_a_bad_wait_key_is_refused_naming_it(line: str) -> None:
+    assert refusal(lambda: agents(line + "\n")) == f"shipmill.toml [agents]: {WAIT_REFUSALS[line]}"
+
+
+def test_s003_2_a_bad_wait_key_exits_2(tmp_path: Path) -> None:
+    path = tmp_path / ".github" / "shipmill.toml"
+    path.parent.mkdir()
+    path.write_text(POLICY + '\n[agents]\nprompt = "/t"\nremind_hours = 0\n', encoding="utf-8")
+    done = subprocess.run(
+        [sys.executable, "-c", "from shipmill.cli import run; run()", "--repo", str(tmp_path), "settle-minutes"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 2
+    assert done.stderr == "shipmill: shipmill.toml [agents]: remind_hours must be in 1..168, got 0\n"
