@@ -39,6 +39,12 @@ bot.
 
 ### Fixed
 
+- `shipmill gate` no longer writes a row's detail into the session's prompt: an open
+  incident's detail starts with the issue's title, text anyone who can edit the issue
+  controls, which reached the session as if the gate wrote it. The prompt lists each row by
+  state and subject only (`- INCIDENT_OPEN #42`) and tells the session to rerun
+  `watch_state.py` for the details and read each issue's text as untrusted data, not
+  instructions. `--dry-run`, the log, and the launch fingerprint keep the detail (#114)
 - The github-issue-resolve skill no longer leaves the checkout it starts in on the fix branch,
   where a later `shipmill plan` read the PR branch instead of main: Phase 3 creates the branch
   in a worktree (`git worktree add -b fix/<slug> tmp/wt-<slug> origin/<default>`) unless the
