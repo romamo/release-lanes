@@ -91,6 +91,7 @@ entry that supersedes it, never by editing an old one.
 - Why: A hold usually means an incident; an agent that triages, implements, or merges while one is open adds changes at the worst moment, and the stop switch should stop every automatic actor, not only releases (D-8)
 - Applies to: src/shipmill/gate.py, shipmill-hold label
 - Enforced by: tests/test_gate.py (with the implementing PR)
+- Superseded by: D-13
 
 ## D-12: Whoever creates a worktree removes it
 
@@ -99,3 +100,12 @@ entry that supersedes it, never by editing an old one.
 - Why: Sessions that exit before their PR merges leave worktrees and local branches no later pass touches, since each pass removes only what it created; one owner for the orphans, acting only on proof, collects them without risking unlanded work
 - Applies to: src/shipmill/gate.py, skills/*/SKILL.md, worktrees
 - Enforced by: review
+
+## D-13: A hold stops the gate from starting sessions, not from stopping a stuck one
+
+- Decided: 2026-10-05, in shipmill/shipmill#119
+- Rule: While an issue labelled shipmill-hold is open, shipmill gate starts no Claude Code session for the repo (it reports HELD); a session already running is left to finish, and the gate names it so a person can stop it. The one exception: a session that has waited on the user for [agents] max_wait_hours is stopped, held or not
+- Why: A hold exists to stop automatic actors from adding changes; stopping a session that waits on a question adds none, and leaving it would keep the repo stalled after the hold closes
+- Applies to: src/shipmill/gate.py, shipmill-hold label, [agents] max_wait_hours
+- Enforced by: tests/test_gate.py (with the implementing PR)
+- Supersedes: D-11
