@@ -45,9 +45,6 @@ bot.
   session already runs in a linked worktree, never switches, resets, or pulls the user's
   checkout, keeps the worktree while the PR is open, and removes it and its branch once
   `landed.py` confirms the merge (#110)
-
-### Fixed
-
 - `fleet.py report --metrics` measured change failure rate and time to restore with the
   `incident` label for a repo whose fleet entry sets no `incident_label`, even when the repo's
   config sets `[operate] incident_label`. fleet.py now reads that label from the clone with
