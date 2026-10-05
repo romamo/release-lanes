@@ -2,9 +2,11 @@
 
 Each worktree gets one verdict, REMOVABLE or KEPT; a KEPT one carries the first check it
 failed, in the spec's order. Judging reads git, `claude agents --json`, and one `gh pr list`,
-and changes nothing but the fetched `origin/<default>`.
+and changes nothing but the fetched `origin/<default>`. Pruning removes the REMOVABLE ones
+of that same judgement, each with the local branch it held, and nothing else.
 """
 
+import dataclasses
 import datetime as dt
 import enum
 import json
@@ -30,6 +32,8 @@ HEADS = "refs/heads/"
 class Verdict(enum.StrEnum):
     REMOVABLE = "REMOVABLE"
     KEPT = "KEPT"
+    REMOVED = "REMOVED"  # a REMOVABLE worktree --prune removed, with its branch
+    WOULD_REMOVE = "WOULD_REMOVE"  # a REMOVABLE worktree --prune --dry-run would remove
 
 
 @dataclass(frozen=True, slots=True)
@@ -386,3 +390,31 @@ def table(judged: Sequence[Judged], label: Callable[[Judged], str] = lambda j: j
 
 def report(judged: Sequence[Judged]) -> dict[str, list[dict[str, object]]]:
     return {"worktrees": [j.record() for j in judged]}
+
+
+def prune(git: Git, judged: Sequence[Judged], dry_run: bool) -> list[Judged]:
+    """Remove each REMOVABLE worktree of judged with `git worktree remove` (never --force, so
+    git refuses one that changed since it was judged), then delete the local branch it held;
+    those rows come back REMOVED, or WOULD_REMOVE under dry_run, which touches nothing. Every
+    other row comes back unchanged. The first failure stops the prune: what it removed before
+    stays removed, and no worktree after it is touched"""
+    acted = Verdict.WOULD_REMOVE if dry_run else Verdict.REMOVED
+    done: list[str] = []
+    out = []
+    for j in judged:
+        if j.verdict is not Verdict.REMOVABLE:
+            out.append(j)
+            continue
+        branch = j.worktree.branch
+        if branch is None:
+            raise ReleaseError(f"{j.path} was judged REMOVABLE without a branch")
+        if not dry_run:
+            for step in (("worktree", "remove", str(j.worktree.path)), ("branch", "-D", branch)):
+                try:
+                    git.run(*step)
+                except ReleaseError as exc:
+                    before = f"; removed before it: {', '.join(done)}" if done else ""
+                    raise ReleaseError(f"prune stopped at {j.path} ({branch}): {exc}{before}") from None
+            done.append(j.path)
+        out.append(dataclasses.replace(j, verdict=acted))
+    return out

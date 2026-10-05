@@ -13,7 +13,8 @@
   doctor          check that the repository is ready for the bot
   init            write a starting policy and the calling workflow (--operate: the operate one)
   gate            start a Claude Code session for the repo only when its state needs one
-  worktrees       list the repository's worktrees, each REMOVABLE once its work landed, or KEPT and why
+  worktrees       list the repository's worktrees, each REMOVABLE once its work landed, or KEPT and why;
+                  --prune removes the REMOVABLE ones and their local branches
 
 Exit codes: 0 done (a plan may skip); 1 doctor found a failure; 2 bad input or a refused state.
 """
@@ -45,7 +46,7 @@ from shipmill.policy import Lane, Policy
 from shipmill.propose import close_released, propose, run_url
 from shipmill.stamp import notes, sync
 from shipmill.version import Version
-from shipmill.worktrees import ClaudeSessions, Sessions, judge, table
+from shipmill.worktrees import ClaudeSessions, Sessions, judge, prune, table
 from shipmill.worktrees import report as worktrees_report
 
 
@@ -179,6 +180,14 @@ def _parser() -> argparse.ArgumentParser:
     p = sub.add_parser(
         "worktrees", help="list every worktree of the repository as REMOVABLE once its work landed, or KEPT and why"
     )
+    p.add_argument(
+        "--prune",
+        action="store_true",
+        help="remove each REMOVABLE worktree (never forced) and the local branch it held; print them REMOVED",
+    )
+    p.add_argument(
+        "--dry-run", action="store_true", help="with --prune: print the REMOVABLE ones as WOULD_REMOVE, remove nothing"
+    )
     p.add_argument("--json", action="store_true", help="print the worktrees as one JSON object")
 
     p = sub.add_parser("launchd", help="run the gate for a dedicated checkout every few minutes (macOS)")
@@ -224,7 +233,12 @@ def main(
     if args.command == "launchd":
         return _launchd(root, args)
     if args.command == "worktrees":
-        judged = judge(Git(root), hub, sessions or ClaudeSessions(root), dt.datetime.now(dt.UTC))
+        if args.dry_run and not args.prune:
+            raise ReleaseError("--dry-run goes with --prune")
+        git = Git(root)
+        judged = judge(git, hub, sessions or ClaudeSessions(root), dt.datetime.now(dt.UTC))
+        if args.prune:
+            judged = prune(git, judged, args.dry_run)
         sys.stdout.write(json.dumps(worktrees_report(judged), indent=2) + "\n" if args.json else table(judged))
         return 0
 

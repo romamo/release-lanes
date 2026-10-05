@@ -33,7 +33,13 @@ bot.
   its whole diff), or KEPT with the first check it fails: the main or current checkout, not
   under `.claude/worktrees/` or `tmp/wt-*`, missing, locked, detached, on the default
   branch, under a day old, a live Claude Code session in it, another worktree inside it,
-  uncommitted changes, commits not landed, or an open pull request. It removes nothing yet (#122)
+  uncommitted changes, commits not landed, or an open pull request (#122)
+- `shipmill worktrees --prune` removes each REMOVABLE worktree with `git worktree remove`
+  (never `--force`) and then the local branch it held, printing those rows as REMOVED (also
+  the `verdict` in `--json`); no other worktree or branch, local or remote, is touched.
+  `--prune --dry-run` prints them as WOULD_REMOVE and removes nothing, and `--dry-run` alone
+  exits 2. The first removal or branch deletion git refuses stops the prune with exit 2,
+  naming the worktree and git's error and what it removed before (#123)
 
 ## [0.16.0] - 2026-10-05
 
