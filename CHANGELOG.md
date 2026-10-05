@@ -7,6 +7,15 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- `docs/install.md`: the full installation, from prerequisites through the skills, release
+  lanes, and the gate, to pausing and removing shipmill. The README keeps a short Install
+  section and links to it; its Quick start and Where the agents run sections moved there
+- A one-line setup: `claude plugin marketplace add shipmill/shipmill && claude plugin install
+  shipmill@shipmill && claude "/shipmill:shipmill-setup"`, from the root of a repo, installs
+  the plugin and starts the shipmill-setup skill
+
 ### Changed
 
 - shipmill moved to the shipmill GitHub org: the repository is `shipmill/shipmill`, so
