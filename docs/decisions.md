@@ -83,3 +83,11 @@ entry that supersedes it, never by editing an old one.
 - Why: what to build is the maintainer's call; the factory's job is to gather the evidence and keep the decision on record, so the same request isn't argued twice
 - Applies to: skills/product-intake/*, src/shipmill/autonomy.py, [autonomy] intake, opportunity issues
 - Enforced by: tests/test_autonomy.py (intake refuses act, with #76); review
+
+## D-11: A hold stops the gate from starting sessions
+
+- Decided: 2026-10-04, in romamo/shipmill#45
+- Rule: While an issue labelled shipmill-hold is open, shipmill gate starts no Claude Code session for the repo (it reports HELD); a session already running is left to finish, and the gate names it so a person can stop it
+- Why: A hold usually means an incident; an agent that triages, implements, or merges while one is open adds changes at the worst moment, and the stop switch should stop every automatic actor, not only releases (D-8)
+- Applies to: src/shipmill/gate.py, shipmill-hold label
+- Enforced by: tests/test_gate.py (with the implementing PR)
