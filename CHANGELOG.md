@@ -16,6 +16,7 @@ bot.
   it closes because the new plan dropped it (#117)
 - Spec 002 for pruning landed worktrees, and D-12: whoever creates a worktree removes it,
   and `shipmill gate`'s prune owns what an exited session left (#116)
+- Spec 002's build issues: #122 to #125 (#116)
 
 ### Changed
 
