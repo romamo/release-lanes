@@ -109,3 +109,11 @@ entry that supersedes it, never by editing an old one.
 - Applies to: src/shipmill/gate.py, shipmill-hold label, [agents] max_wait_hours
 - Enforced by: tests/test_gate.py (with the implementing PR)
 - Supersedes: D-11
+
+## D-14: Agent sessions write as the App or not at all
+
+- Decided: 2026-10-05, in shipmill/shipmill#137
+- Rule: When [agents] app_id is set, shipmill gate starts a session only as that GitHub App, with a token limited to the gate's repo; any failure to set up the App's identity exits 2 instead of falling back to the host's gh login
+- Why: A silent fallback would make agent work look like the maintainer's again, defeating the metrics and the reviews that rely on telling the two apart, and would hand the session the maintainer's full token
+- Applies to: src/shipmill/gate.py, [agents] app_id, shipmill app-token
+- Enforced by: tests/test_gate.py (with the implementing PR)
