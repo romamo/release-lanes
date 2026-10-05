@@ -7,6 +7,16 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- `shipmill gate` prunes on each tick as `shipmill worktrees --prune` does, held or not:
+  after the waiting step and before the hold check, it removes each worktree that provably
+  landed with the local branch it held, prints `pruned <path> (<branch>)` for each, and
+  lists their paths under a new `pruned` key in `--json`. `--dry-run` removes nothing,
+  prints `would prune <path> (<branch>)`, and lists them under `pruned`. A prune error
+  (`claude agents --json` or `gh pr list` failing, or git refusing a removal) exits 2 and
+  starts no session; the gate's own checkout is never a candidate (#124)
+
 ## [0.17.0] - 2026-10-06
 
 ### Added

@@ -7,7 +7,8 @@ the user, and the work changed since the last launch. Everything it knows comes 
 GitHub and from Claude Code; the two files it writes, under the checkout's git directory,
 keep an unchanged state from starting a session on every tick and time how long a session
 has waited on the user, so a reminder repeats only every few hours and an optional limit
-stops it.
+stops it. Each tick also prunes the repository's worktrees that provably landed (spec
+S-002), held or not, before it decides anything.
 """
 
 import datetime as dt
@@ -26,8 +27,10 @@ from typing import Protocol
 from shipmill.agents import AgentsConfig
 from shipmill.autonomy import Hold
 from shipmill.errors import ReleaseError
+from shipmill.github import GitHub
 from shipmill.gitrepo import Git
 from shipmill.notify import Notifier, NotifyFailed
+from shipmill.worktrees import Judged, Sessions, Verdict, judge, prune
 
 RECORD = "gate.json"
 WAITING = "waiting.json"  # one entry per blocked gate session (spec 003)
@@ -447,6 +450,18 @@ def refresh(git: Git) -> None:
     git.run("checkout", "-q", "--detach", "FETCH_HEAD")
 
 
+Pruner = Callable[[dt.datetime, bool], list[Judged]]  # (now, dry_run) -> every worktree, as the prune left it
+
+
+def pruner(git: Git, github: GitHub, sessions: Sessions) -> Pruner:
+    """`shipmill worktrees --prune`, with --dry-run on a dry-run tick"""
+
+    def run(now: dt.datetime, dry_run: bool) -> list[Judged]:
+        return prune(git, judge(git, github, sessions, now), dry_run)
+
+    return run
+
+
 def gate(
     git: Git,
     repo: str,
@@ -456,46 +471,50 @@ def gate(
     now: dt.datetime,
     hold: Callable[[], Hold],
     notifier: Notifier,
+    worktrees: Pruner,
     refresh_checkout: bool = False,
     dry_run: bool = False,
-) -> tuple[Decision, str | None, tuple[Waiting, ...]]:
+) -> tuple[Decision, str | None, tuple[Waiting, ...], tuple[Judged, ...]]:
     """Decide, and on LAUNCH stop the finished sessions and start a new one. Returns the
-    decision, the launched session's id, and what the waiting step did for each blocked
-    session. The waiting step runs first, held or not (D-13), and the rest of the tick is
-    decided without the sessions it stopped. A hold, then a busy session, ends the run
-    before the checkout moves or the state is read; of the two, only a blocked session
-    reads the config"""
+    decision, the launched session's id, what the waiting step did for each blocked
+    session, and the worktrees the prune removed (on a dry run, the ones it would remove).
+    The waiting step runs first, then the prune, both held or not (D-13: a prune starts no
+    session), and the rest of the tick is decided without the sessions the waiting step
+    stopped. A prune error raises, so that tick starts no session. A hold, then a busy
+    session, ends the run before the checkout moves or the state is read; of the two, only
+    a blocked session reads the config"""
     check_checkout(git, repo)
     record = state_dir(git) / RECORD
     sessions = claude.sessions(git.root, repo)
     waiting = attend(state_dir(git) / WAITING, repo, sessions, config, notifier, now, dry_run, claude.stop)
     gone = {w.session for w in waiting if w.stopped}  # on a dry run, the ones a real tick would stop
     sessions = [s for s in sessions if s.id not in gone]
+    pruned = tuple(j for j in worktrees(now, dry_run) if j.verdict in (Verdict.REMOVED, Verdict.WOULD_REMOVE))
     stopped = held(hold(), sessions)
     if stopped is not None:
-        return stopped, None, waiting
+        return stopped, None, waiting, pruned
     pending = busy(sessions)
     if pending is not None:
-        return pending, None, waiting
+        return pending, None, waiting, pruned
     if refresh_checkout and not dry_run:
         refresh(git)
     agents = config()
     retry = dt.timedelta(hours=agents.retry_hours)
     decision = decide(findings(), sessions, load_launch(record), now, retry, agents.prs)
     if decision.action is not Action.LAUNCH or dry_run:
-        return decision, None, waiting
+        return decision, None, waiting, pruned
     for session in decision.stop:
         claude.stop(session)
     name = f"{session_name(repo)} {now:%Y-%m-%d %H:%M}"
     launched = claude.launch(git.root, name, prompt(agents.prompt, repo, decision.work, now))
     save_launch(record, Launch(fingerprint(decision.work), launched, now))
-    return decision, launched, waiting
+    return decision, launched, waiting, pruned
 
 
 def tick_record(
-    decision: Decision, launched: str | None, waiting: Sequence[Waiting], dry_run: bool
+    decision: Decision, launched: str | None, waiting: Sequence[Waiting], pruned: Sequence[Judged], dry_run: bool
 ) -> dict[str, object]:
-    """`shipmill gate --json`"""
+    """`shipmill gate --json`; pruned holds the paths removed, or on a dry run the ones it would remove"""
     return {
         "action": decision.action.value,
         "reason": decision.reason,
@@ -503,16 +522,21 @@ def tick_record(
         "stopped": [] if dry_run else list(decision.stop),
         "launched": launched,
         "waiting": [w.record() for w in waiting],
+        "pruned": [j.path for j in pruned],
     }
 
 
-def tick_lines(decision: Decision, launched: str | None, waiting: Sequence[Waiting], dry_run: bool) -> list[str]:
-    """`shipmill gate`'s text: the decision, then one line per blocked session"""
+def tick_lines(
+    decision: Decision, launched: str | None, waiting: Sequence[Waiting], pruned: Sequence[Judged], dry_run: bool
+) -> list[str]:
+    """`shipmill gate`'s text: the decision, one line per blocked session, then one per pruned worktree"""
     lines = [f"{decision.action.value}: {decision.reason}"]
     for w in waiting:
         lines.append(f"  {w.line(dry_run)}")
         if w.stopped and w.error is not None:  # the stop line above leaves out the failed send
             lines.append(f"  notify failed for {w.session}: {w.error}")
+    verb = "would prune" if dry_run else "pruned"
+    lines += [f"  {verb} {j.path} ({j.worktree.branch})" for j in pruned]
     lines += [f"  {f.line()}" for f in decision.work]
     if launched:
         lines.append(f"  launched {launched}: claude attach {launched}")

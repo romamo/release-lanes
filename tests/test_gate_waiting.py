@@ -33,7 +33,7 @@ from shipmill.gate import (
 from shipmill.gitrepo import Git
 from shipmill.notify import NO_NOTIFIER, OSASCRIPT, Desktop, NotifyFailed, run
 
-from .test_gate import ISSUES, NOW, FakeClaude, FakeNotifier, bg, on_hold
+from .test_gate import ISSUES, NO_PRUNE, NOW, FakeClaude, FakeNotifier, bg, on_hold
 
 HOUR = dt.timedelta(hours=1)
 REPO = "romamo/demo"
@@ -63,8 +63,8 @@ def tick(
 ) -> tuple[Decision, tuple[Waiting, ...]]:
     claude = FakeClaude(list(sessions))
     agents = config or cfg()
-    decision, launched, waiting = gate(
-        git, REPO, lambda: agents, claude, lambda: [], now, Hold, notifier, dry_run=dry_run
+    decision, launched, waiting, _ = gate(
+        git, REPO, lambda: agents, claude, lambda: [], now, Hold, notifier, NO_PRUNE, dry_run=dry_run
     )
     assert (launched, claude.launched, claude.stopped) == (None, [], [])
     return decision, waiting
@@ -90,7 +90,7 @@ def test_s003_3_a_tick_with_no_blocked_session_reads_nothing_and_drops_the_recor
 
     notifier = FakeNotifier(fail="no send should run")
     claude = FakeClaude([bg("a", "busy", "working"), bg("c", "idle", "done")])
-    decision, launched, waiting = gate(checkout, REPO, unread, claude, lambda: [], NOW, Hold, notifier)
+    decision, launched, waiting, _ = gate(checkout, REPO, unread, claude, lambda: [], NOW, Hold, notifier, NO_PRUNE)
     assert (decision.action, launched, waiting, claude.stopped) == (Action.RUNNING, None, (), [])
     assert not (state_dir(checkout) / WAITING).exists()
 
@@ -101,7 +101,9 @@ def test_s003_3_a_tick_with_no_blocked_session_reads_nothing_and_drops_the_recor
         return cfg()
 
     claude = FakeClaude([bg("c", "idle", "done")])
-    decision, _, waiting = gate(checkout, REPO, counted, claude, lambda: [ISSUES], NOW, Hold, notifier, dry_run=True)
+    decision, _, waiting, _ = gate(
+        checkout, REPO, counted, claude, lambda: [ISSUES], NOW, Hold, notifier, NO_PRUNE, dry_run=True
+    )
     assert (decision.action, waiting, len(reads), notifier.sent) == (Action.LAUNCH, (), 1, [])
 
 
@@ -240,9 +242,9 @@ def test_s003_14_a_dry_run_sends_nothing_and_writes_no_record(checkout: Git) -> 
     decision, waiting = tick(checkout, [bg("b", "idle", "blocked")], notifier, dry_run=True)
     assert decision.action is Action.WAITING
     assert not (state_dir(checkout) / WAITING).exists()
-    lines = tick_lines(decision, None, waiting, dry_run=True)
+    lines = tick_lines(decision, None, waiting, (), dry_run=True)
     assert lines[1] == "  would notify b (waiting 0h)"
-    assert tick_record(decision, None, waiting, dry_run=True)["waiting"] == [
+    assert tick_record(decision, None, waiting, (), dry_run=True)["waiting"] == [
         {
             "session": "b",
             "name": "shipmill romamo/demo b",
@@ -268,7 +270,7 @@ def test_s003_15_json_lists_each_blocked_session(checkout: Git) -> None:
     decision, waiting = tick(
         checkout, sessions, FakeNotifier(fail="boom"), NOW + 2 * HOUR + 59 * dt.timedelta(minutes=1)
     )
-    data = json.loads(json.dumps(tick_record(decision, None, waiting, dry_run=False)))
+    data = json.loads(json.dumps(tick_record(decision, None, waiting, (), dry_run=False)))
     assert data["action"] == "WAITING"
     assert data["waiting"] == [
         {
@@ -291,17 +293,17 @@ def test_s003_15_json_lists_each_blocked_session(checkout: Git) -> None:
         },
     ]
     quiet, _ = tick(checkout, [], notifier)
-    assert tick_record(quiet, None, (), dry_run=False)["waiting"] == []
+    assert tick_record(quiet, None, (), (), dry_run=False)["waiting"] == []
 
 
 def test_a_held_tick_still_notifies(checkout: Git) -> None:
     """D-13: a hold stops the gate starting sessions, not the waiting step"""
     notifier = FakeNotifier()
     claude = FakeClaude([bg("b", "idle", "blocked")])
-    decision, _, waiting = gate(checkout, REPO, cfg, claude, lambda: [ISSUES], NOW, on_hold, notifier)
+    decision, _, waiting, _ = gate(checkout, REPO, cfg, claude, lambda: [ISSUES], NOW, on_hold, notifier, NO_PRUNE)
     assert decision.action is Action.HELD
     assert len(notifier.sent) == 1 and waiting[0].notified
-    assert tick_lines(decision, None, waiting, dry_run=False)[1] == "  notified b (waiting 0h)"
+    assert tick_lines(decision, None, waiting, (), dry_run=False)[1] == "  notified b (waiting 0h)"
 
 
 def limited(max_wait_hours: int, notify: bool = True) -> AgentsConfig:
@@ -331,16 +333,18 @@ def test_s003_10_a_session_past_max_wait_hours_is_stopped_and_the_tick_goes_on(c
     claude = FakeClaude([bg("b", "idle", "blocked"), bg("d", "idle", "done")])
     agents = limited(5)
     # gate() takes no GitHub writer: its only GitHub call is the hold read
-    decision, launched, waiting = gate(checkout, REPO, lambda: agents, claude, lambda: [ISSUES], NOW, Hold, notifier)
+    decision, launched, waiting, _ = gate(
+        checkout, REPO, lambda: agents, claude, lambda: [ISSUES], NOW, Hold, notifier, NO_PRUNE
+    )
     assert claude.stopped == ["b", "d"]  # b by the limit, then d as a finished session before the launch
     assert (decision.action, launched) == (Action.LAUNCH, "s1")
     assert record(checkout) == {}
     assert notifier.sent == [
         (f"shipmill {REPO}", "stopped session b after 5h waiting: claude attach b shows its question")
     ]
-    lines = tick_lines(decision, launched, waiting, dry_run=False)
+    lines = tick_lines(decision, launched, waiting, (), dry_run=False)
     assert lines[1] == "  stopped b after 5h waiting: shipmill romamo/demo b"
-    assert tick_record(decision, launched, waiting, dry_run=False)["waiting"] == [
+    assert tick_record(decision, launched, waiting, (), dry_run=False)["waiting"] == [
         {
             "session": "b",
             "name": "shipmill romamo/demo b",
@@ -359,7 +363,9 @@ def test_s003_10_after_a_stop_unchanged_findings_still_wait_for_retry_hours(chec
     claude = FakeClaude([bg("b", "idle", "blocked")])
     agents = limited(5, notify=False)
     notifier = FakeNotifier(fail="no send should run")
-    decision, launched, waiting = gate(checkout, REPO, lambda: agents, claude, lambda: [ISSUES], NOW, Hold, notifier)
+    decision, launched, waiting, _ = gate(
+        checkout, REPO, lambda: agents, claude, lambda: [ISSUES], NOW, Hold, notifier, NO_PRUNE
+    )
     assert (decision.action, launched, claude.stopped, claude.launched) == (Action.UNCHANGED, None, ["b"], [])
     assert (waiting[0].stopped, waiting[0].notified, notifier.sent) == (True, False, [])
 
@@ -368,8 +374,8 @@ def test_s003_10_another_blocked_session_still_holds_the_repo(checkout: Git) -> 
     waited(checkout, b=5, c=1)
     claude = FakeClaude([bg("b", "idle", "blocked"), bg("c", "idle", "blocked")])
     agents = limited(5)
-    decision, launched, waiting = gate(
-        checkout, REPO, lambda: agents, claude, lambda: [ISSUES], NOW, Hold, FakeNotifier()
+    decision, launched, waiting, _ = gate(
+        checkout, REPO, lambda: agents, claude, lambda: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE
     )
     assert (decision.action, launched, claude.stopped) == (Action.WAITING, None, ["b"])
     assert "claude attach c" in decision.reason
@@ -382,9 +388,11 @@ def test_s003_10_a_failed_stopped_notification_is_printed_too(checkout: Git) -> 
     claude = FakeClaude([bg("b", "idle", "blocked")])
     agents = limited(5)
     notifier = FakeNotifier(fail="boom")
-    decision, launched, waiting = gate(checkout, REPO, lambda: agents, claude, lambda: [], NOW, Hold, notifier)
+    decision, launched, waiting, _ = gate(
+        checkout, REPO, lambda: agents, claude, lambda: [], NOW, Hold, notifier, NO_PRUNE
+    )
     assert (decision.action, claude.stopped) == (Action.QUIET, ["b"])
-    assert tick_lines(decision, launched, waiting, dry_run=False)[1:] == [
+    assert tick_lines(decision, launched, waiting, (), dry_run=False)[1:] == [
         "  stopped b after 5h waiting: shipmill romamo/demo b",
         "  notify failed for b: boom",
     ]
@@ -405,7 +413,9 @@ def test_s003_12_a_held_tick_still_stops_and_no_longer_names_the_stopped_session
     notifier = FakeNotifier()
     claude = FakeClaude([bg("b", "idle", "blocked"), bg("c", "idle", "blocked")])
     agents = limited(5)
-    decision, launched, waiting = gate(checkout, REPO, lambda: agents, claude, lambda: [ISSUES], NOW, on_hold, notifier)
+    decision, launched, waiting, _ = gate(
+        checkout, REPO, lambda: agents, claude, lambda: [ISSUES], NOW, on_hold, notifier, NO_PRUNE
+    )
     assert (decision.action, launched, claude.stopped, claude.launched) == (Action.HELD, None, ["b"], [])
     assert "claude stop c" in decision.reason and "claude stop b" not in decision.reason
     assert [w.stopped for w in waiting] == [True, False] and all(w.notified for w in waiting)
@@ -423,7 +433,7 @@ def test_s003_13_a_failed_stop_raises_launches_nothing_and_keeps_the_entry(check
     agents = limited(9)
     later = NOW + 4 * HOUR
     with pytest.raises(ReleaseError, match="claude stop b failed"):  # cli.run() exits 2 on a ReleaseError
-        gate(checkout, REPO, lambda: agents, claude, lambda: [ISSUES], later, Hold, FakeNotifier())
+        gate(checkout, REPO, lambda: agents, claude, lambda: [ISSUES], later, Hold, FakeNotifier(), NO_PRUNE)
     assert claude.launched == []
     assert record(checkout)["b"] == before
     assert record(checkout)["a"]["notified"] == later.isoformat()  # a's reminder, sent first, is kept
@@ -436,12 +446,12 @@ def test_s003_14_a_dry_run_would_stop_and_stops_nothing(checkout: Git) -> None:
     claude = FakeClaude([bg("b", "idle", "blocked")])
     agents = limited(5)
     notifier = FakeNotifier(fail="no send should run")
-    decision, launched, waiting = gate(
-        checkout, REPO, lambda: agents, claude, lambda: [ISSUES], NOW, Hold, notifier, dry_run=True
+    decision, launched, waiting, _ = gate(
+        checkout, REPO, lambda: agents, claude, lambda: [ISSUES], NOW, Hold, notifier, NO_PRUNE, dry_run=True
     )
     assert (decision.action, launched, claude.stopped, claude.launched) == (Action.LAUNCH, None, [], [])
     assert path.read_text(encoding="utf-8") == before
-    lines = tick_lines(decision, None, waiting, dry_run=True)
+    lines = tick_lines(decision, None, waiting, (), dry_run=True)
     assert lines[1] == "  would stop b after 5h waiting: shipmill romamo/demo b"
     assert (waiting[0].stopped, waiting[0].notified, waiting[0].error) == (True, True, None)
 
