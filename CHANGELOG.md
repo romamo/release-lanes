@@ -12,6 +12,7 @@ bot.
 - Spec 003 for notifying when a gated session waits on you, and stopping it after an
   optional `max_wait_hours`, with D-13: a hold doesn't keep the gate from stopping a stuck
   session (#119)
+- Spec 003's build issues: #128 to #130 (#119)
 
 ## [0.16.0] - 2026-10-05
 
