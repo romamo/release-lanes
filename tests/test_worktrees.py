@@ -25,6 +25,7 @@ from shipmill.worktrees import (
     judge,
     parse_live_sessions,
     parse_worktrees,
+    prune,
 )
 
 from .conftest import FakeGitHub
@@ -521,3 +522,140 @@ def test_worktree_list_parses_every_kind_of_record() -> None:
 def test_a_worktree_list_shipmill_cannot_read_is_refused(text: str) -> None:
     with pytest.raises(ReleaseError):
         parse_worktrees(text)
+
+
+def branches(c: Checkout) -> set[str]:
+    return set(c.git().run("for-each-ref", "--format=%(refname:short)", "refs/heads/").split())
+
+
+def remote_branches(c: Checkout) -> set[str]:
+    return set(c.git().run("for-each-ref", "--format=%(refname:short)", "refs/remotes/").split())
+
+
+def rows_by_path(out: str) -> dict[str, list[str]]:
+    rows = [line.split(None, 4) for line in out.splitlines()[1:]]
+    return {r[1]: r for r in rows}
+
+
+def test_s002_12_prune_removes_each_removable_worktree_and_its_branch_only(
+    repo: Checkout, capsys: pytest.CaptureFixture[str]
+) -> None:
+    done = repo.add(".claude/worktrees/done", "-b", "feat/done")
+    pushed = repo.add("tmp/wt-pushed", "-b", "feat/pushed")
+    repo.git(pushed).run("push", "-q", "-u", "origin", "feat/pushed")
+    young = repo.add("tmp/wt-young", "-b", "feat/young", hours=5)
+    open_ = repo.add("tmp/wt-open", "-b", "feat/open")
+    repo.commit(open_, {"feature.py": "A = 1\n"}, "Unlanded")
+    gate = repo.add("tmp/shipmill-gate", "--detach")
+    repo.git().run("branch", "landed-alone", "origin/main")  # landed, but no worktree holds it
+    remotes = remote_branches(repo)
+    assert "origin/feat/pushed" in remotes
+    assert main(["--repo", str(repo.root), "worktrees", "--prune"], repo.github, sessions=repo.sessions) == 0
+    assert rows_by_path(capsys.readouterr().out) == {
+        ".": ["KEPT", ".", "main", "-", "main checkout"],
+        ".claude/worktrees/done": ["REMOVED", ".claude/worktrees/done", "feat/done", "3d"],
+        "tmp/wt-pushed": ["REMOVED", "tmp/wt-pushed", "feat/pushed", "3d"],
+        "tmp/wt-young": ["KEPT", "tmp/wt-young", "feat/young", "5h", "created 5h ago"],
+        "tmp/wt-open": ["KEPT", "tmp/wt-open", "feat/open", "3d", "1 commit(s) not landed"],
+        "tmp/shipmill-gate": ["KEPT", "tmp/shipmill-gate", "-", "3d", "not a shipmill worktree"],
+    }
+    assert not done.exists() and not pushed.exists()
+    assert young.is_dir() and open_.is_dir() and gate.is_dir()
+    assert branches(repo) == {"main", "feat/young", "feat/open", "landed-alone"}
+    assert remote_branches(repo) == remotes
+    assert "refs/heads/feat/pushed" in repo.git().run("ls-remote", "--heads", "origin")
+    listed = repo.git().run("worktree", "list", "--porcelain")
+    assert "wt-pushed" not in listed and ".claude/worktrees/done" not in listed
+
+
+def test_s002_12_prune_json_marks_the_removed_rows(repo: Checkout, capsys: pytest.CaptureFixture[str]) -> None:
+    repo.add(".claude/worktrees/done", "-b", "feat/done")
+    repo.add("tmp/wt-detached", "--detach")
+    argv = ["--repo", str(repo.root), "worktrees", "--prune", "--json"]
+    assert main(argv, repo.github, sessions=repo.sessions) == 0
+    rows = {row["path"]: row for row in json.loads(capsys.readouterr().out)["worktrees"]}
+    assert (rows[".claude/worktrees/done"]["verdict"], rows[".claude/worktrees/done"]["reason"]) == ("REMOVED", None)
+    assert rows["tmp/wt-detached"]["verdict"] == "KEPT"
+    assert rows["."]["verdict"] == "KEPT"
+
+
+def test_s002_13_dry_run_prints_would_remove_and_touches_nothing(
+    repo: Checkout, capsys: pytest.CaptureFixture[str]
+) -> None:
+    done = repo.add(".claude/worktrees/done", "-b", "feat/done")
+    repo.add("tmp/wt-young", "-b", "feat/young", hours=5)
+    before = repo.state()
+    argv = ["--repo", str(repo.root), "worktrees", "--prune", "--dry-run"]
+    assert main(argv, repo.github, sessions=repo.sessions) == 0
+    verdicts = {path: row[0] for path, row in rows_by_path(capsys.readouterr().out).items()}
+    assert verdicts == {".": "KEPT", ".claude/worktrees/done": "WOULD_REMOVE", "tmp/wt-young": "KEPT"}
+    assert main([*argv, "--json"], repo.github, sessions=repo.sessions) == 0
+    found = json.loads(capsys.readouterr().out)["worktrees"]
+    assert {row["path"]: row["verdict"] for row in found}[".claude/worktrees/done"] == "WOULD_REMOVE"
+    assert done.is_dir()
+    assert repo.state() == before
+
+
+def test_s002_13_dry_run_without_prune_exits_2_before_judging(repo: Checkout) -> None:
+    repo.add(".claude/worktrees/done", "-b", "feat/done")
+    before = repo.state()
+    repo.github.pulls_error = "gh must not be called"
+    with pytest.raises(ReleaseError, match="--dry-run goes with --prune"):
+        main(["--repo", str(repo.root), "worktrees", "--dry-run"], repo.github, sessions=repo.sessions)
+    cmd = [sys.executable, "-c", "from shipmill.cli import run; run()", "--repo", str(repo.root), "worktrees"]
+    proc = subprocess.run([*cmd, "--dry-run"], capture_output=True, text=True)
+    assert proc.returncode == 2 and "--dry-run goes with --prune" in proc.stderr
+    assert repo.state() == before
+
+
+def removable_in_order(repo: Checkout, *names: str) -> list[Path]:
+    """Linked worktrees under tmp/wt-<name>, each REMOVABLE, in the order the prune visits them"""
+    paths = {repo.add(f"tmp/wt-{n}", "-b", n).resolve() for n in names}
+    order = [j.worktree.path.resolve() for j in repo.judge().values() if j.verdict is Verdict.REMOVABLE]
+    assert set(order) == paths
+    return order
+
+
+def test_s002_14_a_branch_git_cannot_delete_stops_the_prune(repo: Checkout) -> None:
+    first, second, third = removable_in_order(repo, "a", "b", "c")
+    held = second.name.removeprefix("wt-")
+    common = Path(repo.git().run("rev-parse", "--path-format=absolute", "--git-common-dir").strip())
+    (common / "refs/heads" / f"{held}.lock").write_text("", encoding="utf-8")  # another git holds the ref
+    root = repo.root.resolve()
+    message = (
+        rf"(?s)prune stopped at {os.path.relpath(second, root)} \({held}\): git branch -D {held} failed: .+; "
+        rf"removed before it: {os.path.relpath(first, root)}$"
+    )
+    with pytest.raises(ReleaseError, match=message):
+        main(["--repo", str(repo.root), "worktrees", "--prune"], repo.github, sessions=repo.sessions)
+    assert not first.exists() and not second.exists()  # its worktree went before its branch failed
+    assert third.is_dir()
+    assert branches(repo) == {"main", held, third.name.removeprefix("wt-")}
+
+
+def test_s002_14_a_worktree_git_refuses_to_remove_stops_the_prune(repo: Checkout) -> None:
+    """A worktree that changed between the judgement and its removal: git refuses it
+    without --force, and nothing after it is touched"""
+    first, second, third = removable_in_order(repo, "a", "b", "c")
+    judged = judge(repo.git(), repo.github, repo.sessions, dt.datetime.now(dt.UTC))
+    (second / "late.txt").write_text("written after the check\n", encoding="utf-8")
+    rel = os.path.relpath(second, repo.root.resolve())
+    with pytest.raises(ReleaseError, match=rf"prune stopped at {rel} \(.+\): git worktree remove .+ failed: .+"):
+        prune(repo.git(), judged, dry_run=False)
+    assert not first.exists()
+    assert (second / "late.txt").is_file() and third.is_dir()
+    assert branches(repo) == {"main", second.name.removeprefix("wt-"), third.name.removeprefix("wt-")}
+
+
+@pytest.mark.parametrize("flags", [["--prune"], ["--prune", "--dry-run"]])
+def test_s002_11_prune_removes_nothing_when_claude_or_gh_fails(repo: Checkout, flags: list[str]) -> None:
+    repo.add(".claude/worktrees/done", "-b", "feat/done")
+    before = repo.state()
+    argv = ["--repo", str(repo.root), "worktrees", *flags]
+    repo.github.pulls_error = "HTTP 502"
+    with pytest.raises(ReleaseError, match="gh pr list failed: HTTP 502"):
+        main(argv, repo.github, sessions=repo.sessions)
+    repo.github.pulls_error = ""
+    with pytest.raises(ReleaseError, match="claude agents"):
+        main(argv, repo.github, sessions=ClaudeSessions(repo.root, str(repo.root / "no-claude")))
+    assert repo.state() == before
