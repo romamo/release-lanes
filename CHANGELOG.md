@@ -7,6 +7,11 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- D-18: a Release run that finds a work branch no active run owns deletes it and pushes its
+  own, given `actions: read`; without it, the stop stays but is reported (#175)
+
 ### Changed
 
 - `docs/design/agent-modes.md` records the #160 probe of a headless `claude -p` session on
