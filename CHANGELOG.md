@@ -39,6 +39,10 @@ bot.
 
 ### Fixed
 
+- `shipmill launchd` writes each `--claude-arg` into the job as `--claude-arg=<flag>`. It
+  wrote `--claude-arg` and the flag as two arguments, which the job's gate refused ("expected
+  one argument") on every tick, since a separate value that starts with a dash reads as an
+  option. Run `shipmill launchd` once more for a job installed with `--claude-arg` (#192)
 - A `needs-decision` question now counts only from a trusted author, in `triage_state.py`
   and the pull requests `watch_state.py` reads: a comment whose first line is the marker,
   by an owner, member, or collaborator, or with `--bot-login` by the bot. An outsider's
