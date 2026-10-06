@@ -22,6 +22,8 @@ bot.
 
 ### Fixed
 
+- D-15's `Decided` line names the issue it was decided in (#147), so `specs.py check`
+  accepts a spec that cites it
 - `shipmill app-create` prints each line as it happens, so a piped or backgrounded run shows
   the plan and the URL at once; its local page no longer posts to GitHub by itself, which
   lost the manifest when GitHub asked to sign in first (*We didn't find an App Manifest*),
