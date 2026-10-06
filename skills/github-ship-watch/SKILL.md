@@ -45,6 +45,8 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | UNANNOUNCED | Post the notices: `../github-pr-triage/scripts/shipped.py <repo> <prev> <tag> --install '<install command>' --post`. Show the plan first if this repo has never had notices |
 | ISSUES | Under "watch and triage", run github-issue-triage on the flagged issues. Otherwise list them |
 | WORKTREE_STALE | A shipmill worktree (under `.claude/worktrees/` or `tmp/wt-*`) that `shipmill worktrees` keeps, created over 7 days ago: the subject is its path, the detail why it is kept. The gate's prune removes only what landed, so this is work a person finishes (commit, push, open the PR), or removes by hand once it is unwanted (`git worktree remove <path>`). Report only, never remove it from the watch. Not an action (exit 0 by itself) |
+| NEEDS_DECISION | Issues and pull requests labelled `needs-decision` whose question has no reply from an OWNER, MEMBER, or COLLABORATOR ([needs-decision.md](../github-issue-triage/references/needs-decision.md)), as `#N` only. They are left out of ISSUES and PRS_OPEN, so they start no session. Report them as waiting on the user; never answer or unlabel one. An action (exit 1): a person owes the answer |
+| UNTRUSTED | With `--trusted-only` (the headless gate's trust filter, D-16): issues whose author is no OWNER, MEMBER, or COLLABORATOR nor the `--bot-login`, and pull requests whose head is in a fork, as `#N` only. Report them for an interactive session. Not an action |
 | PRS_OPEN, BOT_OK, BOT_NONE, NO_REGISTRY | Report only |
 
 `--json` prints one JSON object per row: `state`, `subject`, `detail`, and `agent`, which says whether the row needs an agent. `shipmill gate` starts a session only on `agent: true` rows (plus PRS_OPEN with `[agents] prs = true`), and refuses a row without the field. The script's `AGENT` set decides it, next to this table; change both together:
@@ -58,6 +60,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | `false` | UNHEALTHY | Operate owns it and rolls back after `rollback_after` failures; past that, the incident it opens reads INCIDENT_OPEN |
 | `false` | HOLD | Report only; the gate checks `shipmill-hold` itself before anything else (D-15) |
 | `false` | WORKTREE_STALE | Only a person knows whether kept work is wanted; the gate's prune already removes what landed |
+| `false` | NEEDS_DECISION, UNTRUSTED | The item waits on a person's reply, or on an interactive session; a session started for it could only ask again |
 | `false` | PRS_OPEN, POSTMORTEM_DUE, and every other state | Report only, or a repair the watch pass makes itself |
 
 Pass `--grace` to give a slow publish more minutes before it reads NOT_PUBLISHED, and `--tool` when the shipmill bot isn't installed from `shipmill/shipmill@v0`.

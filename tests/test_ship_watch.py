@@ -560,6 +560,8 @@ REPORT_ROWS = [
     "PUBLISHED",
     "PUBLISHING",
     "WORKTREE_STALE",
+    "NEEDS_DECISION",
+    "UNTRUSTED",
 ]
 
 

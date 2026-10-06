@@ -7,12 +7,21 @@ bot.
 
 ## [Unreleased]
 
-### Changed
+### Added
 
-- `docs/design/agent-modes.md` records the #160 probe of a headless `claude -p` session on
-  Claude Code 2.1.291: it outlives the launchd job that started it, a call outside the
-  allowlist is denied with no prompt, AskUserQuestion is absent, and it exits on its own
-  even when its last reply asks a question (S-005-4)
+- The needs-decision protocol for headless sessions: a question for the user becomes a
+  comment whose first line is `<!-- shipmill:needs-decision -->` and a `needs-decision`
+  label, and the item waits on GitHub (`references/needs-decision.md`, linked from a headless
+  rule in github-issue-triage, github-issue-resolve, and github-pr-triage).
+  `triage_state.py` reads such an issue as NEEDS_DECISION, no action, until an OWNER,
+  MEMBER, or COLLABORATOR replies, and gains `--bot-login` and `--trusted-only` (an outside
+  author's issue reads UNTRUSTED). `watch_state.py` passes both through, leaves waiting
+  issues and pull requests out of ISSUES and PRS_OPEN, and lists them in a NEEDS_DECISION
+  row (an action, `agent: false`) and, with `--trusted-only`, outsiders' issues and fork pull
+  requests in an UNTRUSTED row, so `shipmill gate` reads a repo whose only work waits as
+  QUIET (S-005-7, S-005-8, S-005-9, S-005-10, S-005-17) (#161)
+- D-18: a Release run that finds a work branch no active run owns deletes it and pushes its
+  own, given `actions: read`; without it, the stop stays but is reported (#175)
 
 ### Fixed
 
@@ -26,6 +35,15 @@ bot.
   `actions: read` when that is the cause; the run stays green. github-ship-watch reports
   `WORK_BRANCH_STALE` for a `shipmill/v*` branch no active run owns, and deletes it and
   starts the lane (#175)
+
+## [0.22.0] - 2026-10-06
+
+### Changed
+
+- `docs/design/agent-modes.md` records the #160 probe of a headless `claude -p` session on
+  Claude Code 2.1.291: it outlives the launchd job that started it, a call outside the
+  allowlist is denied with no prompt, AskUserQuestion is absent, and it exits on its own
+  even when its last reply asks a question (S-005-4)
 
 ## [0.21.0] - 2026-10-06
 
@@ -731,7 +749,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/shipmill/shipmill/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/shipmill/shipmill/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/shipmill/shipmill/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/shipmill/shipmill/compare/v0.18.0...v0.19.0
