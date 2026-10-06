@@ -31,12 +31,14 @@ The command is built by `watch_command` in `src/shipmill/gate.py`, which the gat
 uses. That function gains a `json` parameter: the gate passes true, and `status` passes its
 own `--json`. Today it always adds `--json`.
 
-With no repo, status takes the checkout's `origin` through `_origin_repo` in
-`src/shipmill/cli.py` (as `app-install` does). Outside a GitHub checkout and with no repo,
-it exits 2 saying to name one. A named repo must match the checkout's `origin`, checked by
-the gate's `check_checkout` in `src/shipmill/gate.py`, since the report reads the checkout
-(tags, the policy, worktrees); otherwise it exits 2 naming both. No third origin parser is
-written.
+The report reads the checkout (tags, the policy, worktrees), so status needs one whether or
+not a repo is named. Outside a git checkout it exits 2 saying to run it in a checkout of the
+repo or to pass `--repo PATH`; this is checked first, before git is asked for anything else.
+In a checkout with no repo named, status takes the `origin` through `_origin_repo` in
+`src/shipmill/cli.py` (as `app-install` does); when `origin` isn't a GitHub repo it exits 2
+saying to name the repo. A named repo must match the checkout's `origin`, checked by the
+gate's `check_checkout` in `src/shipmill/gate.py`; otherwise it exits 2 naming both. No
+third origin parser is written.
 
 ### What it reads and writes
 
@@ -65,7 +67,27 @@ scope, not its "watch" scope. Untrusted issue text is never printed beyond what
 - 2: bad input, no `gh`, the script exited with any other code, or the script exited 1 with
   no row printed. The script prints its rows only once they are all read, so an uncaught
   exception (a network error reaching PyPI, say) exits 1 with nothing on stdout. That is a
-  failure, not a report. Its stderr is shown, cut to 500 characters as the gate cuts it
+  failure, not a report. Its whole stderr is shown, since a traceback ends with the
+  exception
+
+status captures the script's stdout before printing it, since the guard needs to know
+whether a row was printed; the rows reach stdout unchanged. The script's stderr is passed
+to status's stderr on every exit, so its warnings are seen on 0 and 1 too.
+
+### The gate shares the guard
+
+The gate has the same gap: `watch` in `src/shipmill/gate.py` accepts exit 1 and parses an
+empty stdout as no findings, so a crashed script reads as QUIET. One function in
+`src/shipmill/gate.py` decides whether a `watch_state.py` run failed (any exit but 0 or 1,
+or exit 1 with no row), and both `watch` and `status` call it. A failed run stops the gate's
+tick with an error, as any other code but 0 or 1 does today; its message keeps the last 500
+characters of stderr rather than the first, so the exception is in it.
+
+### Docs
+
+The README's setup names `shipmill status` as the command for "is anything stuck?", and
+github-ship-watch's `SKILL.md` says that its "status" scope is what `shipmill status`
+prints for a person without an agent.
 
 The module docstring's command list and exit codes in `src/shipmill/cli.py` name `status`.
 
@@ -73,8 +95,8 @@ The module docstring's command list and exit codes in `src/shipmill/cli.py` name
 
 - S-008-1: `shipmill status` with no repo runs `watch_state.py` for the checkout's `origin`
   repo with `--repo-dir` set to the checkout's top level, also when run from a subdirectory
-- S-008-2: `shipmill status` outside a GitHub checkout and with no repo exits 2 saying to
-  name one
+- S-008-2: `shipmill status` in a checkout whose `origin` isn't a GitHub repo, with no repo
+  named, exits 2 saying to name the repo
 - S-008-3: `shipmill status owner/name` exits 2 naming both repos when it differs from the
   checkout's `origin`
 - S-008-4: `shipmill status` prints `watch_state.py`'s table unchanged, and `--json` prints
@@ -86,8 +108,13 @@ The module docstring's command list and exit codes in `src/shipmill/cli.py` name
 - S-008-7: the gate and `status` build the `watch_state.py` command through
   `watch_command`, whose `json` parameter decides `--json`; the gate's command is unchanged
 - S-008-8: the `src/shipmill/cli.py` docstring lists `status` and its exit code 1
-- S-008-9: `status` takes the origin through `_origin_repo` and checks a named repo through
-  `check_checkout`
+- S-008-9: `shipmill status` outside a git checkout exits 2 saying to run it in a checkout or
+  pass `--repo`, with or without a named repo
+- S-008-10: `shipmill status` passes the script's stderr through on exits 0 and 1, and shows
+  its whole stderr on a failure
+- S-008-11: the gate's tick fails, rather than going QUIET, when `watch_state.py` exits 1
+  with no row; its message ends with the end of the script's stderr
+- S-008-12: the README and github-ship-watch's `SKILL.md` name `shipmill status`
 
 ## Out of scope
 
@@ -99,8 +126,8 @@ The module docstring's command list and exit codes in `src/shipmill/cli.py` name
 - Folding `doctor`'s checks into the report: setup and pipeline state stay two commands
 - Pinning `--tool` to the installed shipmill: a development build has no tag to pin to, and
   the gate runs the default too; one change can move both later
-- Making `watch_state.py` itself exit 2 on unexpected errors: the guard above covers
-  `status`, and the script's other callers are their own change
+- Making `watch_state.py` itself exit 2 on unexpected errors: the shared guard covers
+  `status` and the gate; `fleet.py` is its own change
 
 ## Decisions relied on
 
