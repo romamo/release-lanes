@@ -261,7 +261,9 @@ no `--bot-login`, and the marker tells the question from the reply.
 ### Notifications
 
 - **With `app_id`:** the question comes from `<slug>[bot]`, so its `@<login>` mention
-  notifies the maintainer on GitHub. The gate sends no desktop notification for items
+  notifies the maintainer on GitHub. The gate sends no desktop notification for items; it
+  still records the waiting items in `needs-decision.json` and lists them in `decisions`
+  (Output) with `notified: false`
 - **Without it:** the comment is the maintainer's own, and GitHub doesn't notify anyone of
   their own mention. The gate notifies instead, with spec 003's notifier and keys: on a
   tick that reads the state, for each item in the NEEDS_DECISION row, with
@@ -271,8 +273,10 @@ no `--bot-login`, and the marker tells the question from the reply.
   state directory, `needs-decision.json`, `{"<n>": {"since": ..., "notified": ...}}`, with
   `waiting.json`'s rules: an entry is dropped once its item no longer waits, a failed send
   is printed and tried next tick, a malformed file exits 2 naming its path, and
-  `--dry-run` sends nothing, writes nothing, and prints `would notify #<n>`. Ticks that
-  don't read the state (HELD, WAITING, RUNNING) don't notify for items
+  `--dry-run` sends nothing, writes nothing, and prints `would notify #<n> (waiting <N>h)`.
+  Only a send or a failed send prints a line: an item that waits and isn't due for a
+  reminder prints none. Ticks that don't read the state (HELD, WAITING, RUNNING) don't
+  notify for items
 
 A headless launch without `app_id` prints, under its decision line,
 `  no app_id: needs-decision comments post as <login>, so GitHub won't notify you`.
@@ -283,7 +287,7 @@ A headless session can't block: it ends, and its question waits on GitHub.
 
 Text output adds one line per notified item, `  notified #<n> (waiting <N>h)` or
 `  notify failed for #<n>: <error>`. `--json` adds `"mode"` (`"interactive"` or
-`"headless"`) and `"decisions": [{"item", "since", "waited_hours", "notified", "error"}]`,
+`"headless"`, or null on a tick that read no config: HELD, WAITING, RUNNING) and `"decisions": [{"item", "since", "waited_hours", "notified", "error"}]`,
 an empty list when nothing waits or the tick didn't read the state.
 
 ### Setup
