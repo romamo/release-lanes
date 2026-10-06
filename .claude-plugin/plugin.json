@@ -1,6 +1,6 @@
 {
   "name": "shipmill",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "description": "Issue to release on GitHub: triage issues, review and land pull requests, and cut releases on lanes from a hand-written CHANGELOG",
   "author": {
     "name": "Roman Medvedev",
