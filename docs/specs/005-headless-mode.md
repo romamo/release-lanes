@@ -209,11 +209,15 @@ marker:
 
 | | The question | A reply |
 |---|---|---|
-| With `--bot-login` (an App, spec 004) | The newest comment by that login | A newer comment by an OWNER, MEMBER, or COLLABORATOR other than that login |
-| Without it | The newest comment whose first line is the marker | A newer comment by an OWNER, MEMBER, or COLLABORATOR without the marker |
+| With `--bot-login` (an App, spec 004) | The newest comment by that login whose first line is the marker | A newer comment by an OWNER, MEMBER, or COLLABORATOR other than that login, without the marker |
+| Without it | The newest comment whose first line is the marker, by an OWNER, MEMBER, or COLLABORATOR | A newer comment by an OWNER, MEMBER, or COLLABORATOR without the marker |
 
-A labelled issue with no question comment reads NEEDS_DECISION until the label comes off: a
-person parked it. An issue with a reply reads the state it would read without the label
+A marker comment from any other author never counts (#184): an outsider can't re-park an
+answered item, and with `--bot-login` a bot comment without the marker (a triage comment)
+is not a question. With `--bot-login`, when the newest marker comment by that login or by an
+OWNER, MEMBER, or COLLABORATOR is a person's, the person asked after the bot did, and the
+issue reads as a labelled issue with no question. A labelled issue with no question comment
+reads NEEDS_DECISION until the label comes off: a person parked it. An issue with a reply reads the state it would read without the label
 (NEW, NEEDS_PR, UNBLOCKED, and so on), so it is work again. A comment from any other
 author association never counts as a reply, so an outsider can't wake an item.
 
@@ -313,7 +317,7 @@ an empty list when nothing waits or the tick didn't read the state.
 - S-005-5: with `mode = "headless"`, a `--claude-arg` of `--permission-mode`, `--permission-prompts`, `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--bg`, `--background`, or `--session-id` (alone or as `--flag=value`) exits 2 naming the flag, and stops and launches no session
 - S-005-6: the headless prompt ends with the headless paragraph naming `@<login>` from `gh api user -q .login` and `references/needs-decision.md`; a failing login read exits 2 and launches nothing
 - S-005-7: `triage_state.py` reports an open issue labelled `needs-decision` whose question has no reply as `NEEDS_DECISION`, which doesn't make it exit 1, and an issue with a reply as the state it reads without the label
-- S-005-8: without `--bot-login`, the question is the newest comment whose first line is `<!-- shipmill:needs-decision -->` and a reply is a newer comment without it by an OWNER, MEMBER, or COLLABORATOR; with `--bot-login X`, the question is the newest comment by X and a reply is a newer comment by an OWNER, MEMBER, or COLLABORATOR other than X; in both, a comment by any other author association is never a reply, and a labelled issue with no question reads `NEEDS_DECISION`
+- S-005-8: a question's first line is `<!-- shipmill:needs-decision -->`; without `--bot-login`, the question is the newest such comment by an OWNER, MEMBER, or COLLABORATOR; with `--bot-login X`, the question is the newest such comment by X, unless a newer one by an OWNER, MEMBER, or COLLABORATOR exists, and then the issue has no question; a reply is a newer comment without the marker by an OWNER, MEMBER, or COLLABORATOR (other than X); a marker comment by any other author is never a question and a comment by any other author association is never a reply; a labelled issue with no question reads `NEEDS_DECISION`
 - S-005-9: `watch_state.py --json` leaves waiting issues out of the ISSUES row and waiting pull requests out of PRS_OPEN, and prints a `NEEDS_DECISION` row whose detail lists only `#N` numbers, with `agent: false`; a repo whose only open work waits on a decision reads QUIET at the gate, and a waiting item doesn't change the gate's fingerprint
 - S-005-10: with `--trusted-only`, `triage_state.py` reports an open issue whose author is neither an OWNER, MEMBER, or COLLABORATOR nor the `--bot-login` as `UNTRUSTED`, not an action state, and `watch_state.py` counts in PRS_OPEN only pull requests whose head is in the repo, listing the others in an `UNTRUSTED` row with `agent: false`
 - S-005-11: a headless gate calls `watch_state.py` with `--trusted-only`, and with `--bot-login <slug>[bot]` when `app_id` is set; when resolving the slug fails, it exits 2, reads no state, and launches no session

@@ -7,6 +7,14 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- Spec 005's S-005-8 counts a `needs-decision` question only from a trusted author: an
+  owner, member, or collaborator, or with `--bot-login` the bot's own marker comment. An
+  outsider's marker comment can no longer re-park an answered item, and a maintainer's
+  question after a bot's triage comment no longer reads as its reply. The code follows in
+  #184
+
 ## [0.23.0] - 2026-10-06
 
 ### Added
