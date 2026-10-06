@@ -19,6 +19,7 @@ bot.
 
 ### Changed
 
+- shipmill's own gated sessions write as the `shipmill-romamo` GitHub App (`[agents] app_id`)
 - `shipmill app-create` makes the App yours by default (your personal account), private
   unless a gated repo is in an org, then public so it installs there; an interactive run
   asks who should own it, your account first, and `--owner` picks an org you administer
