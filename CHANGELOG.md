@@ -9,8 +9,8 @@ bot.
 
 ### Added
 
-- github-ship-watch compares the host's `shipmill@shipmill` plugin with the latest shipmill
-  release: SHIPMILL_VERSION lists the installs that apply to the repo (user scope, the
+- github-ship-watch compares the host's `shipmill@shipmill` plugin (`claude plugin list`)
+  with the latest shipmill release: SHIPMILL_VERSION lists the installs that apply to the repo (user scope, the
   checkout, and the gate's working directory) and a marketplace on an old repo name, and
   SHIPMILL_OUTDATED names an install behind the release with the command that updates it.
   The gate's checkout was found pinned at 0.14.0 while 0.24.0 was out (#196)

@@ -99,7 +99,7 @@ Agents (all reported, never an action by itself):
                   session or the cloud, where no script reads it
   HOST_UNKNOWN    the agent sessions weren't read: claude isn't on PATH (a cloud session)
 
-shipmill on this host (from Claude Code's plugin registry):
+shipmill on this host (from `claude plugin list --json` and `claude plugin marketplace list --json`):
   SHIPMILL_VERSION   the latest shipmill release, the shipmill@shipmill plugin's installs
                   that apply to the repo (user scope, and local or project scope in the
                   checkout or the gate's launchd working directory), and the marketplace's
@@ -183,7 +183,6 @@ GATE_SESSION = "shipmill "  # shipmill gate names its sessions "shipmill <owner/
 LAUNCH_AGENTS = Path.home() / "Library" / "LaunchAgents"
 SHIPMILL_REPO = "shipmill/shipmill"  # where shipmill releases
 PLUGIN = "shipmill@shipmill"  # the Claude Code plugin, in its marketplace
-PLUGINS = Path.home() / ".claude" / "plugins"  # installed_plugins.json and known_marketplaces.json
 # the gate log's decision lines: QUIET, LAUNCH, RUNNING, WAITING, UNCHANGED, HELD, or an error
 GATE_DECISION = re.compile(r"^(?:[A-Z]+|error): ")
 VERSION_TAG = re.compile(r"^v\d+\.\d+")  # skips moving major tags such as v0
@@ -1240,25 +1239,27 @@ def agent_rows(repo: str, repo_dir: Path, now: dt.datetime) -> list[Row]:
     return [*rows, loop_row(label, plist, printed, log, now)]
 
 
-def plugin_rows(installed: object, marketplace: object, latest: str, folders: list[Path]) -> list[Row]:
-    """The plugin's installs that apply to the repo, against the latest release: from
-    installed_plugins.json and known_marketplaces.json, parsed (None when missing). An install
-    applies at user scope, or at local or project scope in one of the folders"""
+def plugin_rows(plugins: object, marketplaces: object, latest: str, folders: list[Path]) -> list[Row]:
+    """The plugin's installs that apply to the repo, against the latest release: from `claude
+    plugin list --json` and `claude plugin marketplace list --json`, parsed (None when claude
+    isn't on PATH). An install applies at user scope, or at local or project scope in one of
+    the folders"""
     newest = version_key(latest)
     if newest is None:
         raise Refused(f"error: {SHIPMILL_REPO}'s latest release {latest!r} is not a version tag")
+    if plugins is None:
+        return [Row("SHIPMILL_VERSION", "shipmill", f"latest {latest}; plugin: claude isn't on PATH, not read")]
+    if not isinstance(plugins, list):
+        raise Refused("error: claude plugin list --json: expected a JSON array")
     installs = []
-    if installed is not None:
-        plugins = installed.get("plugins") if isinstance(installed, dict) else None
-        entries = plugins.get(PLUGIN, []) if isinstance(plugins, dict) else None
-        if not isinstance(entries, list):
-            raise Refused(f"error: {PLUGINS / 'installed_plugins.json'} has no plugins table")
-        for e in entries:
-            if not isinstance(e, dict) or not isinstance(e.get("scope"), str) or not isinstance(e.get("version"), str):
-                raise Refused(f"error: {PLUGINS / 'installed_plugins.json'}: {PLUGIN} install {e!r}")
-            where = e.get("projectPath")
-            if e["scope"] == "user" or (isinstance(where, str) and Path(where) in folders):
-                installs.append((e["scope"], e["version"], where if isinstance(where, str) else None))
+    for e in plugins:
+        if not isinstance(e, dict) or e.get("id") != PLUGIN:
+            continue
+        if not isinstance(e.get("scope"), str) or not isinstance(e.get("version"), str):
+            raise Refused(f"error: claude plugin list --json: {PLUGIN} install {e!r}")
+        where = e.get("projectPath")
+        if e["scope"] == "user" or (isinstance(where, str) and Path(where) in folders):
+            installs.append((e["scope"], e["version"], where if isinstance(where, str) else None))
     rows = []
     for scope, version, where in installs:
         key = version_key(f"v{version}")
@@ -1270,21 +1271,20 @@ def plugin_rows(installed: object, marketplace: object, latest: str, folders: li
             rows.append(Row("SHIPMILL_OUTDATED", f"plugin {scope}", f"{version}, latest {latest}; {fix}"))
     found = ", ".join(f"{scope} {version}" + (f" ({where})" if where else "") for scope, version, where in installs)
     detail = f"latest {latest}; plugin: {found or 'not installed for this repo on this host'}"
-    source = marketplace.get("shipmill", {}).get("source", {}) if isinstance(marketplace, dict) else {}
-    origin = source.get("repo") if isinstance(source, dict) else None
-    if isinstance(origin, str) and origin.lower() != SHIPMILL_REPO:
-        detail += f"; marketplace source {origin}, now {SHIPMILL_REPO}"
+    market = PLUGIN.partition("@")[2]
+    for m in marketplaces if isinstance(marketplaces, list) else []:
+        origin = m.get("repo") if isinstance(m, dict) and m.get("name") == market else None
+        if isinstance(origin, str) and origin.lower() != SHIPMILL_REPO:
+            detail += f"; marketplace source {origin}, now {SHIPMILL_REPO}"
     return [Row("SHIPMILL_VERSION", "shipmill", detail), *rows]
 
 
-def read_json(path: Path) -> object:
-    """A JSON file's content, None when missing; malformed JSON stops the watch"""
-    if not path.is_file():
-        return None
+def claude_json(claude: str, *args: str) -> object:
+    out = run([claude, *args, "--json"])
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(out)
     except json.JSONDecodeError as exc:
-        raise Refused(f"error: {path}: {exc}") from None
+        raise Refused(f"error: claude {' '.join(args)} --json printed no JSON: {exc}") from None
 
 
 def shipmill_rows(repo: str, repo_dir: Path) -> list[Row]:
@@ -1295,8 +1295,11 @@ def shipmill_rows(repo: str, repo_dir: Path) -> list[Row]:
     workdir = plist.get("WorkingDirectory") if plist else None
     if isinstance(workdir, str):
         folders.append(Path(workdir))
-    installed = read_json(PLUGINS / "installed_plugins.json")
-    return plugin_rows(installed, read_json(PLUGINS / "known_marketplaces.json"), latest, folders)
+    claude = shutil.which("claude")
+    if claude is None:
+        return plugin_rows(None, None, latest, folders)
+    plugins = claude_json(claude, "plugin", "list")
+    return plugin_rows(plugins, claude_json(claude, "plugin", "marketplace", "list"), latest, folders)
 
 
 # -- repository settings -------------------------------------------------------------------

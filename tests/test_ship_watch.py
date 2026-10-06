@@ -867,16 +867,16 @@ def test_a_setting_that_is_not_a_boolean_is_refused(ws: ModuleType) -> None:
         ws.settings_rows("o/r", None)
 
 
-def install(scope: str, version: str, where: str | None = None) -> dict[str, str]:
-    """One entry of installed_plugins.json"""
-    return {"scope": scope, "version": version, **({"projectPath": where} if where else {})}
+def install(scope: str, version: str, where: str | None = None, plugin: str = "shipmill@shipmill") -> dict[str, str]:
+    """One install as `claude plugin list --json` prints it"""
+    return {"id": plugin, "scope": scope, "version": version, **({"projectPath": where} if where else {})}
 
 
-def registry(*entries: dict[str, str]) -> dict[str, object]:
-    return {"version": 2, "plugins": {"shipmill@shipmill": list(entries), "other@x": [install("user", "0.1.0")]}}
+def registry(*entries: dict[str, str]) -> list[dict[str, str]]:
+    return [*entries, install("user", "0.1.0", plugin="other@x")]
 
 
-MARKETPLACE = {"shipmill": {"source": {"source": "github", "repo": "shipmill/shipmill"}}}
+MARKETPLACE = [{"name": "shipmill", "source": "github", "repo": "shipmill/shipmill"}]
 FOLDERS = [Path("/work/r"), Path("/work/r/tmp/shipmill-gate")]
 
 
@@ -915,25 +915,25 @@ def test_a_current_install_is_only_reported(ws: ModuleType) -> None:
 
 
 def test_a_marketplace_on_the_old_repo_name_is_named(ws: ModuleType) -> None:
-    old = {"shipmill": {"source": {"source": "github", "repo": "romamo/shipmill"}}}
+    old = [{"name": "shipmill", "source": "github", "repo": "romamo/shipmill"}, {"name": "x", "repo": "a/b"}]
     rows = ws.plugin_rows(registry(install("user", "0.24.0")), old, "v0.24.0", FOLDERS)
     assert rows[0].detail.endswith("; marketplace source romamo/shipmill, now shipmill/shipmill")
 
 
-def test_no_plugin_registry_reads_not_installed(ws: ModuleType) -> None:
+def test_without_claude_the_plugin_is_not_read(ws: ModuleType) -> None:
     rows = ws.plugin_rows(None, None, "v0.24.0", FOLDERS)
-    assert [r.detail for r in rows] == ["latest v0.24.0; plugin: not installed for this repo on this host"]
+    assert [r.detail for r in rows] == ["latest v0.24.0; plugin: claude isn't on PATH, not read"]
 
 
 @pytest.mark.parametrize(
     ("installed", "latest"),
     [
-        ({"plugins": {"shipmill@shipmill": [{"scope": "user"}]}}, "v0.24.0"),
+        ([{"id": "shipmill@shipmill", "scope": "user"}], "v0.24.0"),
         ({"plugins": []}, "v0.24.0"),
         (registry(install("user", "weird")), "v0.24.0"),
         (registry(install("user", "0.24.0")), "latest"),
     ],
 )
-def test_a_malformed_registry_or_release_is_refused(ws: ModuleType, installed: object, latest: str) -> None:
+def test_a_malformed_plugin_list_or_release_is_refused(ws: ModuleType, installed: object, latest: str) -> None:
     with pytest.raises(ws.Refused):
         ws.plugin_rows(installed, MARKETPLACE, latest, FOLDERS)
