@@ -147,6 +147,23 @@ Verified on Claude Code 2.1:
   session, and its Bash tool sees those variables, `PATH` included (verified on 2.1.289).
   The JSON is a process argument that `ps` can show, so the gate puts a `PATH` there whose
   `gh` mints a token at call time, never a token
+- Headless mode (spec 005, D-17) runs a session as `claude -p`, never `claude --bg`: a
+  `--bg` session reads `blocked` whenever its last reply asks for something, prompt or
+  not, and `claude --bg -p` refuses to run. Verified on Claude Code 2.1.291 (#160) with
+  S-005-3's command line, `claude -p --permission-prompts none --allowedTools
+  "<HEADLESS_TOOLS>" --disallowedTools AskUserQuestion --session-id <uuid> -n <name>
+  <prompt>`, started with `start_new_session`, stdin from `/dev/null`, and output to a
+  log, from a launchd job like the gate's:
+  - The session outlived the job that started it (parent PID 1, its own process group),
+    with or without `AbandonProcessGroup`
+  - A Bash call outside the allowlist (`touch`, `python3 -c`) was denied with no prompt:
+    "this session has no approval surface ... so it was denied automatically. The action
+    was NOT performed". The session went on and reported the denial
+  - Read-only commands such as `ls` run without an allow rule, as in any mode
+  - AskUserQuestion was absent from the tool list, and ToolSearch couldn't find it
+  - The session exited on its own about 10 seconds in, though its last reply ended with
+    "Decision needed (@<login>): ..."; `claude agents` doesn't list it
+  - Its transcript was saved under `--session-id`, so `claude --resume <uuid>` reopens it
 
 ### State
 

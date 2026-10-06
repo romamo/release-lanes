@@ -7,6 +7,13 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- `docs/design/agent-modes.md` records the #160 probe of a headless `claude -p` session on
+  Claude Code 2.1.291: it outlives the launchd job that started it, a call outside the
+  allowlist is denied with no prompt, AskUserQuestion is absent, and it exits on its own
+  even when its last reply asks a question (S-005-4)
+
 ## [0.21.0] - 2026-10-06
 
 ### Changed
