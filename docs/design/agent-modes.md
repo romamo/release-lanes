@@ -12,7 +12,7 @@ code decides when it runs and with what.
 
 | Mode | Session | Questions for you | Status |
 |---|---|---|---|
-| 1. Interactive | A new `claude --bg` session per launch: attachable, listed in `claude agents` | AskUserQuestion; the session waits, the gate notifies you and starts nothing for that repo until you answer or `max_wait_hours` stops it | Built: `shipmill gate` |
+| 1. Interactive | A new `claude --bg` session per launch: attachable, listed in `claude agents` | AskUserQuestion; the session waits, the gate notifies you and starts nothing for that repo until you answer or `max_wait_minutes` (15 by default) stops it | Built: `shipmill gate` |
 | 2. Noninteractive | The same, started with a tool allowlist, for a machine nobody watches | The `needs-decision` protocol: a label and a comment that mentions you; the item waits on GitHub and the session ends | Next, after mode 1 shows how often sessions wait on you |
 | 3. Ephemeral | A fresh container per job (GitHub Actions) | The same protocol | Parked: [ephemeral-mode.md](ephemeral-mode.md) |
 
