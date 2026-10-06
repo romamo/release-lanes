@@ -133,13 +133,14 @@ With no callback after 10 minutes, the command exits 2 with `no App was created`
 
 ### 4. Install
 
-The App exists, but on no repo. The command prints and opens
-`https://github.com/apps/<slug>/installations/new` and the repos to select, then checks
-every 5 seconds, for up to 10 minutes, `GET /repos/<owner>/<repo>/installation` with the
-App's JWT (as `src/shipmill/app.py` signs it) for each gated repo in an account the App can
-be installed on. It prints `installed on <owner/repo>` as each appears, and stops when all
-have. When the time runs out it prints each repo still missing and exits 1: the App and key
-stay, and the same URL installs it later.
+The App exists, but on no repo. For each gated repo in an account the App can be installed
+on, the command runs spec 007's guide: it opens the App's **Install App** page and says per
+account what to click there (Install, then Only select repositories and the repos), then
+checks every 5 seconds, for up to 10 minutes, `GET /repos/<owner>/<repo>/installation` with
+the App's JWT (as `src/shipmill/app.py` signs it). It prints `installed on <owner/repo>` as
+each appears, and stops when all have. When the time runs out it prints each repo still
+missing with the page and exits 1: the App and key stay, and `shipmill app-install` finishes
+the job later. Until spec 007 this step opened `https://github.com/apps/<slug>/installations/new`.
 
 It ends by printing what the repos' configs need, without editing any (D-4: a config change
 is a reviewed commit):
@@ -175,7 +176,7 @@ then prove it: shipmill --repo <gate checkout> gate <owner/repo> --dry-run
 - S-006-10: the server listens on `127.0.0.1` only, and a callback with a missing or wrong `state` writes nothing and leaves the flow waiting
 - S-006-11: the code is exchanged through `POST /app-manifests/<code>/conversions`; the key is written to `~/.config/shipmill/app-<id>.pem` with mode `0600` in a directory with mode `0700`, an existing key file is never overwritten, and the client secret, webhook secret, client id, and key never appear in output
 - S-006-12: with no callback in 10 minutes the command exits 2 with `no App was created`
-- S-006-13: after creation the command prints the installation URL, prints `installed on <owner/repo>` as each gated repo's installation appears, and exits 1 naming the missing repos if any is still missing after 10 minutes
+- S-006-13: after creation the command guides the installation as spec 007 does (the App's Install App page and what to pick), prints `installed on <owner/repo>` as each gated repo's installation appears, and exits 1 naming the missing repos if any is still missing after 10 minutes
 - S-006-14: the command never edits a repo's config; it prints the `app_id` line to add and the gate's dry run to prove it
 - S-006-15: `--json` prints one object with the plan's `owner`, `owner_type`, `public`, `name`, `reason`, and `repos`, and after a real run `app_id`, `slug`, `key`, and `installed`
 - S-006-16: `docs/install.md` and `skills/shipmill-setup/SKILL.md` document `shipmill app-create`, the plan's rules, and `--dry-run`, and keep the manual steps as the fallback

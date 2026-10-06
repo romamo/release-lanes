@@ -7,8 +7,6 @@ bot.
 
 ## [Unreleased]
 
-## [0.19.0] - 2026-10-06
-
 ### Added
 
 - `shipmill app-install [owner/name ...]` guides installing the gate's App on more repos:
@@ -18,20 +16,6 @@ bot.
   install step uses the same guide (#172)
 - Spec 007 for `shipmill app-install`, which guides installing the gate's App on more repos
   and accounts, and checks that it took
-- Spec 006 for `shipmill app-create`, which makes the gate's GitHub App in one click and
-  picks its owner and visibility from where the gated repos are
-- `shipmill app-create` makes the gate's GitHub App in one click: it finds the accounts your
-  `gh` login administers and the repos in them holding `.github/shipmill.toml`, plans a
-  private App when they are all in one account and a public one when they span several
-  (`--owner`, `--public`, `--private`, `--name`, `--repos` change it; `--dry-run` prints the
-  plan), opens GitHub's create page with the permissions filled in, saves the key to
-  `~/.config/shipmill/app-<app_id>.pem` with mode `0600`, waits for the installations, and
-  prints the `app_id` line to commit; exit 1 names a repo still missing the App. The setup
-  skill and `docs/install.md` use it first, the manual steps as the fallback (#155)
-- Spec 005 for headless gate sessions: `[agents] mode = "headless"` starts sessions that
-  can't prompt, a decision for the user becomes a `needs-decision` comment and label the
-  gate waits on, and headless work is limited to trusted authors' items, with D-16 (#134)
-- Spec 005's build issues: #160 to #164 (#134)
 
 ### Changed
 
@@ -47,6 +31,28 @@ bot.
 
 - `shipmill app-create` sets the App's homepage to `https://github.com/shipmill/shipmill`,
   not the first gated repo's URL
+
+## [0.19.0] - 2026-10-06
+
+### Added
+
+- Spec 006 for `shipmill app-create`, which makes the gate's GitHub App in one click and
+  picks its owner and visibility from where the gated repos are
+- `shipmill app-create` makes the gate's GitHub App in one click: it finds the accounts your
+  `gh` login administers and the repos in them holding `.github/shipmill.toml`, plans a
+  private App when they are all in one account and a public one when they span several
+  (`--owner`, `--public`, `--private`, `--name`, `--repos` change it; `--dry-run` prints the
+  plan), opens GitHub's create page with the permissions filled in, saves the key to
+  `~/.config/shipmill/app-<app_id>.pem` with mode `0600`, waits for the installations, and
+  prints the `app_id` line to commit; exit 1 names a repo still missing the App. The setup
+  skill and `docs/install.md` use it first, the manual steps as the fallback (#155)
+- Spec 005 for headless gate sessions: `[agents] mode = "headless"` starts sessions that
+  can't prompt, a decision for the user becomes a `needs-decision` comment and label the
+  gate waits on, and headless work is limited to trusted authors' items, with D-16 (#134)
+- Spec 005's build issues: #160 to #164 (#134)
+
+### Fixed
+
 - D-15's `Decided` line names the issue it was decided in (#147), so `specs.py check`
   accepts a spec that cites it
 - `shipmill app-create` prints each line as it happens, so a piped or backgrounded run shows
