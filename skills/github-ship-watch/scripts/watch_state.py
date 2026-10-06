@@ -59,6 +59,9 @@ deployments and issues shipmill operate writes):
 
 Intake (github-issue-triage's triage_state.py):
   ISSUES          issues needing triage action, counted by state
+  ISSUES_OPEN     the other open issues, by state: in progress, blocked, triaged, or
+                  postponed, less the ones NEEDS_DECISION and UNTRUSTED list (reported,
+                  never an action by itself)
   PRS_OPEN        open non-draft pull requests (reported, never an action by itself),
                   less the ones NEEDS_DECISION and UNTRUSTED list
   NEEDS_DECISION  issues and pull requests labelled needs-decision whose question has no
@@ -72,6 +75,23 @@ Intake (github-issue-triage's triage_state.py):
 --bot-login and --trusted-only go through to triage_state.py: the login shipmill's
 sessions write as (whose comment is the question, and whose issue is trusted), and the
 trust filter of an unattended gate.
+
+Workflows:
+  RUNS_ACTIVE     a queued or running workflow run of any workflow, one row each, with its
+                  status, age, event, branch, and link (reported, never an action by itself)
+
+Agents (all reported, never an action by itself):
+  TRIAGE_MODE     the config's [agents] table, what the gate's sessions are told to do: its
+                  prompt, whether open pull requests count as work, and the rest of its keys;
+                  "no [agents]" without one
+  AGENT_SESSION   a Claude Code session on this host working the repo, one row each, from
+                  `claude agents --json`: a gate session (named "shipmill <owner/repo>") or one
+                  whose folder is in the checkout, with its kind, status, and age
+  LOOP            on a Mac, the launchd job running `shipmill gate` for the repo: its
+                  interval, whether it runs now, its last exit code, and its log's last
+                  decision; "none" without one. A /loop or a /schedule routine lives in a
+                  session or the cloud, where no script reads it
+  HOST_UNKNOWN    the agent sessions weren't read: claude isn't on PATH (a cloud session)
 
 --incident-label names the label the repo's incidents carry, in place of the config's
 [operate] incident_label (fleet.py passes a fleet file's incident_label this way).
@@ -98,7 +118,9 @@ import datetime as dt
 import importlib.util
 import json
 import os
+import plistlib
 import re
+import shutil
 import subprocess
 import sys
 import urllib.error
@@ -143,6 +165,10 @@ def triage_module() -> ModuleType:
 
 
 TRIAGE = triage_module()
+GATE_SESSION = "shipmill "  # shipmill gate names its sessions "shipmill <owner/repo> ..."
+LAUNCH_AGENTS = Path.home() / "Library" / "LaunchAgents"
+# the gate log's decision lines: QUIET, LAUNCH, RUNNING, WAITING, UNCHANGED, HELD, or an error
+GATE_DECISION = re.compile(r"^(?:[A-Z]+|error): ")
 VERSION_TAG = re.compile(r"^v\d+\.\d+")  # skips moving major tags such as v0
 ACTION = {
     "BOT_FAILED",
@@ -230,6 +256,18 @@ class Row:
 class Run:
     status: str
     conclusion: str
+    created: dt.datetime
+    url: str
+
+
+@dataclass(frozen=True)
+class ActiveRun:
+    """A workflow run of any workflow, as the RUNS_ACTIVE row shows it"""
+
+    workflow: str
+    status: str
+    event: str
+    branch: str
     created: dt.datetime
     url: str
 
@@ -973,6 +1011,12 @@ def intake(
             f"{s} {' '.join(f'#{n}' for n in numbers)}" for s, numbers in sorted(counts.items()) if s in TRIAGE_ACTION
         )
         rows.append(Row("ISSUES", repo, detail))
+    elsewhere = TRIAGE_ACTION | {"NEEDS_DECISION", "UNTRUSTED"}  # rows of their own
+    rest = "; ".join(
+        f"{s} {' '.join(f'#{n}' for n in numbers)}" for s, numbers in sorted(counts.items()) if s not in elsewhere
+    )
+    if rest:
+        rows.append(Row("ISSUES_OPEN", repo, rest))
     waiting, untrusted = list(counts.get("NEEDS_DECISION", [])), list(counts.get("UNTRUSTED", []))
     ready = []
     for pr in prs:
@@ -1004,6 +1048,158 @@ def intake_rows(repo: str, bot_login: str | None = None, trusted_only: bool = Fa
     fields = "number,isDraft,isCrossRepository,labels"
     prs = json.loads(run(["gh", "pr", "list", "-R", repo, "--json", fields, "-L", "100"]))
     return intake(repo, proc.returncode, proc.stdout, prs, lambda n: pr_comments(repo, n), bot_login, trusted_only)
+
+
+# -- agents --------------------------------------------------------------------------------
+
+
+def triage_mode_row(text: str, policy: Path) -> Row:
+    """The config's [agents] table, each key as the config sets it, the prompt first"""
+    table = agents_table(text, policy)
+    if table is None:
+        return Row("TRIAGE_MODE", "[agents]", "no [agents]: no gate session runs for this repo")
+    keys = sorted(table, key=lambda k: (k != "prompt", k))
+    return Row("TRIAGE_MODE", "[agents]", "; ".join(f"{k} = {table[k]}" for k in keys))
+
+
+def agents_table(text: str, policy: Path) -> dict[str, str] | None:
+    """[agents] of the config, each value as TOML writes it; None without the table"""
+    if tomllib is None:
+        return agents_table_310(text, policy)
+    try:
+        raw = tomllib.loads(text)
+    except tomllib.TOMLDecodeError as exc:
+        raise Refused(f"error: {policy}: {exc}") from None
+    return agents_table_toml(raw, policy)
+
+
+def agents_table_toml(raw: dict[str, object], policy: Path) -> dict[str, str] | None:
+    table = raw.get("agents")
+    if table is None:
+        return None
+    if not isinstance(table, dict):
+        raise Refused(f"error: {policy}: agents is not a table")
+    return {k: json.dumps(v) if isinstance(v, (str, bool)) else str(v) for k, v in table.items()}
+
+
+def agents_table_310(text: str, policy: Path) -> dict[str, str] | None:
+    """[agents] as a plain table of one-line keys; any other form is refused"""
+    tables = toml_tables(text)
+    if "agents" not in tables:
+        return None
+    if any(name.startswith("agents.") for name in tables):
+        raise Refused(f"error: {policy}: can't read [agents] on Python 3.10: use 3.11+ or a plain [agents] table")
+    found = {}
+    for line in tables["agents"].splitlines():
+        if blank(line):
+            continue
+        key = re.match(r"^\s*(\w+)\s*=\s*(\"[^\"]*\"|'[^']*'|[^#\s]+)\s*(?:#.*)?$", line)
+        if key is None:
+            raise Refused(f"error: {policy}: can't read [agents] on Python 3.10: use 3.11+ ({line.strip()!r})")
+        value = key.group(2)
+        found[key.group(1)] = json.dumps(value[1:-1]) if value[0] in "\"'" else value
+    return found
+
+
+def session_rows(text: str, repo: str, repo_dir: Path, now: dt.datetime) -> list[Row]:
+    """`claude agents --json`'s sessions working the repo: the gate's, by name, and any whose
+    folder is in the checkout"""
+    try:
+        sessions = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise Refused(f"error: claude agents --json printed no JSON: {exc}") from None
+    if not isinstance(sessions, list):
+        raise Refused("error: claude agents --json: expected a JSON array")
+    rows = []
+    for s in sessions:
+        if not isinstance(s, dict) or not isinstance(s.get("startedAt"), int):
+            raise Refused(f"error: claude agents --json printed a session without startedAt: {s!r}")
+        name, cwd = str(s.get("name") or ""), Path(str(s.get("cwd") or "/"))
+        gate = name == GATE_SESSION + repo or name.startswith(f"{GATE_SESSION}{repo} ")
+        if not gate and cwd != repo_dir and repo_dir not in cwd.parents:
+            continue
+        started = dt.datetime.fromtimestamp(s["startedAt"] / 1000, tz=dt.timezone.utc)  # noqa: UP017
+        status = "/".join(str(s[k]) for k in ("status", "state") if s.get(k))
+        who = "gate" if gate else str(s.get("kind") or "session")
+        detail = f"{who} {status}, started {ago(now - started)} ago: {name or s.get('sessionId', '')}"
+        rows.append(Row("AGENT_SESSION", str(s.get("id") or s.get("pid") or ""), detail))
+    return rows
+
+
+def gate_label(repo: str) -> str:
+    """The gate's launchd label, as shipmill's launchd.label builds it"""
+    owner, _, name = repo.partition("/")
+    return "dev.shipmill.gate." + re.sub(r"[^a-z0-9.-]", "-", f"{owner}.{name}".lower())
+
+
+def loop_row(
+    label: str, plist: dict[str, object] | None, printed: str | None, log: str | None, now: dt.datetime
+) -> Row:
+    """The gate's launchd job: from its plist, `launchctl print` (None when not loaded), and
+    its log's text (None without a log)"""
+    if plist is None:
+        return Row("LOOP", "none", "no launchd job runs shipmill gate for this repo (shipmill launchd)")
+    interval = plist.get("StartInterval")
+    parts = [f"launchd every {ago(dt.timedelta(seconds=interval))}" if isinstance(interval, int) else "launchd"]
+    if printed is None:
+        parts.append("installed but not loaded")
+    else:
+        state = re.search(r"^\tstate = (.+)$", printed, re.MULTILINE)
+        code = re.search(r"^\tlast exit code = (.+)$", printed, re.MULTILINE)
+        parts.append(state.group(1) if state else "state unknown")
+        if code:
+            parts.append(f"last exit {code.group(1)}")
+    if log is not None:
+        decisions = [line for line in log.splitlines() if GATE_DECISION.match(line)]
+        if decisions:
+            parts.append(f"last: {decisions[-1]}")
+    return Row("LOOP", label, "; ".join(parts))
+
+
+def agent_rows(repo: str, repo_dir: Path, now: dt.datetime) -> list[Row]:
+    """The sessions and, on a Mac, the gate's launchd job; what this host can see"""
+    claude = shutil.which("claude")
+    if claude is None:
+        rows = [Row("HOST_UNKNOWN", "claude", "not on PATH: the agent sessions weren't read")]
+    else:
+        rows = session_rows(run([claude, "agents", "--json"]), repo, repo_dir, now)
+    if sys.platform != "darwin":
+        return rows
+    label = gate_label(repo)
+    path = LAUNCH_AGENTS / f"{label}.plist"
+    if not path.is_file():
+        return [*rows, loop_row(label, None, None, None, now)]
+    with path.open("rb") as handle:
+        plist = plistlib.load(handle)
+    proc = subprocess.run(
+        ["launchctl", "print", f"gui/{os.getuid()}/{label}"], capture_output=True, text=True, check=False
+    )
+    printed = proc.stdout if proc.returncode == 0 else None
+    log_path = plist.get("StandardOutPath")
+    log = Path(log_path).read_text(errors="replace") if isinstance(log_path, str) and Path(log_path).is_file() else None
+    return [*rows, loop_row(label, plist, printed, log, now)]
+
+
+# -- workflows -----------------------------------------------------------------------------
+
+
+def active_rows(runs: list[ActiveRun], now: dt.datetime) -> list[Row]:
+    """The queued and running workflow runs, oldest first"""
+    return [
+        Row("RUNS_ACTIVE", r.workflow, f"{r.status} {ago(now - r.created)}: {r.event} on {r.branch}, {r.url}")
+        for r in sorted(runs, key=lambda r: r.created)
+        if r.status in ACTIVE
+    ]
+
+
+def fetch_active(repo: str) -> list[ActiveRun]:
+    """The repo's newest runs of every workflow; a run still active is among them"""
+    fields = "workflowName,status,event,headBranch,createdAt,url"
+    out = run(["gh", "run", "list", "-R", repo, "-L", "100", "--json", fields])
+    return [
+        ActiveRun(r["workflowName"], r["status"], r["event"], r["headBranch"], parse_time(r["createdAt"]), r["url"])
+        for r in json.loads(out)
+    ]
 
 
 def arguments() -> argparse.ArgumentParser:
@@ -1071,6 +1267,7 @@ def main() -> int:
                 rows.append(Row("UNANNOUNCED", tag.name, f"{' '.join(issues)} (since {tags[i + 1].name})"))
 
     if policy is not None:
+        rows.append(triage_mode_row((repo_dir / policy).read_text(encoding="utf-8"), policy))
         read = config((repo_dir / policy).read_text(encoding="utf-8"), policy, args.incident_label)
         holds = hold_rows(fetch_issues(args.repo, "--label", HOLD_LABEL), now)
         rows += holds
@@ -1082,6 +1279,8 @@ def main() -> int:
             rows += operations_rows(args.repo, repo_dir, read.environments, bool(holds), read.incident_label, now)
 
     rows += intake_rows(args.repo, args.bot_login, args.trusted_only)
+    rows += active_rows(fetch_active(args.repo), now)
+    rows += agent_rows(args.repo, repo_dir, now)
     for row in ordered(rows):
         print(json.dumps(row.json(), sort_keys=True) if args.json else row.text())
     return 1 if any(r.state in ACTION for r in rows) else 0
