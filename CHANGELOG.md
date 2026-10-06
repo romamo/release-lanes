@@ -7,6 +7,18 @@ bot.
 
 ## [Unreleased]
 
+### Fixed
+
+- github-ship-watch no longer reports `WORK_BRANCH_STALE` for a work branch whose run is
+  still alive behind ten or more newer runs: with a work branch on origin, it asks GitHub
+  for the release workflow's unfinished runs by status (queued, in progress, waiting,
+  pending, requested), as `prepare` does, instead of reading the newest ten, and a failed
+  query stops the watch (exit 2) rather than reading as no owner. The row's re-check before
+  deleting the branch asks by status the same way. A pass with no work branch makes no
+  extra calls (#185)
+
+## [0.23.0] - 2026-10-06
+
 ### Added
 
 - The needs-decision protocol for headless sessions: a question for the user becomes a
@@ -41,13 +53,6 @@ bot.
   `actions: read` when that is the cause; the run stays green. github-ship-watch reports
   `WORK_BRANCH_STALE` for a `shipmill/v*` branch no active run owns, and deletes it and
   starts the lane (#175)
-- github-ship-watch no longer reports `WORK_BRANCH_STALE` for a work branch whose run is
-  still alive behind ten or more newer runs: with a work branch on origin, it asks GitHub
-  for the release workflow's unfinished runs by status (queued, in progress, waiting,
-  pending, requested), as `prepare` does, instead of reading the newest ten, and a failed
-  query stops the watch (exit 2) rather than reading as no owner. The row's re-check before
-  deleting the branch asks by status the same way. A pass with no work branch makes no
-  extra calls (#185)
 
 ## [0.22.0] - 2026-10-06
 
@@ -762,7 +767,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/shipmill/shipmill/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/shipmill/shipmill/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/shipmill/shipmill/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/shipmill/shipmill/compare/v0.19.0...v0.20.0
