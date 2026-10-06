@@ -14,6 +14,7 @@ import datetime as dt
 import html
 import json
 import os
+import re
 import secrets
 import stat
 import subprocess
@@ -193,6 +194,32 @@ def plan(
     return Plan(chosen, public, name, reason, tuple(repos), warnings)
 
 
+def slug(name: str) -> str:
+    """The slug GitHub makes of an App's name: lowercase, each run of other characters a dash"""
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+
+
+def taken(api: Api, token: str, name: str) -> bool:
+    """S-006-17: whether an App already uses the name's slug"""
+    answer = api.get(f"/apps/{slug(name)}", token)
+    if answer.status not in (200, 404):
+        raise ReleaseError(f"can't tell whether the App name {name} is free: GET answered {answer.status}")
+    return answer.status == 200
+
+
+def free_name(api: Api, token: str, p: Plan, login: str, chosen: bool) -> tuple[str, str | None]:
+    """S-006-17: the plan's name when free; else, when the name was the default, the first free
+    of <name>-<owner> and <name>-<login>, with a note; a taken --name exits 2 suggesting them"""
+    if not taken(api, token, p.name):
+        return p.name, None
+    candidates = list(dict.fromkeys(f"{p.name}-{who}" for who in (p.owner.login, login)))
+    free = [c for c in candidates if not taken(api, token, c)]
+    if chosen or not free:
+        hint = f"; free: {', '.join(free)}" if free else "; pass another --name"
+        raise ReleaseError(f"the App name {p.name} is taken{hint}")
+    return free[0], f"{p.name} is taken; using {free[0]} (--name picks another)"
+
+
 def manifest(p: Plan, redirect: str) -> dict[str, object]:
     """S-006-9: exactly the permissions the gate checks, no webhook"""
     return {
@@ -299,19 +326,58 @@ def _handler(flow: _Flow) -> type[BaseHTTPRequestHandler]:
     return Handler
 
 
+# What each permission lets the App's bot do, in the words the review page uses
+WHY = {
+    "contents": "push branches and merge pull requests",
+    "pull_requests": "open, review, and merge pull requests",
+    "issues": "comment on, label, and close issues",
+    "actions": "rerun a failed release job",
+    "workflows": "change files under .github/workflows/",
+    "checks": "read CI results",
+    "statuses": "read CI results",
+    "discussions": "read discussions for product intake",
+    "metadata": "read the repo's basic details (GitHub requires it)",
+}
+
+
+def page(p: Plan, action: str, body: str) -> str:
+    """S-006-18: the plan, what the App may do, and a button; nothing is sent to GitHub until
+    the maintainer clicks. action and body are already HTML-escaped"""
+    visibility = (
+        "Public: it can be installed on any account, but only your key can act as it"
+        if p.public
+        else f"Private: it can be installed only on {html.escape(p.owner.login)}"
+    )
+    repos = "".join(f"<li>{html.escape(r)}</li>" for r in p.installable) or "<li>none yet</li>"
+    rows = "".join(
+        f"<tr><td>{html.escape(perm.label)}</td><td>{perm.access.value}</td><td>{html.escape(WHY[perm.key])}</td></tr>"
+        for perm in PERMISSIONS
+    )
+    return (
+        f"<h1>Create {html.escape(p.name)}</h1>"
+        f"<p>shipmill will ask GitHub to create a GitHub App named <b>{html.escape(p.name)}</b> owned by "
+        f"<b>{html.escape(p.owner.login)}</b>. Every field on GitHub's page is filled in for you: "
+        "the name, the homepage, the permissions below, and no webhook.</p>"
+        f"<p>{visibility}.</p><p>You will install it on:</p><ul>{repos}</ul>"
+        "<table><tr><th align=left>Permission</th><th align=left>Access</th><th align=left>Used to</th></tr>"
+        f"{rows}</table>"
+        f"<form method=post action='{action}'><input type=hidden name=manifest value=\"{body}\">"
+        "<p><button style='font-size:1.2em;padding:.5em 1em'>Create on GitHub</button></p></form>"
+        "<p>On GitHub, click <b>Create GitHub App</b>. If GitHub first asks you to sign in or confirm your "
+        "password, it loses the request and shows <i>We didn't find an App Manifest</i>: come back to this "
+        "page and click the button again.</p>"
+    )
+
+
 def create(p: Plan, browser: Callable[[str], None], seconds: float = FLOW_SECONDS) -> str:
-    """S-006-9, S-006-10, S-006-12: serve the manifest on 127.0.0.1, wait for GitHub's
-    callback, and return its code"""
+    """S-006-9, S-006-10, S-006-12, S-006-18: serve the review page on 127.0.0.1, wait for
+    GitHub's callback, and return its code"""
     state = secrets.token_urlsafe(24)
     server = HTTPServer(("127.0.0.1", 0), BaseHTTPRequestHandler)
     port = server.server_address[1]
     body = html.escape(json.dumps(manifest(p, f"http://127.0.0.1:{port}/callback")), quote=True)
     action = html.escape(new_app_url(p, state), quote=True)
-    form = (
-        f"<form id=f method=post action='{action}'><input type=hidden name=manifest value=\"{body}\">"
-        "<p>Opening GitHub to create the App&hellip;</p><button>Continue to GitHub</button></form>"
-        "<script>document.getElementById('f').submit()</script>"
-    )
+    form = page(p, action, body)
     flow = _Flow(form, state)
     server.RequestHandlerClass = _handler(flow)
     thread = threading.Thread(target=server.serve_forever, daemon=True)

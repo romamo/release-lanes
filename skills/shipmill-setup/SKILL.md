@@ -325,11 +325,15 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
      plan: a **private** App under that account when the gated repos are all in one, a
      **public** one under the account with the most when they span several (a private App
      installs only on its owner; a public one on any account, but only the key's holder
-     can mint its tokens). Show the user the plan and ask; `--owner`, `--public`,
-     `--private`, and `--name` change it. It needs the `read:org` scope
-   - **Create it:** run it without `--dry-run`. It opens GitHub's create page with the
-     manifest filled in; the user clicks **Create GitHub App**, then picks the repos on the
-     install page it opens next. It saves the key to `~/.config/shipmill/app-<app_id>.pem`
+     can mint its tokens). Show the user the plan and ask whether to create it; `--owner`,
+     `--public`, `--private`, and `--name` change it. It needs the `read:org` scope, and
+     it moves a taken default name to a free variant, saying so
+   - **Create it:** once the user agrees, run it yourself without `--dry-run`, in the
+     background: it waits up to 10 minutes for the click. It opens a local page showing
+     the plan and the permissions; the user clicks **Create on GitHub**, then **Create
+     GitHub App** on GitHub's page, where every field is filled in. If GitHub asks them to
+     sign in first it shows *We didn't find an App Manifest*: they go back to the local
+     page and click again. Then they pick the repos on the install page it opens next. It saves the key to `~/.config/shipmill/app-<app_id>.pem`
      (mode `0600`), prints `installed on <owner/repo>` as each appears, and ends with the
      `app_id = <id>` line to commit; exit 1 names a repo still missing the App
    - **Set `app_id`** in `[agents]` through a PR, in each gated repo
