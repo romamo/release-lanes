@@ -5,7 +5,17 @@ Write each body to a file and post it with `gh issue comment <n> --body-file <fi
 ## Implement
 
 ```markdown
-Triage: **implement**{, for the next release candidate | after rcN}. The plan:
+Triage: **implement**{, for the next release candidate | after rcN}.{ Waits on your decision below.}
+
+{Only while a design question is open (design-gate.md, step 3); the block goes first, before the plan:}
+**Decision needed:** {the question in one sentence, in words a user of the tool knows}
+
+1. {option} (recommended): {what it means for users}
+2. {option}: {what it means for users, what it costs}
+
+Reply here with a number or your own answer{, or in the gate session}; nothing is built until you do.
+
+The plan:
 
 - {change 1}
 - {change 2}
@@ -15,6 +25,8 @@ Triage: **implement**{, for the next release candidate | after rcN}. The plan:
 
 {What is deliberately left out, and where it went (a postponed issue, 1.1).} I'll link the PR here.
 ```
+
+Write the decision block for the person who owes the answer, not for the implementer: no file, function, or permission names in the question or the options unless the answer turns on them, and then say what each one means. Name the effect instead ("repos without ship-watch stay stuck until someone notices"). Keep the options to the ones you'd accept, two or three, the recommended one first. The same block, under the same heading, asks a PR's "decisions for you" on the pull request (design-gate.md, step 3).
 
 Once the PR is up:
 

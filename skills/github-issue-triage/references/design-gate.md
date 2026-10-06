@@ -28,7 +28,7 @@ A bug fix that restores documented behaviour skips the gate. So does an internal
    - two designs are both reasonable and users would see the difference
    - it breaks existing users
 
-   Put your recommendation first. Until the answer arrives, the verdict comment says **implement** with the open question, and no agent starts on it
+   Ask in both places at once: write the question as the **Decision needed** block of the verdict comment ([comments.md](comments.md), Implement), so someone reading the issue can answer without attaching to the session, and ask the same question, with the same options in the same order, with AskUserQuestion. Put your recommendation first. Until the answer arrives no agent starts on it. The answer is whichever comes first: the AskUserQuestion reply, or a newer comment on the issue by an OWNER, MEMBER, or COLLABORATOR that picks an option or answers in its own words; read the issue's comments before asking again on a later pass. Then edit the verdict comment: replace the block with **Decided:** {the option}, by {who}, and go on. The headless protocol (spec 005) adds a marker and a label to the same block
 4. **Hand the design to the implementer** as the agreed plan in its brief. A change of design during implementation is a "decision for you", never a quiet deviation
 
 ## Recording a decision
