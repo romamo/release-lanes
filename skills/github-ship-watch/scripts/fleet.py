@@ -88,6 +88,7 @@ ACTION = frozenset(
         "INCIDENT_OPEN",
         "POSTMORTEM_DUE",
         "NEEDS_DECISION",
+        "BRANCH_DELETE_OFF",
     }
 )
 REPO_ERROR = "REPO_ERROR"

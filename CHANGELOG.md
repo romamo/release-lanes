@@ -7,6 +7,12 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- github-ship-watch reports BRANCH_DELETE_OFF when the repo's `delete_branch_on_merge` is
+  off, with the command that turns it on: merged branches piled up unnoticed after a repo
+  move, since only setup checked it. An action for a person, never an agent's (#194)
+
 ## [0.24.0] - 2026-10-06
 
 ### Added

@@ -53,6 +53,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | AGENT_SESSION | A Claude Code session on this host working the repo (`claude agents --json`): a gate session or one in the checkout, with its status. One that is `blocked` waits on the user: give them `claude attach <id>`. Report only |
 | LOOP | The launchd job running `shipmill gate` for the repo on this Mac: its interval, state, last exit, and the gate's last decision, or "none". Add this session's own loops (CronList) and any `/schedule` routine the user named, which no script can read. Report only |
 | HOST_UNKNOWN | `claude` isn't on PATH, as in a cloud session, so the agent sessions weren't read: say so rather than "no agents". Report only |
+| BRANCH_DELETE_OFF | The repo's `delete_branch_on_merge` is off, so merged branches pile up and a stacked PR isn't retargeted. The watch never changes repo settings: recommend the command in the row (`gh repo edit <repo> --delete-branch-on-merge`), or shipmill-setup's `setup_state.py --fix`. An action (exit 1), never an agent's |
 | PRS_OPEN, BOT_OK, BOT_NONE, NO_REGISTRY | Report only |
 
 `--json` prints one JSON object per row: `state`, `subject`, `detail`, and `agent`, which says whether the row needs an agent. `shipmill gate` starts a session only on `agent: true` rows (plus PRS_OPEN with `[agents] prs = true`), and refuses a row without the field. The script's `AGENT` set decides it, next to this table; change both together:
@@ -63,6 +64,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | `true` | OPERATE_FAILED | An agent reruns a flaky operate run or reports the failure |
 | `true` | INCIDENT_OPEN | An agent works the incident: diagnosis, then a hotfix or a revert |
 | `false` | PROMOTION_DUE | Only a person approves; an agent would wake every retry window for nothing |
+| `false` | BRANCH_DELETE_OFF | A repo setting only a person changes |
 | `false` | UNHEALTHY | Operate owns it and rolls back after `rollback_after` failures; past that, the incident it opens reads INCIDENT_OPEN |
 | `false` | HOLD | Report only; the gate checks `shipmill-hold` itself before anything else (D-15) |
 | `false` | WORKTREE_STALE | Only a person knows whether kept work is wanted; the gate's prune already removes what landed |

@@ -76,6 +76,12 @@ Intake (github-issue-triage's triage_state.py):
 sessions write as (whose comment is the question, and whose issue is trusted), and the
 trust filter of an unattended gate.
 
+Repository settings:
+  BRANCH_DELETE_OFF  delete_branch_on_merge is off: merged pull request branches stay on
+                  GitHub, and a stacked pull request isn't retargeted when the one under it
+                  merges. A person turns it on (shipmill-setup's setup_state.py --fix does), so
+                  an action but never an agent's; no row while it is on
+
 Workflows:
   RUNS_ACTIVE     a queued or running workflow run of any workflow, one row each, with its
                   status, age, event, branch, and link (reported, never an action by itself)
@@ -183,6 +189,7 @@ ACTION = {
     "INCIDENT_OPEN",
     "POSTMORTEM_DUE",
     "NEEDS_DECISION",
+    "BRANCH_DELETE_OFF",
 }
 # the states whose row needs an agent: --json marks each row's "agent" from this, and
 # shipmill gate starts a session on those rows (SKILL.md's repair table says what it does)
@@ -1211,6 +1218,20 @@ def agent_rows(repo: str, repo_dir: Path, now: dt.datetime) -> list[Row]:
     return [*rows, loop_row(label, plist, printed, log, now)]
 
 
+# -- repository settings -------------------------------------------------------------------
+
+
+def settings_rows(repo: str, delete_on_merge: object) -> list[Row]:
+    """The repo settings the pipeline relies on, from `gh repo view`; a value that isn't a
+    boolean is refused, never guessed"""
+    if not isinstance(delete_on_merge, bool):
+        raise Refused(f"error: gh repo view {repo}: deleteBranchOnMerge is {delete_on_merge!r}, not a boolean")
+    if delete_on_merge:
+        return []
+    fix = f"gh repo edit {repo} --delete-branch-on-merge"
+    return [Row("BRANCH_DELETE_OFF", repo, f"merged PR branches stay on GitHub; turn it on: {fix}")]
+
+
 # -- workflows -----------------------------------------------------------------------------
 
 
@@ -1264,12 +1285,11 @@ def main() -> int:
     now = dt.datetime.now(dt.timezone.utc)  # noqa: UP017 (dt.UTC needs 3.11)
     grace = dt.timedelta(minutes=args.grace)
 
-    branch = run(
-        ["gh", "repo", "view", args.repo, "--json", "defaultBranchRef", "-q", ".defaultBranchRef.name"]
-    ).strip()
+    view = json.loads(run(["gh", "repo", "view", args.repo, "--json", "defaultBranchRef,deleteBranchOnMerge"]))
+    branch = view["defaultBranchRef"]["name"]
     run(["git", "fetch", "-q", "--force", "--tags", "origin", branch], cwd=repo_dir)
 
-    rows: list[Row] = []
+    rows: list[Row] = settings_rows(args.repo, view["deleteBranchOnMerge"])
     bot = bot_workflow(repo_dir)
     policy = policy_file(repo_dir)
     if bot is None or policy is None:
