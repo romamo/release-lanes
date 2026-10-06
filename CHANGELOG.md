@@ -38,6 +38,8 @@ bot.
 
 ### Fixed
 
+- `shipmill app-create` sets the App's homepage to `https://github.com/shipmill/shipmill`,
+  not the first gated repo's URL
 - D-15's `Decided` line names the issue it was decided in (#147), so `specs.py check`
   accepts a spec that cites it
 - `shipmill app-create` prints each line as it happens, so a piped or backgrounded run shows

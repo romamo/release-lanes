@@ -112,7 +112,7 @@ manifest to `https://github.com/organizations/<owner>/settings/apps/new` for an 
 or `https://github.com/settings/apps/new` for the login, with a random `state`. The
 manifest:
 
-- `name`, `public` from the plan; `url` the first gated repo's URL, or the owner's
+- `name`, `public` from the plan; `url`, the App's homepage, `https://github.com/shipmill/shipmill`
 - `default_permissions`: exactly `PERMISSIONS` from `src/shipmill/app.py`, so the App has
   what the gate checks and nothing more
 - `hook_attributes.active: false` and no `default_events`: the App needs no webhook
@@ -171,7 +171,7 @@ then prove it: shipmill --repo <gate checkout> gate <owner/repo> --dry-run
 - S-006-6: the owner menu lists the login first as the default and each administered org with its gated repos; Enter keeps the default, a number or a login picks one, and anything else exits 2 saying to pass `--owner`
 - S-006-7: `--owner` and `--public`/`--private` override the plan; an `--owner` the login doesn't administer exits 2 naming it and the role needed; `--private` with gated repos outside the owner prints a warning naming each
 - S-006-8: the plan is printed before anything is created, and `--dry-run` prints it, starts no server, opens no browser, and writes nothing
-- S-006-9: the manifest's permissions are exactly `PERMISSIONS` from `src/shipmill/app.py`, its webhook is inactive with no events, its `public` and `name` come from the plan, and it is posted to the org's or the user's new-App URL as the owner type requires
+- S-006-9: the manifest's permissions are exactly `PERMISSIONS` from `src/shipmill/app.py`, its webhook is inactive with no events, its homepage is `https://github.com/shipmill/shipmill`, its `public` and `name` come from the plan, and it is posted to the org's or the user's new-App URL as the owner type requires
 - S-006-10: the server listens on `127.0.0.1` only, and a callback with a missing or wrong `state` writes nothing and leaves the flow waiting
 - S-006-11: the code is exchanged through `POST /app-manifests/<code>/conversions`; the key is written to `~/.config/shipmill/app-<id>.pem` with mode `0600` in a directory with mode `0700`, an existing key file is never overwritten, and the client secret, webhook secret, client id, and key never appear in output
 - S-006-12: with no callback in 10 minutes the command exits 2 with `no App was created`

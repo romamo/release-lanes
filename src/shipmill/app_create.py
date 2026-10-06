@@ -32,6 +32,7 @@ from shipmill.app import PERMISSIONS, Api, Signer, jwt
 from shipmill.errors import ReleaseError
 
 CONFIG = ".github/shipmill.toml"
+HOMEPAGE = "https://github.com/shipmill/shipmill"  # S-006-9: the App's page links to shipmill
 FLOW_SECONDS = 600  # how long the create and the install steps each wait
 POLL_SECONDS = 5
 _PAGE = 100
@@ -258,7 +259,7 @@ def manifest(p: Plan, redirect: str) -> dict[str, object]:
     """S-006-9: exactly the permissions the gate checks, no webhook"""
     return {
         "name": p.name,
-        "url": f"https://github.com/{p.repos[0] if p.repos else p.owner.login}",
+        "url": HOMEPAGE,
         "description": "Gated Claude Code sessions started by shipmill gate",
         "public": p.public,
         "redirect_url": redirect,
