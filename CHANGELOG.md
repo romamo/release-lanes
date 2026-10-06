@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-06
+
 ### Added
 
 - `[agents] mode = "headless"` for `shipmill gate` (D-17): a launch runs `claude -p` with
@@ -816,7 +818,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/shipmill/shipmill/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/shipmill/shipmill/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/shipmill/shipmill/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/shipmill/shipmill/compare/v0.20.0...v0.21.0
