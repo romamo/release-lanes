@@ -369,9 +369,9 @@ an empty list when nothing waits or the tick didn't read the state.
 
 ## Verification
 
-Checked on main plus #164's PR. The spec merged in #148, with its `claude -p` launch from
+Checked on main plus #191 (#164). The spec merged in #148, with its `claude -p` launch from
 #177 and the trusted-question rule from #188; the build issues landed in #178 (#160), #180
-(#161), #187 (#162), #190 (#163), and #164's PR. `specs.py coverage --spec 005` names a
+(#161), #187 (#162), #190 (#163), and #191 (#164). `specs.py coverage --spec 005` names a
 passing test for every criterion. The probe behind S-005-4 ran a real `claude -p` on Claude
 Code 2.1.291; every other criterion is checked by its tests, with fakes for `claude`, `gh`,
 and the notifier. By hand: `shipmill launchd shipmill/shipmill --print` with
