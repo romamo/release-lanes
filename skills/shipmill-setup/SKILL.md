@@ -284,6 +284,17 @@ needs an agent when github-ship-watch's `watch_state.py` marks a row `agent: tru
 (github-ship-watch's SKILL.md lists them), plus open PRs with `prs = true`.
 docs/design/agent-modes.md has the details.
 
+Each tick also prunes landed worktrees, before the hold check, so it prunes under a hold
+too: it removes a worktree under `.claude/worktrees/` or `tmp/wt-*` and its local branch
+once its commits landed on the default branch, it is clean and over a day old, and no
+open PR or live Claude Code session holds it, and prints a `pruned <path> (<branch>)` line
+for each (`would prune` under `--dry-run`). The worktrees a session leaves behind once it
+exits are the gate's prune's to remove (D-12); never the main checkout, the gate's own
+checkout, or a worktree elsewhere. `$CR --repo tmp/shipmill-gate worktrees` lists every
+worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--prune
+--dry-run` for what a prune would remove); github-ship-watch reports a kept one older than
+7 days as WORKTREE_STALE, for a person to finish or remove.
+
 1. **Scope.** Ask what the session may do; the prompt carries it. Recommend triage without
    merges for the first week: `/github-issue-triage {repo} triage the new issues; do not
    merge`. "merge when green" lets it land PRs; then also set `prs = true`, so open PRs

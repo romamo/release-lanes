@@ -123,7 +123,7 @@ When the new plan drops the PR, close it with `gh pr close <n> --delete-branch` 
 
 **Continuous intake:** issues keep arriving while you work. When the user wants the backlog kept current, offer `/loop 30m` (or `/schedule` for daily) running `triage_state.py` and triaging only what it flags. Don't start a loop unasked.
 
-Clean up only the worktrees your agents created, and only once their PRs have merged. A pushed branch isn't enough: an implementer revises its PR through SendMessage, and an agent whose worktree is gone can't be resumed, so a review finding or a rebase after removal needs a fresh agent briefed from scratch. After a merge, confirm the commits landed (`landed.py`), then remove the worktree and its local branch.
+Clean up only the worktrees your agents created, and only once their PRs have merged. A pushed branch isn't enough: an implementer revises its PR through SendMessage, and an agent whose worktree is gone can't be resumed, so a review finding or a rebase after removal needs a fresh agent briefed from scratch. After a merge, confirm the commits landed (`landed.py`), then remove the worktree and its local branch. The worktrees a session leaves behind once it exits, its agents' included, are the gate's prune's to remove (D-12): `shipmill gate` runs `shipmill worktrees --prune` on each tick and removes only what landed, so a later pass leaves them alone.
 
 ## Report
 
