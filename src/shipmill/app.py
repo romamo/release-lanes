@@ -5,6 +5,12 @@ every permission a session needs.
 The key is a host secret: shipmill reads its mode, hands its path to `openssl`, and never
 reads its bytes, so they can't reach output. The package keeps no dependencies: the JWT is
 signed by `openssl dgst -sha256 -sign <key>`, and GitHub is asked over urllib.
+
+A session never holds a token (spec 004, Tokens): its `gh` and git credential helpers mint
+one, limited to the gate's repo, at each call, or reuse the one cached in `app-token.json`
+(mode 0600) while it has at least 10 minutes left. A token reaches stdout only as
+`shipmill app-token`'s answer, which the helpers read; never an error message, a process's
+arguments, or a helper's file.
 """
 
 import base64
@@ -12,13 +18,16 @@ import datetime as dt
 import enum
 import http.client
 import json
+import os
+import secrets
+import shlex
 import shutil
 import stat
 import subprocess
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -125,18 +134,29 @@ class Api(Protocol):
         """GET api.github.com's path with the token as a bearer; an error status is an Answer"""
         ...
 
+    def post(self, path: str, token: str, body: Mapping[str, object]) -> Answer:
+        """POST body as JSON to api.github.com's path with the token as a bearer; an error
+        status is an Answer"""
+        ...
+
 
 class UrllibApi:
     def get(self, path: str, token: str) -> Answer:
-        request = urllib.request.Request(
-            API + path,
-            headers={
-                "Accept": "application/vnd.github+json",
-                "Authorization": f"Bearer {token}",
-                "User-Agent": "shipmill-gate",
-                "X-GitHub-Api-Version": "2022-11-28",
-            },
-        )
+        return self._send("GET", path, token, None)
+
+    def post(self, path: str, token: str, body: Mapping[str, object]) -> Answer:
+        return self._send("POST", path, token, json.dumps(body).encode())
+
+    def _send(self, method: str, path: str, token: str, data: bytes | None) -> Answer:
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "shipmill-gate",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        if data is not None:
+            headers["Content-Type"] = "application/json"
+        request = urllib.request.Request(API + path, data=data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(request, timeout=TIMEOUT) as answer:
                 return Answer(int(answer.status), answer.read(_BODY_LIMIT).decode(errors="replace"))
@@ -144,29 +164,33 @@ class UrllibApi:
             body = exc.read(_BODY_LIMIT) if exc.fp is not None else b""
             return Answer(exc.code, body.decode(errors="replace"))
         except (OSError, http.client.HTTPException) as exc:  # URLError and timeouts are OSErrors
-            raise ReleaseError(f"GitHub's API is unreachable for GET {path}: {getattr(exc, 'reason', exc)}") from None
+            reason = getattr(exc, "reason", exc)
+            raise ReleaseError(f"GitHub's API is unreachable for {method} {path}: {reason}") from None
 
 
-def _json(answer: Answer, path: str) -> dict[str, Any]:
+def _json(answer: Answer, path: str, method: str = "GET") -> dict[str, Any]:
+    """The answer's JSON object; the message never quotes the body, which may hold a token"""
     try:
         data = json.loads(answer.body)
     except json.JSONDecodeError:
-        raise ReleaseError(f"GET {path} answered {answer.status} without JSON") from None
+        raise ReleaseError(f"{method} {path} answered {answer.status} without JSON") from None
     if not isinstance(data, dict):
-        raise ReleaseError(f"GET {path} answered {answer.status} with JSON that is not an object")
+        raise ReleaseError(f"{method} {path} answered {answer.status} with JSON that is not an object")
     return data
 
 
-def _ok(answer: Answer, path: str, app_id: int) -> dict[str, Any]:
-    if answer.status == 200:
-        return _json(answer, path)
+def _ok(answer: Answer, path: str, app_id: int, method: str = "GET", status: int = 200) -> dict[str, Any]:
+    """The JSON of an answer with the expected status; an error answer's body, which is only
+    ever GitHub's message, is quoted"""
+    if answer.status == status:
+        return _json(answer, path, method)
     message = answer.body.strip()[:300]
     if answer.status == 401:
         raise ReleaseError(
-            f"GitHub refused the JWT for app_id {app_id} (GET {path}: 401 {message}); "
+            f"GitHub refused the JWT for app_id {app_id} ({method} {path}: 401 {message}); "
             f"check that the private key is App {app_id}'s and the host's clock is right"
         )
-    raise ReleaseError(f"GET {path} for app_id {app_id} answered {answer.status}: {message}")
+    raise ReleaseError(f"{method} {path} for app_id {app_id} answered {answer.status}: {message}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,3 +264,219 @@ def app_check(repo: str, key: Path | None, home: Path, signer: Signer, api: Api)
         return installation(app_id, repo, jwt(app_id, path, now, signer), api)
 
     return check
+
+
+CACHE = "app-token.json"  # in the gate's state folder, `$(git rev-parse --git-common-dir)/shipmill`
+REUSE_FOR = dt.timedelta(minutes=10)  # a cached token is reused while it has at least this long left
+
+
+def repo_name(repo: str) -> str:
+    """The name in owner/name, which the token is limited to"""
+    owner, slash, name = repo.partition("/")
+    if not owner or not slash or not name or "/" in name:
+        raise ReleaseError(f"the repo is owner/name, such as romamo/demo; got {repo!r}")
+    return name
+
+
+@dataclass(frozen=True, slots=True)
+class Token:
+    """An installation token for one repository; repr leaves the value out"""
+
+    value: str = field(repr=False)
+    expires: dt.datetime
+    repo: str
+    app_id: int
+
+    def reusable(self, repo: str, app_id: int, now: dt.datetime) -> bool:
+        return self.repo.lower() == repo.lower() and self.app_id == app_id and self.expires - now >= REUSE_FOR
+
+
+def _malformed(path: Path, reason: str) -> ReleaseError:
+    return ReleaseError(f"the App token cache {path} is malformed ({reason}); delete it to mint a new token")
+
+
+def _expiry(value: object) -> dt.datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        moment = dt.datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None else None
+
+
+def load_token(path: Path) -> Token | None:
+    """The cached token, or None when there is no cache; a malformed one raises naming it.
+    No message quotes the file, which holds the token"""
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_bytes())
+    except json.JSONDecodeError, UnicodeDecodeError:
+        raise _malformed(path, "not JSON") from None
+    if not isinstance(data, dict):
+        raise _malformed(path, "not a JSON object")
+    value, repo, app_id = data.get("token"), data.get("repository"), data.get("app_id")
+    if not isinstance(value, str) or not value:
+        raise _malformed(path, "token is not a non-empty string")
+    if not isinstance(repo, str) or not repo:
+        raise _malformed(path, "repository is not a non-empty string")
+    if not isinstance(app_id, int) or isinstance(app_id, bool):
+        raise _malformed(path, "app_id is not an integer")
+    expires = _expiry(data.get("expires_at"))
+    if expires is None:
+        raise _malformed(path, "expires_at is not an ISO time with an offset")
+    return Token(value, expires, repo, app_id)
+
+
+def _write_atomic(path: Path, data: bytes, mode: int) -> None:
+    """Write path through a sibling created with mode (never wider, so no chmod follows) and
+    renamed over it, so a reader sees the old file or the new one, never part of one"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    done = False
+    try:
+        with os.fdopen(descriptor, "wb") as out:
+            out.write(data)
+            out.flush()
+            os.fsync(out.fileno())
+        os.replace(temporary, path)
+        done = True
+    finally:
+        if not done:
+            temporary.unlink(missing_ok=True)
+
+
+def save_token(path: Path, token: Token) -> None:
+    """Cache the token with mode 0600; two helpers minting at once each write a whole, valid
+    token, and the later rename wins"""
+    record = {
+        "app_id": token.app_id,
+        "repository": token.repo,
+        "expires_at": token.expires.isoformat(),
+        "token": token.value,
+    }
+    _write_atomic(path, (json.dumps(record, indent=2) + "\n").encode(), 0o600)
+
+
+def _scope(data: Mapping[str, object], repo: str, path: str) -> None:
+    """D-14: the token must be limited to the gate's repo, as asked"""
+    repos = data.get("repositories")
+    if not isinstance(repos, list) or len(repos) != 1:
+        raise ReleaseError(f"POST {path} gave a token not limited to {repo}; refusing it")
+    only = repos[0]
+    full = only.get("full_name") if isinstance(only, dict) else None
+    if not isinstance(full, str) or full.lower() != repo.lower():
+        raise ReleaseError(f"POST {path} gave a token for another repository than {repo}; refusing it")
+
+
+def mint(app_id: int, repo: str, key: Path, now: dt.datetime, signer: Signer, api: Api) -> Token:
+    """Spec 004, Tokens: an installation token limited to repo and the table's permissions"""
+    name = repo_name(repo)
+    bearer = jwt(app_id, check_key(key), now, signer)
+    found = installation(app_id, repo, bearer, api)
+    path = f"/app/installations/{found.id}/access_tokens"
+    body = {"repositories": [name], "permissions": {p.key: str(p.access) for p in PERMISSIONS}}
+    data = _ok(api.post(path, bearer, body), path, app_id, "POST", 201)
+    value = data.get("token")
+    if not isinstance(value, str) or not value or any(c.isspace() for c in value):
+        raise ReleaseError(f"POST {path} gave no token")
+    expires = _expiry(data.get("expires_at"))
+    if expires is None:
+        raise ReleaseError(f"POST {path} gave no expires_at with an offset")
+    _scope(data, repo, path)
+    return Token(value, expires, repo, app_id)
+
+
+def app_token(cache: Path, repo: str, app_id: int, key: Path, now: dt.datetime, signer: Signer, api: Api) -> str:
+    """The cached token while it has at least 10 minutes left by this host's clock, else a new
+    one, cached. GitHub's expiry is an hour out, so the margin also absorbs a host clock up to
+    10 minutes behind GitHub's"""
+    repo_name(repo)
+    cached = load_token(cache)
+    if cached is not None and cached.reusable(repo, app_id, now):
+        return cached.value
+    fresh = mint(app_id, repo, key, now, signer, api)
+    save_token(cache, fresh)
+    return fresh.value
+
+
+CREDENTIAL_HOST = "github.com"
+
+
+def credential(operation: str, request: str, token: Callable[[], str]) -> str:
+    """git-credential(1)'s helper protocol. get answers an https request for github.com with
+    the App's token as x-access-token, and anything else with nothing, so git asks its next
+    helper; store, erase, and any other operation are ignored, as the protocol asks"""
+    if operation != "get":
+        return ""
+    asked: dict[str, str] = {}
+    for line in request.splitlines():
+        if not line:
+            break
+        key, equals, value = line.partition("=")
+        if not equals or not key:
+            raise ReleaseError("git sent a credential request line that is not key=value")
+        asked[key] = value
+    if asked.get("protocol") != "https" or asked.get("host") != CREDENTIAL_HOST:
+        return ""
+    return f"username=x-access-token\npassword={token()}\n"
+
+
+HELPERS = "bin"  # in the gate's state folder, next to the token cache
+GH_HELPER = "gh"
+CREDENTIAL_HELPER = "git-credential-shipmill"
+
+
+@dataclass(frozen=True, slots=True)
+class Helpers:
+    folder: Path  # goes first on a session's PATH
+    gh: Path
+    git_credential: Path
+    real_gh: Path  # the gh the gh helper runs
+
+
+def resolve_gh(folder: Path, path: str) -> Path:
+    """The gh on path, skipping the helpers' folder, so the gh helper never runs itself"""
+    mine = folder.resolve()
+    rest = [entry for entry in path.split(os.pathsep) if entry and Path(entry).resolve() != mine]
+    found = shutil.which("gh", path=os.pathsep.join(rest))
+    if found is None:
+        raise ReleaseError("gh not found on PATH; the session's gh helper runs it with the App's token")
+    return Path(found).resolve()
+
+
+def write_helpers(folder: Path, python: Path, checkout: Path, repo: str, app_id: int, key: Path, path: str) -> Helpers:
+    """Spec 004, Tokens: write the session's gh and git credential helpers, mode 0700. Each
+    runs `<python> -m shipmill app-token` with the App's id, key, repo, and checkout as
+    arguments; neither holds a token"""
+    repo_name(repo)
+    real_gh = resolve_gh(folder, path)
+    command = shlex.join(
+        [
+            str(python),
+            "-m",
+            "shipmill",
+            "--repo",
+            str(checkout.resolve()),
+            "app-token",
+            repo,
+            "--app-id",
+            str(app_id),
+            "--app-key",
+            str(key.resolve()),
+        ]
+    )
+    header = "#!/bin/sh\n# Written by shipmill gate (spec 004). It holds no token: each call mints or reuses one.\n"
+    gh = (
+        header
+        + f"token=$({command}) || exit $?\n"
+        + "GH_TOKEN=$token\nexport GH_TOKEN\nunset token\n"
+        + f'exec {shlex.quote(str(real_gh))} "$@"\n'
+    )
+    credential_helper = header + f'exec {command} --git-credential "$1"\n'
+    helpers = Helpers(folder, folder / GH_HELPER, folder / CREDENTIAL_HELPER, real_gh)
+    _write_atomic(helpers.gh, gh.encode(), 0o700)
+    _write_atomic(helpers.git_credential, credential_helper.encode(), 0o700)
+    return helpers

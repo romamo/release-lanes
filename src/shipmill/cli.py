@@ -16,6 +16,8 @@
                   held or not, prunes the worktrees that landed, as `worktrees --prune` does
   worktrees       list the repository's worktrees, each REMOVABLE once its work landed, or KEPT and why;
                   --prune removes the REMOVABLE ones and their local branches
+  app-token       print a GitHub App installation token limited to one repo, cached while it has
+                  10 minutes left; --git-credential answers as git's credential helper
 
 Exit codes: 0 done (a plan may skip); 1 doctor found a failure; 2 bad input or a refused state.
 """
@@ -28,14 +30,25 @@ import shutil
 import sys
 from collections.abc import Mapping
 from pathlib import Path
+from typing import TextIO
 
 from shipmill.agents import AgentsConfig
-from shipmill.app import Openssl, UrllibApi, app_check
+from shipmill.app import CACHE, Api, Openssl, Signer, UrllibApi, app_check, app_token, credential, default_key
 from shipmill.autonomy import Hold
 from shipmill.config import CONFIG_PATH, config_path
 from shipmill.doctor import CALLER, OPERATE_CALLER, doctor
 from shipmill.errors import ReleaseError
-from shipmill.gate import ClaudeCli, check_checkout, gate, pruner, refresh, tick_lines, tick_record, watch
+from shipmill.gate import (
+    ClaudeCli,
+    check_checkout,
+    gate,
+    pruner,
+    refresh,
+    state_dir,
+    tick_lines,
+    tick_record,
+    watch,
+)
 from shipmill.github import GhCli, GitHub
 from shipmill.gitrepo import Git
 from shipmill.init import init, init_operate
@@ -205,6 +218,22 @@ def _parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--json", action="store_true", help="print the worktrees as one JSON object")
 
+    p = sub.add_parser(
+        "app-token",
+        help="print an installation token of a GitHub App, limited to one repo and cached in the checkout",
+    )
+    p.add_argument("slug", metavar="owner/name", help="the GitHub repo the token is limited to; --repo is its checkout")
+    p.add_argument("--app-id", type=int, required=True, help="the App's id, as [agents] app_id names it")
+    p.add_argument("--app-key", type=Path, help="the App's private key (default: ~/.config/shipmill/app-<app_id>.pem)")
+    p.add_argument(
+        "--git-credential",
+        metavar="OPERATION",
+        help=(
+            "answer git's credential protocol on stdin: get prints username=x-access-token and the token "
+            "as password for https://github.com; store, erase, and other operations print nothing"
+        ),
+    )
+
     p = sub.add_parser("launchd", help="run the gate for a dedicated checkout every few minutes (macOS)")
     p.add_argument("slug", metavar="owner/name", help="the GitHub repo; --repo is its gate checkout")
     p.add_argument("--every", type=int, default=15, help="minutes between runs (default: 15)")
@@ -221,12 +250,21 @@ def _release_args(p: argparse.ArgumentParser) -> None:
 
 
 def main(
-    argv: list[str], github: GitHub | None = None, http: Http | None = None, sessions: Sessions | None = None
+    argv: list[str],
+    github: GitHub | None = None,
+    http: Http | None = None,
+    sessions: Sessions | None = None,
+    api: Api | None = None,
+    signer: Signer | None = None,
+    stdin: TextIO | None = None,
 ) -> int:
-    """github stands in for gh, http for the health checks, and sessions for `claude agents`,
-    as tests pass fakes"""
+    """github stands in for gh, http for the health checks, sessions for `claude agents`, api
+    for GitHub's REST API, signer for openssl, and stdin for git's credential request, as
+    tests pass fakes"""
     args = _parser().parse_args(argv)
     root: Path = args.repo.resolve()
+    if args.command == "app-token":
+        return _app_token(root, args, api or UrllibApi(), signer or Openssl(), stdin or sys.stdin)
     hub = github or GhCli(root)
     if args.command == "init" and args.operate:
         print(f"wrote {init_operate(root, args.force).relative_to(root)}")
@@ -360,6 +398,24 @@ def _gate(root: Path, args: argparse.Namespace, github: GitHub, sessions: Sessio
         print(json.dumps(tick_record(decision, launched, waiting, pruned, args.dry_run), indent=2))
         return 0
     print("\n".join(tick_lines(decision, launched, waiting, pruned, args.dry_run)))
+    return 0
+
+
+def _app_token(root: Path, args: argparse.Namespace, api: Api, signer: Signer, stdin: TextIO) -> int:
+    """Spec 004, Tokens. Never falls back to the host's gh login (D-14): any failure exits 2"""
+    app_id: int = args.app_id
+    if app_id < 1:
+        raise ReleaseError(f"--app-id must be 1 or more, got {app_id}")
+    key: Path = args.app_key if args.app_key is not None else default_key(app_id, Path.home())
+    cache = state_dir(Git(root)) / CACHE
+
+    def token() -> str:
+        return app_token(cache, args.slug, app_id, key, dt.datetime.now(dt.UTC), signer, api)
+
+    if args.git_credential is None:
+        print(token())
+        return 0
+    sys.stdout.write(credential(args.git_credential, stdin.read(), token))
     return 0
 
 
