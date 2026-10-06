@@ -47,6 +47,12 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | WORKTREE_STALE | A shipmill worktree (under `.claude/worktrees/` or `tmp/wt-*`) that `shipmill worktrees` keeps, created over 7 days ago: the subject is its path, the detail why it is kept. The gate's prune removes only what landed, so this is work a person finishes (commit, push, open the PR), or removes by hand once it is unwanted (`git worktree remove <path>`). Report only, never remove it from the watch. Not an action (exit 0 by itself) |
 | NEEDS_DECISION | Issues and pull requests labelled `needs-decision` whose question has no reply from an OWNER, MEMBER, or COLLABORATOR ([needs-decision.md](../github-issue-triage/references/needs-decision.md)), as `#N` only. They are left out of ISSUES and PRS_OPEN, so they start no session. Report them as waiting on the user; never answer or unlabel one. An action (exit 1): a person owes the answer |
 | UNTRUSTED | With `--trusted-only` (the headless gate's trust filter, D-16): issues whose author is no OWNER, MEMBER, or COLLABORATOR nor the `--bot-login`, and pull requests whose head is in a fork, as `#N` only. Report them for an interactive session. Not an action |
+| ISSUES_OPEN | The open issues triage owes nothing on yet, by state (IN_PROGRESS, BLOCKED, TRIAGED, POSTPONED, ...). Report only: list them, with the PR or the issue each waits on |
+| RUNS_ACTIVE | A queued or running run of any workflow (CI, a release, a deploy), one row each with its age and link. Report only; the next pass sees how it ended |
+| TRIAGE_MODE | The config's `[agents]` table: the prompt the gate's sessions get (its scope words, such as "merge when green", are the triage mode), whether open PRs count as work, and the other keys. Report only |
+| AGENT_SESSION | A Claude Code session on this host working the repo (`claude agents --json`): a gate session or one in the checkout, with its status. One that is `blocked` waits on the user: give them `claude attach <id>`. Report only |
+| LOOP | The launchd job running `shipmill gate` for the repo on this Mac: its interval, state, last exit, and the gate's last decision, or "none". Add this session's own loops (CronList) and any `/schedule` routine the user named, which no script can read. Report only |
+| HOST_UNKNOWN | `claude` isn't on PATH, as in a cloud session, so the agent sessions weren't read: say so rather than "no agents". Report only |
 | PRS_OPEN, BOT_OK, BOT_NONE, NO_REGISTRY | Report only |
 
 `--json` prints one JSON object per row: `state`, `subject`, `detail`, and `agent`, which says whether the row needs an agent. `shipmill gate` starts a session only on `agent: true` rows (plus PRS_OPEN with `[agents] prs = true`), and refuses a row without the field. The script's `AGENT` set decides it, next to this table; change both together:
@@ -71,7 +77,9 @@ HOLD and POSTMORTEM_DUE show for every repo with a shipmill config, since a hold
 
 ## Report
 
-One line when exit 0: "Nothing owed: bot OK, <latest tag> published and announced, no issues waiting." (add "held by #N" when a HOLD row shows). Otherwise lead with open incidents and holds, then what needs the user (each with a recommendation), then what the pass repaired with links, then what it left for the next pass. Under /loop, keep quiet passes to that one line.
+Every report the user asks for covers the open issues (ISSUES and ISSUES_OPEN), the workflow runs (RUNS_ACTIVE), and the agents: the triage mode (TRIAGE_MODE), the sessions (AGENT_SESSION), and the loops (LOOP, plus this session's own). Say "none open", "nothing running", or "no agents" when a row is absent; a status report that leaves one out reads as complete when it isn't.
+
+Under /loop, a quiet pass (exit 0) is one line: "Nothing owed: bot OK, <latest tag> published and announced, no issues waiting." (add "held by #N" when a HOLD row shows). Otherwise lead with open incidents and holds, then what needs the user (each with a recommendation), then what the pass repaired with links, then what it left for the next pass.
 
 ## Postmortems
 

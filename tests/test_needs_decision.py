@@ -275,6 +275,7 @@ def test_existing_intake_rows_keep_their_shape(ws: ModuleType) -> None:
     found = ws.intake("o/r", 1, triage((12, "NEW"), (9, "NEEDS_PR"), (5, "TRIAGED")), [pr(3), pr(4)], comments({}))
     assert [r.json() for r in found] == [
         {"state": "ISSUES", "subject": "o/r", "detail": "NEEDS_PR #9; NEW #12", "agent": True},
+        {"state": "ISSUES_OPEN", "subject": "o/r", "detail": "TRIAGED #5", "agent": False},  # #182
         {"state": "PRS_OPEN", "subject": "o/r", "detail": "#3 #4", "agent": False},
     ]
 

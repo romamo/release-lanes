@@ -22,6 +22,12 @@ bot.
   QUIET (S-005-7, S-005-8, S-005-9, S-005-10, S-005-17) (#161)
 - D-18: a Release run that finds a work branch no active run owns deletes it and pushes its
   own, given `actions: read`; without it, the stop stays but is reported (#175)
+- github-ship-watch reports what else is going on in the repo, and every status report lists
+  it: the open issues triage owes nothing on yet, by state (ISSUES_OPEN); each queued or
+  running workflow run (RUNS_ACTIVE); the gate's triage mode from `[agents]` (TRIAGE_MODE);
+  the Claude Code sessions on the host working the repo (AGENT_SESSION); and the gate's
+  launchd loop with its last decision (LOOP). All are report-only, so the exit code and the
+  gate's fingerprint are unchanged (#182)
 
 ### Fixed
 

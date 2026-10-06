@@ -4,6 +4,7 @@ import datetime as dt
 import importlib.util
 import json
 import sys
+import tomllib
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -555,6 +556,8 @@ REPORT_ROWS = [
     "UNHEALTHY",
     "HOLD",
     "PRS_OPEN",
+    "ISSUES_OPEN",
+    "RUNS_ACTIVE",
     "POSTMORTEM_DUE",
     "BOT_OK",
     "PUBLISHED",
@@ -647,3 +650,145 @@ def test_s002_18_the_skills_document_the_report_and_the_gates_prune() -> None:
         text = skill_text(name)
         assert "leaves behind once it exits" in text, name
         assert "the gate's prune's to remove (D-12)" in text, name
+
+
+def triage_line(number: int, state: str) -> str:
+    return json.dumps({"number": number, "state": state, "title": "t", "note": ""})
+
+
+def issue_states(ws: ModuleType, code: int, lines: list[str]) -> list[tuple[str, str]]:
+    rows = ws.intake("o/r", code, "\n".join(lines), [], lambda n: [])
+    return [(r.state, r.detail) for r in rows]
+
+
+def test_the_open_issues_triage_owes_nothing_are_reported_by_state(ws: ModuleType) -> None:
+    # #182: a status report left out the triaged issues; they read ISSUES_OPEN, never an action
+    lines = [
+        triage_line(n, s) for n, s in [(175, "IN_PROGRESS"), (164, "BLOCKED"), (26, "TRIAGED"), (161, "IN_PROGRESS")]
+    ]
+    want = [("ISSUES_OPEN", "BLOCKED #164; IN_PROGRESS #175 #161; TRIAGED #26")]
+    assert issue_states(ws, 0, lines) == want
+    assert "ISSUES_OPEN" not in ws.ACTION
+
+
+def test_issues_triage_acts_on_or_that_wait_keep_their_own_rows(ws: ModuleType) -> None:
+    lines = [triage_line(12, "NEW"), triage_line(9, "BLOCKED"), triage_line(4, "NEEDS_DECISION")]
+    lines.append(triage_line(5, "UNTRUSTED"))
+    assert issue_states(ws, 1, lines) == [
+        ("ISSUES", "NEW #12"),
+        ("ISSUES_OPEN", "BLOCKED #9"),
+        ("NEEDS_DECISION", "#4"),
+        ("UNTRUSTED", "#5"),
+    ]
+
+
+def test_no_open_issues_print_no_issue_rows(ws: ModuleType) -> None:
+    assert issue_states(ws, 0, []) == []
+
+
+def active(ws: ModuleType, workflow: str, status: str, minutes_ago: int) -> object:
+    created = NOW - dt.timedelta(minutes=minutes_ago)
+    return ws.ActiveRun(workflow, status, "push", "main", created, f"https://run/{minutes_ago}")
+
+
+def test_queued_and_running_workflow_runs_are_reported_oldest_first(ws: ModuleType) -> None:
+    # #182: a run in progress never showed; each active run of any workflow reads RUNS_ACTIVE
+    runs = [
+        active(ws, "CI", "queued", 1),
+        active(ws, "Release", "completed", 3),
+        active(ws, "Deploy", "in_progress", 7),
+    ]
+    rows = ws.active_rows(runs, NOW)
+    assert [(r.state, r.subject, r.detail) for r in rows] == [
+        ("RUNS_ACTIVE", "Deploy", "in_progress 7 min: push on main, https://run/7"),
+        ("RUNS_ACTIVE", "CI", "queued 1 min: push on main, https://run/1"),
+    ]
+    assert "RUNS_ACTIVE" not in ws.ACTION and "RUNS_ACTIVE" not in ws.AGENT
+
+
+def test_finished_runs_print_no_active_rows(ws: ModuleType) -> None:
+    assert ws.active_rows([active(ws, "CI", "completed", 2)], NOW) == []
+
+
+AGENTS_CONFIG = """name = "demo"
+
+[agents]
+prompt = "/github-issue-triage {repo} triage the new issues; merge when green"  # the gate's
+prs = true
+retry_hours = 24
+"""
+
+
+def test_the_triage_mode_is_the_agents_table_prompt_first(ws: ModuleType) -> None:
+    # #182: a status report says what the gate's sessions are told to do
+    row = ws.triage_mode_row(AGENTS_CONFIG, Path("shipmill.toml"))
+    assert (row.state, row.subject) == ("TRIAGE_MODE", "[agents]")
+    prompt = '"/github-issue-triage {repo} triage the new issues; merge when green"'
+    assert row.detail == f"prompt = {prompt}; prs = true; retry_hours = 24"
+
+
+def test_the_310_fallback_reads_the_agents_table_as_tomllib_does(ws: ModuleType) -> None:
+    policy = Path("shipmill.toml")
+    want = ws.agents_table_310(AGENTS_CONFIG, policy)
+    assert ws.agents_table_toml(tomllib.loads(AGENTS_CONFIG), policy) == want
+    assert want is not None and want["prs"] == "true"
+    assert ws.agents_table_310('name = "demo"\n', policy) is None
+    with pytest.raises(ws.Refused):
+        ws.agents_table_310(AGENTS_CONFIG + "[agents.extra]\nx = 1\n", policy)
+
+
+def test_no_agents_table_reads_no_gate(ws: ModuleType) -> None:
+    row = ws.triage_mode_row('name = "demo"\n', Path("shipmill.toml"))
+    assert row.detail.startswith("no [agents]")
+
+
+def claude_agent(name: str, cwd: str, minutes_ago: int, **more: object) -> dict[str, object]:
+    started = int((NOW - dt.timedelta(minutes=minutes_ago)).timestamp() * 1000)
+    return {"name": name, "cwd": cwd, "startedAt": started, "status": "busy", **more}
+
+
+def test_agent_sessions_are_the_gates_and_those_in_the_checkout(ws: ModuleType) -> None:
+    # #182: the sessions working the repo, by the gate's name or by folder; others are left out
+    sessions = [
+        claude_agent("shipmill o/r 2026-10-06 14:21", "/elsewhere", 2, id="80a9", kind="background", state="blocked"),
+        claude_agent("mine", "/work/r/sub", 13, pid=2400, kind="interactive"),
+        claude_agent("other", "/work/rr", 5, pid=3, kind="interactive"),
+        claude_agent("shipmill o/rx", "/elsewhere", 5, id="x", kind="background"),
+    ]
+    rows = ws.session_rows(json.dumps(sessions), "o/r", Path("/work/r"), NOW)
+    assert [(r.state, r.subject, r.detail) for r in rows] == [
+        ("AGENT_SESSION", "80a9", "gate busy/blocked, started 2 min ago: shipmill o/r 2026-10-06 14:21"),
+        ("AGENT_SESSION", "2400", "interactive busy, started 13 min ago: mine"),
+    ]
+
+
+def test_a_session_list_without_start_times_is_refused(ws: ModuleType) -> None:
+    with pytest.raises(ws.Refused):
+        ws.session_rows(json.dumps([{"name": "x"}]), "o/r", Path("/work/r"), NOW)
+
+
+def test_the_gate_label_is_the_one_shipmill_launchd_installs(ws: ModuleType) -> None:
+    from shipmill import launchd
+
+    for repo in ["shipmill/shipmill", "Owner/My_Repo.x"]:
+        assert ws.gate_label(repo) == launchd.label(repo)
+
+
+PRINTED = "gui/501/dev.shipmill.gate.o.r = {\n\tactive count = 0\n\tstate = not running\n\tlast exit code = 0\n}\n"
+GATE_LOG = "QUIET: nothing needs an agent\n  ISSUES o/r: NEW #3\nLAUNCH: 1 finding(s) need an agent\n  launched x\n"
+
+
+def test_the_gate_loop_reports_its_interval_state_and_last_decision(ws: ModuleType) -> None:
+    row = ws.loop_row("dev.shipmill.gate.o.r", {"StartInterval": 900}, PRINTED, GATE_LOG, NOW)
+    want = "launchd every 15 min; not running; last exit 0; last: LAUNCH: 1 finding(s) need an agent"
+    assert (row.state, row.subject, row.detail) == ("LOOP", "dev.shipmill.gate.o.r", want)
+
+
+def test_an_unloaded_or_missing_gate_loop_says_so(ws: ModuleType) -> None:
+    assert "not loaded" in ws.loop_row("l", {"StartInterval": 900}, None, None, NOW).detail
+    assert ws.loop_row("l", None, None, None, NOW).subject == "none"
+
+
+@pytest.mark.parametrize("state", ["TRIAGE_MODE", "AGENT_SESSION", "LOOP", "HOST_UNKNOWN"])
+def test_the_agent_rows_are_report_only(ws: ModuleType, state: str) -> None:
+    assert state not in ws.ACTION and state not in ws.AGENT
