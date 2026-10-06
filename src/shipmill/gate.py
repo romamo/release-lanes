@@ -19,13 +19,15 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Iterable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
 from shipmill.agents import AgentsConfig
+from shipmill.app import AppCheck, Identity
 from shipmill.autonomy import Hold
+from shipmill.config import CONFIG_PATH
 from shipmill.errors import ReleaseError
 from shipmill.github import GitHub
 from shipmill.gitrepo import Git
@@ -86,7 +88,7 @@ class Launch:
 
 
 class Action(enum.Enum):
-    HELD = "HELD"  # an open shipmill-hold issue stops every launch (D-13)
+    HELD = "HELD"  # an open shipmill-hold issue stops every launch (D-15)
     QUIET = "QUIET"  # nothing needs an agent
     RUNNING = "RUNNING"  # a session is still working
     WAITING = "WAITING"  # a session waits on the user
@@ -100,6 +102,7 @@ class Decision:
     reason: str
     work: tuple[Finding, ...]
     stop: tuple[str, ...] = ()  # finished sessions to stop before launching
+    identity: str | None = None  # the App bot a launch writes as (spec 004); None: the host's gh login
 
 
 def fingerprint(work: Iterable[Finding]) -> str:
@@ -108,7 +111,7 @@ def fingerprint(work: Iterable[Finding]) -> str:
 
 
 def held(hold: Hold, sessions: Sequence[Session]) -> Decision | None:
-    """D-13: a hold starts nothing. A session already running finishes; the reason names it
+    """D-15: a hold starts nothing. A session already running finishes; the reason names it
     so a person can stop it. A session the waiting step stopped is no longer passed in"""
     if not hold.on:
         return None
@@ -213,25 +216,37 @@ def parse_findings(text: str) -> list[Finding]:
 
 class Claude(Protocol):
     def sessions(self, workspace: Path, repo: str) -> list[Session]: ...
-    def launch(self, workspace: Path, name: str, text: str) -> str: ...
+    def launch(self, workspace: Path, name: str, text: str, env: Mapping[str, str] | None = None) -> str:
+        """Start a background session; env, when given, is its `--settings` env (spec 004)"""
+        ...
+
     def stop(self, session: str) -> None: ...
 
 
-class ClaudeCli:
-    def __init__(self, args: Sequence[str] = ()) -> None:
-        self.args = tuple(args)  # extra flags for the launched session, such as --permission-mode
+Runner = Callable[[list[str], Path], str]  # (command, cwd) -> its stdout
 
-    def _run(self, cmd: list[str], cwd: Path) -> str:
-        proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
-        if proc.returncode != 0:
-            raise ReleaseError(f"{' '.join(cmd[:3])} failed: {(proc.stderr or proc.stdout).strip()[:500]}")
-        return proc.stdout
+
+def run_command(cmd: list[str], cwd: Path) -> str:
+    """Run cmd in the gate's own environment; its stdout, or ReleaseError naming the first words"""
+    proc = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=False)
+    if proc.returncode != 0:
+        raise ReleaseError(f"{' '.join(cmd[:3])} failed: {(proc.stderr or proc.stdout).strip()[:500]}")
+    return proc.stdout
+
+
+class ClaudeCli:
+    def __init__(self, args: Sequence[str] = (), run: Runner = run_command) -> None:
+        self.args = tuple(args)  # extra flags for the launched session, such as --permission-mode
+        self._run = run
 
     def sessions(self, workspace: Path, repo: str) -> list[Session]:
         return parse_sessions(self._run(["claude", "agents", "--json", "--cwd", str(workspace)], workspace), repo)
 
-    def launch(self, workspace: Path, name: str, text: str) -> str:
-        return parse_launched(self._run(["claude", "--bg", "-n", name, *self.args, text], workspace))
+    def launch(self, workspace: Path, name: str, text: str, env: Mapping[str, str] | None = None) -> str:
+        """`claude --bg`; with env, `--settings` follows the name. The settings JSON is a
+        process argument `ps` shows, so env never holds a token (spec 004)"""
+        settings = [] if env is None else ["--settings", json.dumps({"env": dict(env)})]
+        return parse_launched(self._run(["claude", "--bg", "-n", name, *settings, *self.args, text], workspace))
 
     def stop(self, session: str) -> None:
         self._run(["claude", "stop", session], Path.cwd())
@@ -294,7 +309,7 @@ class Waiting:
     session: str
     name: str
     since: dt.datetime
-    waited_hours: int
+    waited_minutes: int
     notified: bool
     stopped: bool
     error: str | None
@@ -302,24 +317,29 @@ class Waiting:
     def line(self, dry_run: bool) -> str:
         if self.stopped:
             verb = "would stop" if dry_run else "stopped"
-            return f"{verb} {self.session} after {self.waited_hours}h waiting: {self.name}"
+            return f"{verb} {self.session} after {span(self.waited_minutes)} waiting: {self.name}"
         if self.error is not None:
             return f"notify failed for {self.session}: {self.error}"
         if self.notified:
             verb = "would notify" if dry_run else "notified"
-            return f"{verb} {self.session} (waiting {self.waited_hours}h)"
-        return f"{self.session} waiting {self.waited_hours}h"
+            return f"{verb} {self.session} (waiting {span(self.waited_minutes)})"
+        return f"{self.session} waiting {span(self.waited_minutes)}"
 
     def record(self) -> dict[str, object]:
         return {
             "session": self.session,
             "name": self.name,
             "since": self.since.isoformat(),
-            "waited_hours": self.waited_hours,
+            "waited_minutes": self.waited_minutes,
             "notified": self.notified,
             "stopped": self.stopped,
             "error": self.error,
         }
+
+
+def span(minutes: int) -> str:
+    """A wait as people read it: whole minutes under an hour, whole hours from then on"""
+    return f"{minutes}m" if minutes < 60 else f"{minutes // 60}h"
 
 
 def _moment(value: object, what: str) -> dt.datetime:
@@ -376,7 +396,7 @@ def attend(
     stop: Callable[[str], None],
 ) -> tuple[Waiting, ...]:
     """Spec 003's waiting step: record each blocked session's wait and notify for it, at
-    once and then every remind_hours, and stop one that waited max_wait_hours (> 0). With
+    once and then every remind_hours, and stop one that waited max_wait_minutes (> 0). With
     none blocked it only drops the record and reads nothing. A failed send is reported,
     never raised, and is tried again next tick; a failed stop raises after saving the
     record with that session's entry kept, so the next tick tries again"""
@@ -387,16 +407,16 @@ def attend(
         return ()
     agents = config()  # the checkout as it stands: a busy tick never moves it
     remind = dt.timedelta(hours=agents.remind_hours)
-    limit = dt.timedelta(hours=agents.max_wait_hours)
+    limit = dt.timedelta(minutes=agents.max_wait_minutes)
     known = load_waiting(path)
     waits: dict[str, Wait] = {}  # only the blocked sessions: any other entry is dropped
     report = []
     for index, s in enumerate(blocked):
         wait = known.get(s.id) or Wait(now, None)
-        hours = max(0, int((now - wait.since).total_seconds() // 3600))
-        expired = agents.max_wait_hours > 0 and now - wait.since >= limit
+        minutes = max(0, int((now - wait.since).total_seconds() // 60))
+        expired = agents.max_wait_minutes > 0 and now - wait.since >= limit
         if expired:
-            body = f"stopped session {s.id} after {hours}h waiting: claude attach {s.id} shows its question"
+            body = f"stopped session {s.id} after {span(minutes)} waiting: claude attach {s.id} shows its question"
             if not dry_run:
                 try:
                     stop(s.id)
@@ -405,7 +425,7 @@ def attend(
                     save_waiting(path, waits | rest)
                     raise
         else:
-            body = f"session {s.id} waits on you ({hours}h): claude attach {s.id}"
+            body = f"session {s.id} waits on you ({span(minutes)}): claude attach {s.id}"
         due = agents.notify and (expired or wait.notified is None or now - wait.notified >= remind)
         error = None
         if due and not dry_run:
@@ -417,7 +437,7 @@ def attend(
                 wait = Wait(wait.since, now)
         if not expired:  # a stopped session's entry is dropped
             waits[s.id] = wait
-        report.append(Waiting(s.id, s.name, wait.since, hours, due and error is None, expired, error))
+        report.append(Waiting(s.id, s.name, wait.since, minutes, due and error is None, expired, error))
     if not dry_run:
         save_waiting(path, waits)
     return tuple(report)
@@ -462,6 +482,17 @@ def pruner(git: Git, github: GitHub, sessions: Sessions) -> Pruner:
     return run
 
 
+SessionEnv = Callable[[Identity], Mapping[str, str]]  # writes the helpers; the launch's --settings env
+
+
+def as_app(app_id: int, now: dt.datetime, app: AppCheck | None) -> Identity:
+    """D-14: with app_id set a session starts as the App or not at all, so a missing check
+    refuses rather than launch as the host's gh login"""
+    if app is None:
+        raise ReleaseError(f"app_id {app_id} is set, but no App check was given; no session starts")
+    return app(app_id, now)
+
+
 def gate(
     git: Git,
     repo: str,
@@ -474,15 +505,25 @@ def gate(
     worktrees: Pruner,
     refresh_checkout: bool = False,
     dry_run: bool = False,
+    app: AppCheck | None = None,
+    app_key_named: bool = False,
+    app_env: SessionEnv | None = None,
 ) -> tuple[Decision, str | None, tuple[Waiting, ...], tuple[Judged, ...]]:
     """Decide, and on LAUNCH stop the finished sessions and start a new one. Returns the
     decision, the launched session's id, what the waiting step did for each blocked
     session, and the worktrees the prune removed (on a dry run, the ones it would remove).
-    The waiting step runs first, then the prune, both held or not (D-13: a prune starts no
+    The waiting step runs first, then the prune, both held or not (D-15: a prune starts no
     session), and the rest of the tick is decided without the sessions the waiting step
     stopped. A prune error raises, so that tick starts no session. A hold, then a busy
     session, ends the run before the checkout moves or the state is read; of the two, only
-    a blocked session reads the config"""
+    a blocked session reads the config. On LAUNCH with [agents] app_id set, app checks the
+    App's key, installation, and bot account, dry run or not, and then, on a real run only,
+    app_env writes the session's helpers and gives its `--settings` env; both happen before
+    any session is stopped or started, so a failure stops none and starts none (D-14). The
+    decision then names the bot as its identity. app_key_named (`--app-key`) without app_id
+    is refused where the config is read, after the refresh, so a checkout the app_id change
+    hasn't reached yet still moves. The gate never changes its own environment: its reads
+    (the findings, the hold, `claude agents`) keep the host's gh login (spec 004)"""
     check_checkout(git, repo)
     record = state_dir(git) / RECORD
     sessions = claude.sessions(git.root, repo)
@@ -499,14 +540,26 @@ def gate(
     if refresh_checkout and not dry_run:
         refresh(git)
     agents = config()
+    if app_key_named and agents.app_id is None:  # read after the refresh, so a stale checkout can't stall it
+        raise ReleaseError(f"--app-key names an App's key, but [agents] in {CONFIG_PATH} sets no app_id")
     retry = dt.timedelta(hours=agents.retry_hours)
     decision = decide(findings(), sessions, load_launch(record), now, retry, agents.prs)
-    if decision.action is not Action.LAUNCH or dry_run:
+    if decision.action is not Action.LAUNCH:
         return decision, None, waiting, pruned
+    identity = None if agents.app_id is None else as_app(agents.app_id, now, app)
+    if identity is not None:
+        decision = replace(decision, identity=identity.login)
+    if dry_run:
+        return decision, None, waiting, pruned
+    env = None
+    if identity is not None:
+        if app_env is None:
+            raise ReleaseError(f"app_id {agents.app_id} is set, but no session env was given; no session starts")
+        env = app_env(identity)
     for session in decision.stop:
         claude.stop(session)
     name = f"{session_name(repo)} {now:%Y-%m-%d %H:%M}"
-    launched = claude.launch(git.root, name, prompt(agents.prompt, repo, decision.work, now))
+    launched = claude.launch(git.root, name, prompt(agents.prompt, repo, decision.work, now), env)
     save_launch(record, Launch(fingerprint(decision.work), launched, now))
     return decision, launched, waiting, pruned
 
@@ -514,13 +567,16 @@ def gate(
 def tick_record(
     decision: Decision, launched: str | None, waiting: Sequence[Waiting], pruned: Sequence[Judged], dry_run: bool
 ) -> dict[str, object]:
-    """`shipmill gate --json`; pruned holds the paths removed, or on a dry run the ones it would remove"""
+    """`shipmill gate --json`; pruned holds the paths removed, or on a dry run the ones it would
+    remove; identity the App bot a launch writes as, or null for the host's gh login (and on a
+    tick that launches nothing)"""
     return {
         "action": decision.action.value,
         "reason": decision.reason,
         "work": [f.line() for f in decision.work],
         "stopped": [] if dry_run else list(decision.stop),
         "launched": launched,
+        "identity": decision.identity,
         "waiting": [w.record() for w in waiting],
         "pruned": [j.path for j in pruned],
     }
@@ -529,8 +585,10 @@ def tick_record(
 def tick_lines(
     decision: Decision, launched: str | None, waiting: Sequence[Waiting], pruned: Sequence[Judged], dry_run: bool
 ) -> list[str]:
-    """`shipmill gate`'s text: the decision, one line per blocked session, then one per pruned worktree"""
-    lines = [f"{decision.action.value}: {decision.reason}"]
+    """`shipmill gate`'s text: the decision (` as <slug>[bot]` when it launches as an App), one
+    line per blocked session, then one per pruned worktree"""
+    who = f" as {decision.identity}" if decision.identity is not None else ""
+    lines = [f"{decision.action.value}: {decision.reason}{who}"]
     for w in waiting:
         lines.append(f"  {w.line(dry_run)}")
         if w.stopped and w.error is not None:  # the stop line above leaves out the failed send
@@ -538,6 +596,8 @@ def tick_lines(
     verb = "would prune" if dry_run else "pruned"
     lines += [f"  {verb} {j.path} ({j.worktree.branch})" for j in pruned]
     lines += [f"  {f.line()}" for f in decision.work]
+    if dry_run and decision.identity is not None:
+        lines.append(f"  would launch as {decision.identity}")
     if launched:
         lines.append(f"  launched {launched}: claude attach {launched}")
     return lines

@@ -70,7 +70,9 @@ def build(
     home: Path,
     path: str,
     skip: Callable[[str], bool] = is_temporary,
+    app_key: Path | None = None,
 ) -> Job:
+    """The job's plist; app_key, the App's private key, goes into the gate's arguments"""
     if not 5 <= interval_minutes <= 24 * 60:
         raise ReleaseError(f"the interval must be 5..1440 minutes, got {interval_minutes}")
     found = [find_tool(t, path, skip) for t in TOOLS]
@@ -78,6 +80,8 @@ def build(
     log = home / "Library" / "Logs" / "shipmill" / f"{name}.log"
     args = [str(found[TOOLS.index("uvx")]), "--from", tool, "shipmill", "--repo", str(checkout), "gate", repo]
     args += ["--refresh"]
+    if app_key is not None:
+        args += ["--app-key", str(app_key)]
     for extra in claude_args:
         args += ["--claude-arg", extra]
     document = plistlib.dumps(

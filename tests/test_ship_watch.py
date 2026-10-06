@@ -2,6 +2,7 @@
 
 import datetime as dt
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -510,7 +511,17 @@ def test_the_issue_states_reported_are_the_ones_triage_state_acts_on(ws: ModuleT
 
 
 AGENT_ROWS = ["BOT_FAILED", "BOT_STALLED", "NOT_PUBLISHED", "UNANNOUNCED", "ISSUES", "OPERATE_FAILED", "INCIDENT_OPEN"]
-REPORT_ROWS = ["PROMOTION_DUE", "UNHEALTHY", "HOLD", "PRS_OPEN", "POSTMORTEM_DUE", "BOT_OK", "PUBLISHED", "PUBLISHING"]
+REPORT_ROWS = [
+    "PROMOTION_DUE",
+    "UNHEALTHY",
+    "HOLD",
+    "PRS_OPEN",
+    "POSTMORTEM_DUE",
+    "BOT_OK",
+    "PUBLISHED",
+    "PUBLISHING",
+    "WORKTREE_STALE",
+]
 
 
 @pytest.mark.parametrize("state", AGENT_ROWS + REPORT_ROWS)
@@ -523,3 +534,75 @@ def test_each_json_row_says_whether_it_needs_an_agent(ws: ModuleType, state: str
 def test_agent_rows_are_action_rows(ws: ModuleType) -> None:
     assert set(AGENT_ROWS) == ws.AGENT
     assert ws.AGENT <= ws.ACTION
+
+
+def worktree(path: str, verdict: str, reason: str | None, age_hours: int | None) -> dict[str, object]:
+    """One row of `shipmill worktrees --json`"""
+    return {
+        "path": path,
+        "branch": None,
+        "head": "0" * 40,
+        "verdict": verdict,
+        "reason": reason,
+        "created": None,
+        "age_hours": age_hours,
+    }
+
+
+def test_s002_17_only_kept_shipmill_worktrees_over_seven_days_report(ws: ModuleType) -> None:
+    week = 7 * 24
+    trees = [
+        worktree(".", "KEPT", "main checkout", None),
+        worktree("tmp/shipmill-gate", "KEPT", "current checkout", week * 4),
+        worktree("tmp/mine", "KEPT", "not a shipmill worktree", week * 4),
+        worktree(".claude/worktrees/done", "REMOVABLE", None, week * 4),
+        worktree(".claude/worktrees/week", "KEPT", "detached HEAD", week),
+        worktree("tmp/wt-old", "KEPT", "2 commit(s) not landed", week + 1),
+        worktree(".claude/worktrees/pr", "KEPT", "open PR #7", week * 3),
+    ]
+    rows = ws.stale_rows(json.dumps({"worktrees": trees}))
+    assert [(r.state, r.subject, r.detail) for r in rows] == [
+        ("WORKTREE_STALE", "tmp/wt-old", "2 commit(s) not landed; created 7d ago"),
+        ("WORKTREE_STALE", ".claude/worktrees/pr", "open PR #7; created 21d ago"),
+    ]
+    assert dt.timedelta(days=7) == ws.STALE
+    assert "WORKTREE_STALE" not in ws.ACTION | ws.AGENT  # report-only: never exits 1, never starts a session
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "not json",
+        "[]",
+        '{"trees": []}',
+        json.dumps({"worktrees": [{"path": "tmp/wt-a"}]}),
+        json.dumps({"worktrees": [worktree("tmp/wt-a", "KEPT", None, 500)]}),
+        json.dumps({"worktrees": [worktree("tmp/wt-a", "KEPT", "detached HEAD", None)]}),
+    ],
+)
+def test_s002_17_a_worktrees_report_it_cannot_read_stops_the_watch(ws: ModuleType, text: str) -> None:
+    with pytest.raises(SystemExit) as refused:
+        ws.stale_rows(text)
+    assert refused.value.code == 2
+
+
+SKILLS = Path(__file__).resolve().parents[1] / "skills"
+
+
+def skill_text(name: str) -> str:
+    """A skill's SKILL.md with its line wrapping folded, so a statement reads as one line"""
+    return " ".join((SKILLS / name / "SKILL.md").read_text(encoding="utf-8").split())
+
+
+def test_s002_18_the_skills_document_the_report_and_the_gates_prune() -> None:
+    watch = skill_text("github-ship-watch")
+    assert "| WORKTREE_STALE |" in watch
+    assert "| `false` | WORKTREE_STALE |" in watch
+    gate = skill_text("shipmill-setup").split("## The gate", 1)[1].split(" ## ", 1)[0]
+    assert "prunes landed worktrees" in gate
+    assert "`pruned <path> (<branch>)`" in gate
+    assert "worktrees` lists every worktree as REMOVABLE or KEPT" in gate
+    for name in ("github-issue-resolve", "github-pr-triage", "github-issue-triage"):
+        text = skill_text(name)
+        assert "leaves behind once it exits" in text, name
+        assert "the gate's prune's to remove (D-12)" in text, name

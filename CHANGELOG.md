@@ -9,6 +9,33 @@ bot.
 
 ### Added
 
+- Spec 006 for `shipmill app-create`, which makes the gate's GitHub App in one click and
+  picks its owner and visibility from where the gated repos are
+- `shipmill app-create` makes the gate's GitHub App in one click: it finds the accounts your
+  `gh` login administers and the repos in them holding `.github/shipmill.toml`, plans a
+  private App when they are all in one account and a public one when they span several
+  (`--owner`, `--public`, `--private`, `--name`, `--repos` change it; `--dry-run` prints the
+  plan), opens GitHub's create page with the permissions filled in, saves the key to
+  `~/.config/shipmill/app-<app_id>.pem` with mode `0600`, waits for the installations, and
+  prints the `app_id` line to commit; exit 1 names a repo still missing the App. The setup
+  skill and `docs/install.md` use it first, the manual steps as the fallback (#155)
+- Spec 005 for headless gate sessions: `[agents] mode = "headless"` starts sessions that
+  can't prompt, a decision for the user becomes a `needs-decision` comment and label the
+  gate waits on, and headless work is limited to trusted authors' items, with D-16 (#134)
+
+### Fixed
+
+- `shipmill app-create` prints each line as it happens, so a piped or backgrounded run shows
+  the plan and the URL at once; its local page no longer posts to GitHub by itself, which
+  lost the manifest when GitHub asked to sign in first (*We didn't find an App Manifest*),
+  but shows the plan and each permission with its use and a **Create on GitHub** button to
+  click again after signing in; and a taken default name moves to a free variant, while a
+  taken `--name` exits 2 naming the free ones (#157)
+
+## [0.18.0] - 2026-10-06
+
+### Added
+
 - `shipmill gate` prunes on each tick as `shipmill worktrees --prune` does, held or not:
   after the waiting step and before the hold check, it removes each worktree that provably
   landed with the local branch it held, prints `pruned <path> (<branch>)` for each, and
@@ -17,9 +44,59 @@ bot.
   (`claude agents --json` or `gh pr list` failing, or git refusing a removal) exits 2 and
   starts no session; the gate's own checkout is never a candidate (#124)
 - Spec 004's build issues: #141 to #144 (#136)
-- Spec 005 for headless gate sessions: `[agents] mode = "headless"` starts sessions that
-  can't prompt, a decision for the user becomes a `needs-decision` comment and label the
-  gate waits on, and headless work is limited to trusted authors' items, with D-15 (#134)
+- `[agents] app_id` names the GitHub App gated sessions write as, and `shipmill gate
+  --app-key <path>` its private key (default `~/.config/shipmill/app-<app_id>.pem`). On a
+  launch with `app_id` set, the gate checks the key's mode, signs the App's JWT with
+  `openssl`, and checks the App is installed on the repo with every permission spec 004
+  lists, exiting 2 naming what failed (D-14) (#141)
+- github-ship-watch's `watch_state.py` reports a `WORKTREE_STALE` row, report-only
+  (`agent: false`, never an action), for each worktree under `.claude/worktrees/` or
+  `tmp/wt-*` that `shipmill worktrees` keeps and that is over 7 days old, naming its path
+  and why it is kept. It runs `shipmill --repo <repo-dir> worktrees --json` for a shipmill
+  bot, so the watch needs `claude` on `PATH` there, and a failing command exits 2 as a
+  failing plan does. shipmill-setup's gate section documents the prune and `shipmill
+  worktrees`, and github-issue-resolve, github-pr-triage, and github-issue-triage say that
+  the worktrees a session leaves behind once it exits are the gate's prune's to remove.
+  Spec 002 is built (#125)
+- `shipmill app-token <owner/repo> --app-id <id> [--app-key <path>]` prints a GitHub App
+  installation token limited to that one repository and spec 004's permissions. It caches
+  the token in `$(git rev-parse --git-common-dir)/shipmill/app-token.json` (mode `0600`,
+  replaced atomically), reuses it while it has at least 10 minutes left, and exits 2 on a
+  malformed cache, naming it. `--git-credential get` answers git's credential protocol for
+  `https://github.com` with `username=x-access-token`; another host gets no answer, and
+  `store`, `erase`, and other operations print nothing. `python -m shipmill` now runs the
+  CLI, and the session's `gh` and `git-credential-shipmill` helpers, which hold no token,
+  can be written for the gate's launch (#142)
+- With `[agents] app_id` set, `shipmill gate` starts its session as the App's bot. After
+  the App's checks it reads the bot account's id, writes the `gh` and git credential
+  helpers to `$(git rev-parse --git-common-dir)/shipmill/bin/`, and launches `claude --bg`
+  with `--settings` env that puts that folder first on `PATH`, makes `<slug>[bot]` and
+  `<id>+<slug>[bot]@users.noreply.github.com` the git author and committer, and, through
+  `GIT_CONFIG_*`, replaces the host's github.com credential helpers with the App's and
+  sends `git@github.com:` and `ssh://git@github.com/` remotes over https. The env holds no
+  token, and the gate's own reads keep the host's `gh` login. Any failure exits 2 before a
+  session is stopped or started. The decision line ends ` as <slug>[bot]`, `--json` gains
+  `identity` (`null` without an App), and `--dry-run` runs the checks, writes nothing, and
+  prints `would launch as <slug>[bot]`. With `app_id` unset the launch is unchanged.
+  `shipmill launchd --app-key <path>` passes the key, made absolute, to the job's gate,
+  and refuses it when `app_id` is unset or the key is missing or readable by others (#143)
+- shipmill-setup's gate section and `docs/install.md` give the GitHub App's setup: creating
+  it with no webhook and spec 004's permission table, installing it only on the repos the
+  gate works on, the private key at `~/.config/shipmill/app-<app_id>.pem` with `chmod 600`
+  (or `--app-key` on `gate` and `launchd`), `app_id` in `[agents]`, the token cache and
+  helpers, the dry run that proves it, and that without `app_id` sessions launch as before.
+  `docs/design/agent-modes.md` describes the session's identity, `--settings` env, and the
+  `app-token.json` and `bin/` state, and github-ship-watch says the App's `<slug>[bot]`
+  counts as a bot in the metrics. Spec 004 is built (#144)
+
+### Changed
+
+- `[agents] max_wait_hours` is now `max_wait_minutes` (0..10080) and defaults to 15, so
+  `shipmill gate` stops a session that has waited on you for 15 minutes unless the config
+  says otherwise (D-15, superseding D-13); 0 still never stops one. A config that still
+  sets `max_wait_hours` is refused naming the key. Waits read in minutes under an hour
+  (`stopped <id> after 15m waiting`), and `--json` reports `waited_minutes` in place of
+  `waited_hours` (#147)
 
 ## [0.17.0] - 2026-10-06
 
@@ -586,7 +663,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/shipmill/shipmill/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/shipmill/shipmill/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/shipmill/shipmill/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/shipmill/shipmill/compare/v0.14.0...v0.15.0

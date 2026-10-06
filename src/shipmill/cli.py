@@ -16,25 +16,75 @@
                   held or not, prunes the worktrees that landed, as `worktrees --prune` does
   worktrees       list the repository's worktrees, each REMOVABLE once its work landed, or KEPT and why;
                   --prune removes the REMOVABLE ones and their local branches
+  app-token       print a GitHub App installation token limited to one repo, cached while it has
+                  10 minutes left; --git-credential answers as git's credential helper
+  app-create      create the gate's GitHub App in one click: owner and visibility planned from the
+                  repos holding .github/shipmill.toml, the key saved with mode 0600
 
-Exit codes: 0 done (a plan may skip); 1 doctor found a failure; 2 bad input or a refused state.
+Exit codes: 0 done (a plan may skip); 1 doctor found a failure, or app-create left a repo without
+the App; 2 bad input or a refused state.
 """
 
 import argparse
+import dataclasses
 import datetime as dt
 import json
 import os
+import re
 import shutil
 import sys
-from collections.abc import Mapping
+import webbrowser
+from collections.abc import Callable, Mapping
 from pathlib import Path
+from typing import TextIO
 
 from shipmill.agents import AgentsConfig
+from shipmill.app import (
+    CACHE,
+    HELPERS,
+    Api,
+    Identity,
+    Openssl,
+    Signer,
+    UrllibApi,
+    app_check,
+    app_token,
+    check_key,
+    credential,
+    default_key,
+    prepare_session,
+)
+from shipmill.app_create import (
+    DEFAULT_NAME,
+    FLOW_SECONDS,
+    accounts,
+    check_key_dir,
+    config_lines,
+    convert,
+    create,
+    free_name,
+    gated_repos,
+    given_repos,
+    host_token,
+    install_url,
+    plan,
+    wait_installed,
+)
 from shipmill.autonomy import Hold
 from shipmill.config import CONFIG_PATH, config_path
 from shipmill.doctor import CALLER, OPERATE_CALLER, doctor
 from shipmill.errors import ReleaseError
-from shipmill.gate import ClaudeCli, check_checkout, gate, pruner, refresh, tick_lines, tick_record, watch
+from shipmill.gate import (
+    ClaudeCli,
+    check_checkout,
+    gate,
+    pruner,
+    refresh,
+    state_dir,
+    tick_lines,
+    tick_record,
+    watch,
+)
 from shipmill.github import GhCli, GitHub
 from shipmill.gitrepo import Git
 from shipmill.init import init, init_operate
@@ -185,6 +235,11 @@ def _parser() -> argparse.ArgumentParser:
         help="decide and print; start, stop, move, or prune nothing (lists the worktrees it would prune)",
     )
     p.add_argument("--json", action="store_true", help="print the decision, with the pruned worktrees, as JSON")
+    p.add_argument(
+        "--app-key",
+        type=Path,
+        help="the private key of the App in [agents] app_id (default: ~/.config/shipmill/app-<app_id>.pem)",
+    )
 
     p = sub.add_parser(
         "worktrees", help="list every worktree of the repository as REMOVABLE once its work landed, or KEPT and why"
@@ -199,11 +254,47 @@ def _parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--json", action="store_true", help="print the worktrees as one JSON object")
 
+    p = sub.add_parser(
+        "app-token",
+        help="print an installation token of a GitHub App, limited to one repo and cached in the checkout",
+    )
+    p.add_argument("slug", metavar="owner/name", help="the GitHub repo the token is limited to; --repo is its checkout")
+    p.add_argument("--app-id", type=int, required=True, help="the App's id, as [agents] app_id names it")
+    p.add_argument("--app-key", type=Path, help="the App's private key (default: ~/.config/shipmill/app-<app_id>.pem)")
+    p.add_argument(
+        "--git-credential",
+        metavar="OPERATION",
+        help=(
+            "answer git's credential protocol on stdin: get prints username=x-access-token and the token "
+            "as password for https://github.com; store, erase, and other operations print nothing"
+        ),
+    )
+
+    p = sub.add_parser("app-create", help="create the gate's GitHub App in one click (spec 006)")
+    p.add_argument("--owner", help="the org or personal account that owns the App (default: planned)")
+    visibility = p.add_mutually_exclusive_group()
+    visibility.add_argument(
+        "--public", dest="public", action="store_const", const=True, help="installable on any account"
+    )
+    visibility.add_argument(
+        "--private", dest="public", action="store_const", const=False, help="installable on the owner only"
+    )
+    p.add_argument("--name", help=f"the App's name, unique on GitHub (default: {DEFAULT_NAME}, or a free variant)")
+    p.add_argument("--repos", help="the gated repos as owner/name,...; skips looking for them")
+    p.add_argument("--dry-run", action="store_true", help="print the plan; create nothing")
+    p.add_argument("--json", action="store_true", help="print the plan and the result as one JSON object")
+    p.add_argument("--no-browser", action="store_true", help="print the URLs instead of opening them")
+
     p = sub.add_parser("launchd", help="run the gate for a dedicated checkout every few minutes (macOS)")
     p.add_argument("slug", metavar="owner/name", help="the GitHub repo; --repo is its gate checkout")
     p.add_argument("--every", type=int, default=15, help="minutes between runs (default: 15)")
     p.add_argument("--tool", default=DEFAULT_TOOL, help=f"where uvx gets shipmill (default: {DEFAULT_TOOL})")
     p.add_argument("--claude-arg", action="append", default=[], help="extra flag for the session (repeatable)")
+    p.add_argument(
+        "--app-key",
+        type=Path,
+        help="pass the private key of the App in [agents] app_id to the job's gate (made absolute)",
+    )
     p.add_argument("--print", action="store_true", help="print the job's plist; install nothing")
     p.add_argument("--remove", action="store_true", help="unload and delete the repo's job")
     return parser
@@ -215,12 +306,23 @@ def _release_args(p: argparse.ArgumentParser) -> None:
 
 
 def main(
-    argv: list[str], github: GitHub | None = None, http: Http | None = None, sessions: Sessions | None = None
+    argv: list[str],
+    github: GitHub | None = None,
+    http: Http | None = None,
+    sessions: Sessions | None = None,
+    api: Api | None = None,
+    signer: Signer | None = None,
+    stdin: TextIO | None = None,
 ) -> int:
-    """github stands in for gh, http for the health checks, and sessions for `claude agents`,
-    as tests pass fakes"""
+    """github stands in for gh, http for the health checks, sessions for `claude agents`, api
+    for GitHub's REST API, signer for openssl, and stdin for git's credential request, as
+    tests pass fakes"""
     args = _parser().parse_args(argv)
     root: Path = args.repo.resolve()
+    if args.command == "app-token":
+        return _app_token(root, args, api or UrllibApi(), signer or Openssl(), stdin or sys.stdin)
+    if args.command == "app-create":
+        return _app_create(root, args, api or UrllibApi(), signer or Openssl())
     hub = github or GhCli(root)
     if args.command == "init" and args.operate:
         print(f"wrote {init_operate(root, args.force).relative_to(root)}")
@@ -335,6 +437,12 @@ def main(
 
 def _gate(root: Path, args: argparse.Namespace, github: GitHub, sessions: Sessions) -> int:
     git = Git(root)
+    path = os.environ.get("PATH", "")
+
+    def session_env(identity: Identity) -> dict[str, str]:
+        """The helpers go in the checkout's state folder and run this very shipmill"""
+        return prepare_session(identity, state_dir(git) / HELPERS, Path(sys.executable), root, args.slug, path)
+
     decision, launched, waiting, pruned = gate(
         git,
         args.slug,
@@ -347,12 +455,103 @@ def _gate(root: Path, args: argparse.Namespace, github: GitHub, sessions: Sessio
         pruner(git, github, sessions),
         args.refresh,
         args.dry_run,
+        app_check(args.slug, args.app_key, Path.home(), Openssl(), UrllibApi()),
+        args.app_key is not None,
+        session_env,
     )
     if args.json:
         print(json.dumps(tick_record(decision, launched, waiting, pruned, args.dry_run), indent=2))
         return 0
     print("\n".join(tick_lines(decision, launched, waiting, pruned, args.dry_run)))
     return 0
+
+
+def _app_token(root: Path, args: argparse.Namespace, api: Api, signer: Signer, stdin: TextIO) -> int:
+    """Spec 004, Tokens. Never falls back to the host's gh login (D-14): any failure exits 2"""
+    app_id: int = args.app_id
+    if app_id < 1:
+        raise ReleaseError(f"--app-id must be 1 or more, got {app_id}")
+    key: Path = args.app_key if args.app_key is not None else default_key(app_id, Path.home())
+    cache = state_dir(Git(root)) / CACHE
+
+    def token() -> str:
+        return app_token(cache, args.slug, app_id, key, dt.datetime.now(dt.UTC), signer, api)
+
+    if args.git_credential is None:
+        print(token())
+        return 0
+    sys.stdout.write(credential(args.git_credential, stdin.read(), token))
+    return 0
+
+
+def _origin_owner(root: Path) -> str | None:
+    """The owner of the checkout's GitHub origin, or None outside a GitHub checkout"""
+    if not (root / ".git").exists():
+        return None
+    url = Git(root).run("remote", "get-url", "origin").strip()
+    found = re.search(r"github\.com[:/]([^/]+)/", url)
+    return found.group(1) if found else None
+
+
+def _app_create(
+    root: Path,
+    args: argparse.Namespace,
+    api: Api,
+    signer: Signer,
+    token: str | None = None,
+    browser: Callable[[str], None] | None = None,
+    key_dir: Path | None = None,
+    install_seconds: float = FLOW_SECONDS,
+    out: TextIO | None = None,
+) -> int:
+    """Spec 006: discover, plan, create, install. Exit 1 when an installation is still missing"""
+    host = token if token is not None else host_token()
+    keys = key_dir if key_dir is not None else Path.home() / ".config" / "shipmill"
+    stream = out if out is not None else (sys.stderr if args.json else sys.stdout)
+
+    def say(line: str) -> None:
+        print(line, file=stream, flush=True)  # S-006-19: each line as it happens, piped or not
+
+    say("looking for the accounts you administer and their repos with .github/shipmill.toml...")
+    found = accounts(api, host)
+    repos = given_repos(args.repos.split(","), found) if args.repos else gated_repos(api, host, found)
+    planned = plan(found, repos, _origin_owner(root), args.owner, args.public, args.name or DEFAULT_NAME)
+    name, note = free_name(api, host, planned, found[0].login, args.name is not None)
+    planned = dataclasses.replace(planned, name=name)
+    if note is not None:
+        say(f"note: {note}")
+    record: dict[str, object] = planned.record()
+    for line in planned.lines():
+        say(line)
+    if args.dry_run:
+        if args.json:
+            print(json.dumps(record, indent=2))
+        return 0
+    check_key_dir(keys)
+
+    def open_url(url: str) -> None:
+        say(f"open {url}")
+        if browser is not None:
+            browser(url)
+        elif not args.no_browser:
+            webbrowser.open(url)
+
+    created = convert(create(planned, open_url), api, host, keys)
+    say(f"created {created.slug} (App ID {created.app_id}), key in {created.key}")
+    targets = planned.installable
+    if targets:
+        say(f"install it on: {', '.join(targets)}")
+        open_url(install_url(created.slug))
+    installed = wait_installed(created, targets, api, signer, say, seconds=install_seconds)
+    for line in config_lines(created):
+        say(line)
+    missing = [r for r in targets if r not in installed]
+    for repo in missing:
+        say(f"not installed on {repo}; install it at {install_url(created.slug)}")
+    record |= {"app_id": created.app_id, "slug": created.slug, "key": str(created.key), "installed": list(installed)}
+    if args.json:
+        print(json.dumps(record, indent=2))
+    return 1 if missing else 0
 
 
 def _launchd(root: Path, args: argparse.Namespace) -> int:
@@ -363,12 +562,17 @@ def _launchd(root: Path, args: argparse.Namespace) -> int:
         return 0
     git = Git(root)
     check_checkout(git, args.slug)
-    job = build(args.slug, root, args.every, args.tool, args.claude_arg, home, os.environ.get("PATH", ""))
+    key: Path | None = None if args.app_key is None else args.app_key.expanduser().resolve()
+    job = build(args.slug, root, args.every, args.tool, args.claude_arg, home, os.environ.get("PATH", ""), app_key=key)
     if args.print:
         sys.stdout.write(job.document.decode())
         return 0
     refresh(git)  # a dedicated checkout, at the default branch's head
     agents = AgentsConfig.load(root)  # the job would fail on every run without it
+    if key is not None:  # as would a key for no App, or one the gate refuses
+        if agents.app_id is None:
+            raise ReleaseError(f"--app-key names an App's key, but [agents] in {CONFIG_PATH} sets no app_id")
+        check_key(key)
     install(job)
     print(f"installed {job.plist}: every {args.every} min, log {job.log}")
     print(f"prompt: {agents.prompt}")

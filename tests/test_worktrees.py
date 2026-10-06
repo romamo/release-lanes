@@ -2,6 +2,7 @@
 its own throwaway repository under tmp_path"""
 
 import datetime as dt
+import importlib.util
 import json
 import os
 import shutil
@@ -10,6 +11,7 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -659,3 +661,37 @@ def test_s002_11_prune_removes_nothing_when_claude_or_gh_fails(repo: Checkout, f
     with pytest.raises(ReleaseError, match="claude agents"):
         main(argv, repo.github, sessions=ClaudeSessions(repo.root, str(repo.root / "no-claude")))
     assert repo.state() == before
+
+
+WATCH_STATE = Path(__file__).resolve().parents[1] / "skills" / "github-ship-watch" / "scripts" / "watch_state.py"
+WEEK = 7 * 24
+
+
+def watch_state() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("watch_state", WATCH_STATE)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses look their module up by name
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_s002_17_the_watch_reports_kept_shipmill_worktrees_over_seven_days(
+    repo: Checkout, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """watch_state.py reads what `shipmill worktrees --json` prints for the checkout it watches"""
+    current = repo.add(".claude/worktrees/me", "-b", "me", hours=WEEK + 30)
+    repo.add("tmp/shipmill-gate", "--detach", hours=WEEK + 30)
+    repo.add("tmp/wt-detached", "--detach", hours=WEEK + 30)
+    dirty = repo.add(".claude/worktrees/dirty", "-b", "dirty", hours=WEEK + 1)
+    (dirty / "notes.txt").write_text("unsaved\n", encoding="utf-8")
+    repo.add(".claude/worktrees/young", "--detach", hours=WEEK)
+    repo.add(".claude/worktrees/done", "-b", "done", hours=WEEK + 30)
+    argv = ["--repo", str(current), "worktrees", "--json"]
+    assert main(argv, repo.github, sessions=repo.sessions) == 0
+    rows = watch_state().stale_rows(capsys.readouterr().out)
+    assert sorted((r.state, r.subject, r.detail) for r in rows) == [
+        ("WORKTREE_STALE", ".claude/worktrees/dirty", "uncommitted changes; created 7d ago"),
+        ("WORKTREE_STALE", "tmp/wt-detached", "detached HEAD; created 8d ago"),
+    ]
+    assert all(r.json()["agent"] is False for r in rows)

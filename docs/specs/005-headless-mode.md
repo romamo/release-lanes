@@ -8,8 +8,8 @@ In mode 1 (`docs/design/agent-modes.md`), a session `shipmill gate` starts with
 `claude --bg` asks the user through AskUserQuestion, or stops on a permission prompt, and
 waits. Until someone answers, the gate starts nothing else for that repo: every tick reads
 WAITING. Spec 003 made the wait visible (a desktop notification) and boundable
-(`max_wait_hours`), but on a machine nobody watches, the repo still stalls until a person
-attaches.
+(`max_wait_hours`, now `max_wait_minutes`, D-15), but on a machine nobody watches, the
+repo still stalls until a person attaches.
 
 This repo's own gate shows how often. Its launchd job (a 15 minute `StartInterval`) logged
 50 ticks between its install on 2026-10-05 and 2026-10-06 10:09. It launched two sessions;
@@ -184,7 +184,7 @@ author association never counts as a reply, so an outsider can't wake an item.
 
 An unattended session reads issue text with the whole workspace in reach, and with
 `Bash(git *)` and `uv run` allowed it can run code. Mode 2 therefore works only on items
-trusted people opened (D-15, added with this spec), inside this spec (the "Trust filter" of
+trusted people opened (D-16, added with this spec), inside this spec (the "Trust filter" of
 agent-modes.md's Next, for headless mode only):
 
 - An issue is trusted when its author's `author_association` is OWNER, MEMBER, or
@@ -293,9 +293,9 @@ an empty list when nothing waits or the tick didn't read the state.
 
 - D-4
 - D-9
-- D-13
 - D-14
 - D-15
+- D-16
 
 ## Issues
 

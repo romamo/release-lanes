@@ -195,7 +195,7 @@ MESSAGES: dict[str, str] = {
     "autonomy deploy environment name": "an environment name is letters, digits, '.', '_', or '-'; got 'pro duction'",
     "autonomy deploy unknown environment": "shipmill.toml [autonomy]: deploy.qa names no environment in [environments]; known: staging",
     "autonomy a table": "shipmill.toml: autonomy must be a table, got 1",
-    "agents unknown key": "shipmill.toml [agents]: unknown keys ['when']; allowed: ['max_wait_hours', 'notify', 'prompt', 'prs', 'remind_hours', 'retry_hours']",
+    "agents unknown key": "shipmill.toml [agents]: unknown keys ['when']; allowed: ['app_id', 'max_wait_minutes', 'notify', 'prompt', 'prs', 'remind_hours', 'retry_hours']",
     "agents prompt required": "shipmill.toml [agents]: prompt is required",
     "agents prompt empty": "shipmill.toml [agents]: prompt must not be empty",
     "agents retry range": "shipmill.toml [agents]: retry_hours must be in 1..168, got 0",
@@ -255,7 +255,7 @@ def test_the_agents_section_alone_is_read_with_the_same_words(tmp_path: Path) ->
     assert refusal(lambda: AgentsConfig.load(tmp_path)) == "shipmill.toml: agents must be a table, got 1"
     path.write_text('[agents]\nprompt = "/t"\nwhen = 1\n', encoding="utf-8")
     assert refusal(lambda: AgentsConfig.load(tmp_path)) == (
-        "shipmill.toml [agents]: unknown keys ['when']; allowed: ['max_wait_hours', 'notify', 'prompt', 'prs', 'remind_hours', 'retry_hours']"
+        "shipmill.toml [agents]: unknown keys ['when']; allowed: ['app_id', 'max_wait_minutes', 'notify', 'prompt', 'prs', 'remind_hours', 'retry_hours']"
     )
 
 
@@ -265,12 +265,12 @@ def agents(text: str) -> AgentsConfig:
 
 def test_s003_1_the_wait_keys_default_and_read_what_is_given() -> None:
     omitted = agents("")
-    assert (omitted.notify, omitted.remind_hours, omitted.max_wait_hours) == (True, 4, 0)
-    given = agents("notify = false\nremind_hours = 1\nmax_wait_hours = 168\n")
-    assert (given.notify, given.remind_hours, given.max_wait_hours) == (False, 1, 168)
-    edges = agents("notify = true\nremind_hours = 168\nmax_wait_hours = 0\n")
-    assert (edges.notify, edges.remind_hours, edges.max_wait_hours) == (True, 168, 0)
-    assert agents("remind_hours = 24\nmax_wait_hours = 2\n").remind_hours == 24  # larger than the stop is allowed
+    assert (omitted.notify, omitted.remind_hours, omitted.max_wait_minutes) == (True, 4, 15)
+    given = agents("notify = false\nremind_hours = 1\nmax_wait_minutes = 10080\n")
+    assert (given.notify, given.remind_hours, given.max_wait_minutes) == (False, 1, 10080)
+    edges = agents("notify = true\nremind_hours = 168\nmax_wait_minutes = 0\n")
+    assert (edges.notify, edges.remind_hours, edges.max_wait_minutes) == (True, 168, 0)
+    assert agents("remind_hours = 24\nmax_wait_minutes = 120\n").remind_hours == 24  # larger than the stop is allowed
 
 
 WAIT_REFUSALS = {
@@ -280,13 +280,17 @@ WAIT_REFUSALS = {
     "remind_hours = 169": "remind_hours must be in 1..168, got 169",
     "remind_hours = true": "remind_hours must be an integer, got True",
     "remind_hours = 1.5": "remind_hours must be an integer, got 1.5",
-    "max_wait_hours = -1": "max_wait_hours must be in 0..168, got -1",
-    "max_wait_hours = 169": "max_wait_hours must be in 0..168, got 169",
-    "max_wait_hours = false": "max_wait_hours must be an integer, got False",
-    'max_wait_hours = "4"': "max_wait_hours must be an integer, got '4'",
+    "max_wait_minutes = -1": "max_wait_minutes must be in 0..10080, got -1",
+    "max_wait_minutes = 10081": "max_wait_minutes must be in 0..10080, got 10081",
+    "max_wait_minutes = false": "max_wait_minutes must be an integer, got False",
+    'max_wait_minutes = "4"': "max_wait_minutes must be an integer, got '4'",
+    "max_wait_hours = 4": (
+        "unknown keys ['max_wait_hours']; allowed: "
+        "['app_id', 'max_wait_minutes', 'notify', 'prompt', 'prs', 'remind_hours', 'retry_hours']"
+    ),
     "wait_hours = 4": (
         "unknown keys ['wait_hours']; allowed: "
-        "['max_wait_hours', 'notify', 'prompt', 'prs', 'remind_hours', 'retry_hours']"
+        "['app_id', 'max_wait_minutes', 'notify', 'prompt', 'prs', 'remind_hours', 'retry_hours']"
     ),
 }
 

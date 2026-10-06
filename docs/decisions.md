@@ -109,6 +109,7 @@ entry that supersedes it, never by editing an old one.
 - Applies to: src/shipmill/gate.py, shipmill-hold label, [agents] max_wait_hours
 - Enforced by: tests/test_gate.py (with the implementing PR)
 - Supersedes: D-11
+- Superseded by: D-15
 
 ## D-14: Agent sessions write as the App or not at all
 
@@ -118,7 +119,16 @@ entry that supersedes it, never by editing an old one.
 - Applies to: src/shipmill/gate.py, [agents] app_id, shipmill app-token
 - Enforced by: tests/test_gate.py (with the implementing PR)
 
-## D-15: Unattended agent sessions work only on trusted authors' items
+## D-15: A session waiting on the user is stopped after 15 minutes unless configured
+
+- Decided: 2026-10-06, by the maintainer after a gate session waited about 10 hours
+- Rule: While an issue labelled shipmill-hold is open, shipmill gate starts no Claude Code session for the repo (it reports HELD); a session already running is left to finish, and the gate names it so a person can stop it. A session that has waited on the user for [agents] max_wait_minutes is stopped, held or not; the key counts minutes, defaults to 15, and 0 never stops one
+- Why: The gate runs one session per repo, so a session waiting on a question stops triage, landing, and shipped notices for every issue; with no limit by default, one unanswered question stalled the repo for 10 hours. A stopped session keeps its conversation, so `claude attach <id>` still shows the question, and the next tick can start fresh work
+- Applies to: src/shipmill/agents.py, src/shipmill/gate.py, shipmill-hold label, [agents] max_wait_minutes
+- Enforced by: tests/test_gate_waiting.py, tests/test_config.py
+- Supersedes: D-13
+
+## D-16: Unattended agent sessions work only on trusted authors' items
 
 - Decided: 2026-10-06, in shipmill/shipmill#148
 - Rule: A shipmill gate session that nobody can watch ([agents] mode = "headless", and any later unattended mode) is started only for issues opened by an OWNER, MEMBER, or COLLABORATOR or by the gate's own App bot, and for pull requests whose head is in the repo; everything else waits for an interactive session

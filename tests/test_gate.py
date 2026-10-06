@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -76,12 +77,14 @@ class FakeClaude:
     listed: list[Session] = field(default_factory=list)
     launched: list[tuple[str, str]] = field(default_factory=list)
     stopped: list[str] = field(default_factory=list)
+    envs: list[Mapping[str, str] | None] = field(default_factory=list)  # each launch's --settings env
 
     def sessions(self, workspace: Path, repo: str) -> list[Session]:
         return list(self.listed)
 
-    def launch(self, workspace: Path, name: str, text: str) -> str:
+    def launch(self, workspace: Path, name: str, text: str, env: Mapping[str, str] | None = None) -> str:
         self.launched.append((name, text))
+        self.envs.append(env)
         return f"s{len(self.launched)}"
 
     def stop(self, session: str) -> None:

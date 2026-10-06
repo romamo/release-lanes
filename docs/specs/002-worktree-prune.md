@@ -1,6 +1,6 @@
 # S-002: Prune landed worktrees
 
-status: approved
+status: built
 
 ## Problem
 
@@ -112,7 +112,7 @@ what it removed before stays removed.
 
 `gate()` in `src/shipmill/gate.py` prunes on each tick with the same code, after
 `check_checkout` and before the hold check, so it prunes while a `shipmill-hold` issue is
-open: D-13 stops the gate from starting sessions, and a prune starts none and removes only
+open: D-15 stops the gate from starting sessions, and a prune starts none and removes only
 landed, clean work. `shipmill gate --dry-run` runs the prune as `--prune --dry-run` does.
 The gate's text output adds a `pruned <path> (<branch>)` line per removed worktree (`would
 prune` under `--dry-run`); its `--json` record gains `"pruned": [<path>, ...]`, the paths
@@ -174,7 +174,7 @@ a failing plan does.
 
 ## Decisions relied on
 
-- D-13
+- D-15
 - D-12
 
 ## Issues
@@ -185,3 +185,28 @@ a failing plan does.
 - shipmill/shipmill#125: S-002-17, S-002-18
 
 ## Verification
+
+Checked on main plus #125's PR, in a scratch clone of shipmill/shipmill (origin on GitHub,
+so `gh pr list` and `claude agents --json` ran for real) with one worktree per case and
+`commondir` back-dated with `touch`, and by the tests `specs.py coverage --spec 002` lists
+(all passing):
+
+- S-002-1: `shipmill --repo <scratch> worktrees` printed one row per worktree with verdict, path relative to the main checkout, branch (`-` for detached), age (`0h`, `3d`, `10d`), and a reason on each KEPT row, exited 0, and `git worktree list` was unchanged after it; holds
+- S-002-2: `worktrees --json` printed one object whose `worktrees` rows each held path, branch, head, verdict, reason, created (ISO 8601 with offset), and age_hours, null for the main checkout's created and age; holds
+- S-002-3: run from `tmp/shipmill-gate`, the JSON kept `.` as `main checkout` and `tmp/shipmill-gate` as `current checkout`; run from the main checkout, the detached clean `tmp/shipmill-gate` (10 days old) read `not a shipmill worktree`; holds
+- S-002-4: a removed `tmp/wt-gone` read `directory missing`, a `git worktree lock --reason "testing the lock"` one `locked: testing the lock`, a detached one `detached HEAD`, and `git worktree add -f tmp/wt-main main` `holds the default branch`; holds
+- S-002-5: a worktree added just before read `created 0h ago`; holds
+- S-002-6: the real `claude agents --json` was read on every run; a session `cwd` inside a candidate keeping it as `live session <name>` is checked by the tests only (no session could be started inside the scratch clone); holds in the tests
+- S-002-7: `tmp/wt-dirty` with one untracked file read `uncommitted changes`; modified and staged files by the tests; holds
+- S-002-8: `tmp/wt-wip` with one new commit read `1 commit(s) not landed`; the patch-id and CHANGELOG-only cases by the tests; holds
+- S-002-9: a branch at `origin/main~3` read REMOVABLE; rebase, merge-commit, and multi-commit squash merges, with and without a hand-resolved CHANGELOG, by the tests; holds
+- S-002-10: a worktree on `feat/max-wait-minutes` at `origin/main`, the head of open PR #149, read `open PR #149`; the upstream-branch match by the tests; holds
+- S-002-11: `--prune` with `claude` off `PATH` exited 2 with `claude is not on PATH: ...`, and with `GH_TOKEN=invalid` exited 2 with `gh pr list ... failed: HTTP 401`; the worktree list and branches were unchanged after both; the other `claude agents` failures by the tests; holds
+- S-002-12: `worktrees --prune` printed `.claude/worktrees/landed` and `tmp/wt-outer/tmp/wt-inner` as REMOVED, removed both and their branches, and left the 10 other worktrees, `main`, the landed branch `spare` no worktree held, and origin's branches in place, exiting 0; holds
+- S-002-13: `--prune --dry-run` printed the two REMOVABLE rows as WOULD_REMOVE and removed nothing; `worktrees --dry-run` exited 2 with `--dry-run goes with --prune`; holds
+- S-002-14: by the tests only (a branch git can't delete, a worktree changed after the check), each stopping the prune with exit 2 naming the worktree and git's error and touching nothing after it; holds in the tests
+- S-002-15: `shipmill --repo <scratch>/tmp/shipmill-gate gate shipmill/shipmill --dry-run` listed `would prune .claude/worktrees/landed (landed)` and `--json` `"pruned": [".claude/worktrees/landed"]`; a real tick's `pruned` line and the held tick by the tests, since a real tick would start a session; holds
+- S-002-16: that dry-run removed nothing; with `GH_TOKEN=invalid` the gate exited 2 on the prune's `gh pr list` before any launch; holds
+- S-002-17: `watch_state.py shipmill/shipmill --repo-dir <scratch>/tmp/shipmill-gate --json` printed `WORKTREE_STALE` rows with `agent: false` for `tmp/wt-dirty` (`uncommitted changes; created 9d ago`) and `tmp/wt-wip` (`1 commit(s) not landed; created 10d ago`) and none for `.`, `tmp/shipmill-gate`, the 2-day-old detached worktree, or the REMOVABLE one; WORKTREE_STALE is in neither `ACTION` nor `AGENT`, and the gate's dry run counted it as no work; holds
+- S-002-18: `test_s002_18_the_skills_document_the_report_and_the_gates_prune` reads the five SKILL.md files: github-ship-watch's repair and agent tables list WORKTREE_STALE, shipmill-setup's The gate describes the prune and `shipmill worktrees`, and github-issue-resolve, github-pr-triage, and github-issue-triage each say the worktrees a session leaves behind once it exits are the gate's prune's to remove (D-12); holds
+- S-002-19: `tmp/wt-outer` holding the worktree `tmp/wt-outer/tmp/wt-inner` (under the ignored `tmp/`) read `holds worktree tmp/wt-outer/tmp/wt-inner`; holds

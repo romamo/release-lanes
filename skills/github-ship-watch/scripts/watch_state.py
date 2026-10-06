@@ -11,6 +11,11 @@ Release bot (a repo with .github/shipmill.toml):
   BOT_STALLED     a shipmill bot in release mode has a release due now, no run of
                   its workflow is queued or running, and none started in --grace minutes
   BOT_OK          neither; BOT_NONE when the repo has no bot (it releases by "tag X")
+  WORKTREE_STALE  for a shipmill bot: a worktree `shipmill worktrees` keeps, under
+                  .claude/worktrees/ or tmp/wt-*, created over 7 days ago, with why it is
+                  kept (reported, never an action: a person finishes, pushes, or removes
+                  the work; the main checkout, the --repo-dir checkout, and worktrees that
+                  aren't shipmill's are never reported)
 
 Each of the --releases newest version tags (default 3):
   NOT_PUBLISHED   the package is on PyPI but this version isn't, --grace minutes after
@@ -60,8 +65,10 @@ OPERATE_FAILED, INCIDENT_OPEN): the rows shipmill gate starts a session for.
 
 Holds and incidents lead the report. Exit 0 when nothing needs action, 1 when any
 BOT_FAILED, BOT_STALLED, NOT_PUBLISHED, UNANNOUNCED, ISSUES, OPERATE_FAILED, UNHEALTHY,
-PROMOTION_DUE, INCIDENT_OPEN, or POSTMORTEM_DUE row is present, 2 on bad input or a git, gh, or uvx failure.
-Needs git, an authenticated gh, and uvx (for a shipmill bot's plan). Python 3.10+,
+PROMOTION_DUE, INCIDENT_OPEN, or POSTMORTEM_DUE row is present, 2 on bad input or a git,
+gh, or uvx failure (a failing `shipmill plan` or `shipmill worktrees`).
+Needs git, an authenticated gh, and uvx (for a shipmill bot's plan and worktrees; `shipmill
+worktrees` needs claude on PATH too, to see the live sessions). Python 3.10+,
 standard library only.
 """
 
@@ -124,6 +131,9 @@ AGENT = {
     "OPERATE_FAILED",
     "INCIDENT_OPEN",
 }
+STALE = dt.timedelta(days=7)  # a kept shipmill worktree older than this is reported
+# the reasons `shipmill worktrees` keeps a worktree that isn't a shipmill worktree at all
+NOT_SHIPMILL = {"main checkout", "current checkout", "not a shipmill worktree"}
 LEAD = ("INCIDENT_OPEN", "HOLD")  # the report starts with these, in this order
 ACTIVE = {"queued", "in_progress", "waiting", "pending", "requested"}
 HOLD_LABEL = "shipmill-hold"  # shipmill's autonomy.HOLD_LABEL
@@ -258,6 +268,34 @@ def planned_release(repo: str, repo_dir: Path, policy: Path, branch: str, tool: 
     if decision["action"] != "release" or policy_mode is None or policy_mode.group(1) != "release":
         return None
     return str(decision["reason"])
+
+
+def stale_rows(text: str) -> list[Row]:
+    """`shipmill worktrees --json`'s kept shipmill worktrees created over STALE ago"""
+    try:
+        report = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise Refused(f"error: shipmill worktrees --json printed no JSON: {exc}") from None
+    trees = report.get("worktrees") if isinstance(report, dict) else None
+    if not isinstance(trees, list):
+        raise Refused(f"error: shipmill worktrees --json printed {text[:200]!r}, not a worktrees list")
+    rows = []
+    for tree in trees:
+        if not isinstance(tree, dict) or not all(isinstance(tree.get(k), str) for k in ("path", "verdict")):
+            raise Refused(f"error: shipmill worktrees --json printed a row without a path and verdict: {tree!r}")
+        if tree["verdict"] != "KEPT" or tree.get("reason") in NOT_SHIPMILL:
+            continue
+        reason, age = tree.get("reason"), tree.get("age_hours")
+        if not isinstance(reason, str) or not isinstance(age, int) or isinstance(age, bool):
+            raise Refused(f"error: shipmill worktrees --json printed a kept row without a reason and age: {tree!r}")
+        if dt.timedelta(hours=age) > STALE:
+            rows.append(Row("WORKTREE_STALE", tree["path"], f"{reason}; created {age // 24}d ago"))
+    return rows
+
+
+def stale_worktrees(repo_dir: Path, tool: str) -> list[Row]:
+    """The kept shipmill worktrees of the checkout's repository created over STALE ago"""
+    return stale_rows(run(["uvx", "--from", tool, "shipmill", "--repo", str(repo_dir), "worktrees", "--json"]))
 
 
 # -- releases ------------------------------------------------------------------------------
@@ -899,6 +937,8 @@ def main() -> int:
         workflow, shipmill = bot
         due = planned_release(args.repo, repo_dir, policy, branch, args.tool) if shipmill else None
         rows += bot_rows(fetch_runs(args.repo, workflow), due, now, grace, workflow)
+        if shipmill:  # after the plan, whose own worktree is gone by then
+            rows += stale_worktrees(repo_dir, args.tool)
 
     tags = version_tags(repo_dir)
     package = package_name(repo_dir)

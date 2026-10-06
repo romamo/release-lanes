@@ -202,8 +202,13 @@ the details.
    retry_hours = 24   # unchanged findings start a new session after this
    notify = true      # a desktop notification when a session waits on you
    remind_hours = 4   # repeat it while the session still waits
-   max_wait_hours = 0 # stop a session that waited this long; 0: never
+   max_wait_minutes = 15 # stop a session that waited this long; 0: never
+   # app_id = 123456  # sessions write as this GitHub App; unset: as your gh login
    ```
+
+   Without `app_id`, a session writes as your `gh` login, so its pull requests, merges,
+   and commits read as yours. Set it to have them made by a GitHub App's bot instead
+   (see [Give the sessions their own identity](#give-the-sessions-their-own-identity))
 
 2. **Give it its own checkout.** A session branches and commits where it starts, so never
    your working copy. Inside the repo's trusted checkout:
@@ -233,11 +238,92 @@ the details.
 5. **Watch a session** with `claude agents` and `claude attach <id>`. A session waiting on
    your answer holds the repo until you give it
 
+### Give the sessions their own identity
+
+Optional. With a GitHub App, a session's pull requests, comments, reviews, merges, and
+commits are made by the App's bot, `<slug>[bot]`, not by you: you can approve its pull
+requests, and github-ship-watch's metrics count its merges as a bot's. The token it uses
+reaches this one repo only, never everything your login can.
+
+The quick way is one command:
+
+```bash
+shipmill app-create --dry-run   # print the plan; create nothing
+shipmill app-create             # create it: one click on GitHub, then pick the repos
+```
+
+It finds the accounts your `gh` login administers (it needs the `read:org` scope: `gh auth
+refresh -s read:org`) and the repos in them holding `.github/shipmill.toml`, then plans:
+
+| Your gated repos | The App |
+|---|---|
+| all in one account | private, owned by that account |
+| in several accounts | public, owned by the account with the most of them |
+| none yet | private, owned by the checkout's owner |
+
+A private App can be installed only on the account that owns it; a public one on any
+account, but only you hold its key, so nobody else can use it. `--owner`, `--public`,
+`--private`, `--name`, and `--repos` change the plan. The command opens GitHub's create
+page with the permissions below filled in and the webhook off; you click **Create GitHub
+App**, then pick the repos on the install page it opens. It saves the key to
+`~/.config/shipmill/app-<app_id>.pem` with mode `0600`, waits for the installations, and
+prints the `app_id = <id>` line for step 4. Then go on at step 4.
+
+By hand instead:
+
+1. **Create the App** once, in GitHub's settings (Developer settings, GitHub Apps, New
+   GitHub App). Clear Webhook's Active box: it needs no
+   webhook. Give it these repository permissions and no others:
+
+   | Permission | Access | Why |
+   |---|---|---|
+   | Contents | write | push branches, merge |
+   | Pull requests | write | open, review, and merge pull requests |
+   | Issues | write | comments, labels, closing |
+   | Actions | write | rerun a failed release job (github-ship-watch) |
+   | Workflows | write | push a change under `.github/workflows/` |
+   | Checks | read | CI state |
+   | Commit statuses | read | CI state |
+   | Discussions | read | product-intake's input |
+   | Metadata | read | required by GitHub |
+
+2. **Install it** only on the repos the gate works on ("Only select repositories")
+
+3. **Save its private key** where the gate looks for it, readable by you alone. Generate
+   one on the App's page, then:
+
+   ```bash
+   mkdir -p ~/.config/shipmill
+   mv ~/Downloads/<app>.*.private-key.pem ~/.config/shipmill/app-<app_id>.pem
+   chmod 600 ~/.config/shipmill/app-<app_id>.pem
+   ```
+
+   The gate refuses a key readable by group or others. The key never goes in the repo; a
+   key elsewhere goes to `gate --app-key <path>`, and to `launchd --app-key <path>`, which
+   puts it in the job's arguments
+
+4. **Set `app_id`** in `[agents]` to the App ID on the App's settings page (not its client
+   ID), and merge it
+
+5. **Prove it** with the gate's dry run (step 3 above). When the tick would launch, it
+   also checks the key, signs the App's JWT with `openssl`, checks the installation and
+   every permission above, and prints `would launch as <slug>[bot]`; anything missing
+   exits 2 naming it. It writes nothing. A tick that would launch nothing checks no App
+
+Each launch then runs those checks again, writes a `gh` wrapper and
+`git-credential-shipmill` (mode `0700`, holding no token) to
+`$(git rev-parse --git-common-dir)/shipmill/bin/`, and starts the session with that folder
+first on its `PATH` and `<slug>[bot]` as its git author. Each `gh` or `git push` call mints
+or reuses a token through `shipmill app-token`, cached in `shipmill/app-token.json`
+(mode `0600`) while it has at least 10 minutes left. A failed check starts no session and
+never falls back to your login. The gate's own reads still use your `gh` login. Remove
+`app_id` and sessions launch as before, as your `gh` login
+
 ## Pause or remove it
 
 | To | Do |
 |---|---|
-| Pause releases and the gate | open an issue labelled `shipmill-hold`; a hotfix started by hand still runs (D-8, D-13) |
+| Pause releases and the gate | open an issue labelled `shipmill-hold`; a hotfix started by hand still runs (D-8, D-15) |
 | Stop releases | set `mode = "off"` in `.github/shipmill.toml` |
 | Stop the gate | `$CR --repo tmp/shipmill-gate launchd <owner/repo> --remove` |
 | Remove the skills | `/plugin uninstall shipmill@shipmill` |

@@ -62,9 +62,12 @@ class Table:
         value: bool = self._get(key, default, bool, "true or false")
         return value
 
-    def integer(self, key: str, default: int | None, low: int, high: int) -> int | None:
+    def integer(self, key: str, default: int | None, low: int, high: int | None) -> int | None:
+        """high None: no upper bound"""
         value: int | None = self._get(key, default, int, "an integer")
-        if value is not None and not low <= value <= high:
+        if value is not None and high is None and value < low:
+            raise ReleaseError(f"{self.where}: {key} must be {low} or more, got {value}")
+        if value is not None and high is not None and not low <= value <= high:
             raise ReleaseError(f"{self.where}: {key} must be in {low}..{high}, got {value}")
         return value
 
