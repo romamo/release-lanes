@@ -339,6 +339,11 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
      (mode `0600`), prints `installed on <owner/repo>` as each appears, and ends with the
      `app_id = <id>` line to commit; exit 1 names a repo still missing the App
    - **Set `app_id`** in `[agents]` through a PR, in each gated repo
+   - **A repo connected later, or in another account:** run `$CR app-install <owner/repo>`.
+     It never installs or adds anything itself: for a repo the App doesn't cover it opens
+     the App's **Install App** page and says what to click there (Install for a new account,
+     Configure to add a repo to an existing installation). Relay those steps, ask the user
+     to click, and wait for its `installed on <owner/repo>`
 
    By hand instead, in GitHub's settings (Developer settings, GitHub Apps, New GitHub App):
    - **No webhook:** clear Webhook's Active box; the App needs no callback URL either
