@@ -41,11 +41,14 @@ For each open issue:
   NEEDS_DECISION   labelled needs-decision and its question has no reply: a headless
                    session asked the user and left it (references/needs-decision.md).
                    The question is the newest comment whose first line is the marker
-                   <!-- shipmill:needs-decision -->, or with --bot-login the newest
-                   comment by that login; a reply is a newer comment by an OWNER, MEMBER,
-                   or COLLABORATOR (other than the --bot-login). A labelled issue with no
-                   question waits too, until the label comes off. Once answered, the issue
-                   reads the state it would without the label
+                   <!-- shipmill:needs-decision --> by an OWNER, MEMBER, or COLLABORATOR,
+                   or with --bot-login the newest such comment by that login, unless an
+                   OWNER, MEMBER, or COLLABORATOR wrote a newer one (then there is no
+                   question); a reply is a newer comment without the marker by an OWNER,
+                   MEMBER, or COLLABORATOR (other than the --bot-login). A marker comment
+                   by anyone else never counts. A labelled issue with no question waits
+                   too, until the label comes off. Once answered, the issue reads the
+                   state it would without the label
   UNTRUSTED        with --trusted-only, an issue whose author is neither an OWNER,
                    MEMBER, or COLLABORATOR nor the --bot-login, whatever it would read
                    otherwise: an unattended session leaves it to an interactive one (D-16)
@@ -645,25 +648,47 @@ def same_login(a: str, b: str) -> bool:
     return a.lower() == b.lower()  # GitHub logins ignore case
 
 
-def asks(comment: tuple[str, str, str], bot_login: str | None) -> bool:
-    """A session's question: the bot's comment with --bot-login, else one whose first line
-    is the marker"""
-    author, _, body = comment
-    if bot_login is not None:
-        return same_login(author, bot_login)
+def marked(body: str) -> bool:
+    """Whether a comment's first line is the needs-decision marker; a quote of it further
+    down is no question"""
     return body.lstrip().split("\n", 1)[0].strip() == DECISION_MARKER
+
+
+def question(comments: list[tuple[str, str, str]], bot_login: str | None) -> int | None:
+    """The index of an item's question, or None; comments are (login, author association,
+    body), oldest first. A question's first line is the marker. Without --bot-login it is
+    the newest such comment by an OWNER, MEMBER, or COLLABORATOR; with it, the newest such
+    comment by that login, unless an OWNER, MEMBER, or COLLABORATOR wrote a newer one: a
+    person asked after the bot, so the item has no question. A marker comment by any other
+    author never counts, so an outsider can't re-park an answered item (#184)"""
+    for i in range(len(comments) - 1, -1, -1):
+        author, association, body = comments[i]
+        if not marked(body):
+            continue
+        if bot_login is not None and same_login(author, bot_login):
+            return i
+        if association in TRUSTED:
+            return None if bot_login is not None else i
+    return None
+
+
+def replies(comment: tuple[str, str, str], bot_login: str | None) -> bool:
+    """A reply: a comment without the marker by an OWNER, MEMBER, or COLLABORATOR other
+    than the --bot-login"""
+    author, association, body = comment
+    if bot_login is not None and same_login(author, bot_login):
+        return False
+    return association in TRUSTED and not marked(body)
 
 
 def waits_on_decision(comments: list[tuple[str, str, str]], bot_login: str | None) -> bool:
     """Whether a needs-decision item still waits; comments are (login, author association,
-    body), oldest first. It waits until a trusted author (OWNER, MEMBER, COLLABORATOR)
-    comments after the newest question; with no question at all, a person parked it, so it
-    waits too. A comment after the newest question is no question itself, so neither the
-    bot's own comment nor one carrying the marker is ever a reply"""
-    questions = [i for i, c in enumerate(comments) if asks(c, bot_login)]
-    if not questions:
+    body), oldest first. It waits until a reply comes after its question; with no question
+    at all, a person parked it, so it waits too"""
+    asked = question(comments, bot_login)
+    if asked is None:
         return True
-    return not any(association in TRUSTED for _, association, _ in comments[questions[-1] + 1 :])
+    return not any(replies(c, bot_login) for c in comments[asked + 1 :])
 
 
 def trusted(author: str, association: str, bot_login: str | None) -> bool:
@@ -683,7 +708,7 @@ def gated(issue: dict[str, Any], bot_login: str | None, trusted_only: bool) -> t
             for c in issue["comments"]["nodes"]
         ]
         if waits_on_decision(comments, bot_login):
-            asked = any(asks(c, bot_login) for c in comments)
+            asked = question(comments, bot_login) is not None
             return "NEEDS_DECISION", "waits on a reply" if asked else "labelled, no question"
     return None
 

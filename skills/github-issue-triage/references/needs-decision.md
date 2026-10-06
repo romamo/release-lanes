@@ -30,10 +30,10 @@ The scripts read a labelled item as waiting, not as work: `triage_state.py` repo
 
 | | The question | A reply |
 |---|---|---|
-| With `--bot-login` (the gate's App, spec 004) | The newest comment by that login | A newer comment by an OWNER, MEMBER, or COLLABORATOR other than that login |
-| Without it | The newest comment whose first line is the marker | A newer comment by an OWNER, MEMBER, or COLLABORATOR without the marker |
+| With `--bot-login` (the gate's App, spec 004) | The newest comment by that login whose first line is the marker | A newer comment by an OWNER, MEMBER, or COLLABORATOR other than that login, without the marker |
+| Without it | The newest comment whose first line is the marker, by an OWNER, MEMBER, or COLLABORATOR | A newer comment by an OWNER, MEMBER, or COLLABORATOR without the marker |
 
-A comment from any other author association never counts as a reply, so an outsider can't wake an item. A labelled item with no question waits until a person takes the label off: someone parked it on purpose.
+A marker comment from any other author never counts, so an outsider can't re-park an answered item, and with `--bot-login` the bot's comment without the marker (a triage comment) is no question. With `--bot-login`, when an OWNER, MEMBER, or COLLABORATOR posts a marker comment after the bot's, the person asked after the bot did, and the item reads as labelled with no question. A comment from any other author association never counts as a reply, so an outsider can't wake an item. A labelled item with no question waits until a person takes the label off: someone parked it on purpose.
 
 ## Taking up an answered item
 
