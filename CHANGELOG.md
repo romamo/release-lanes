@@ -16,6 +16,7 @@ bot.
   prints `would prune <path> (<branch>)`, and lists them under `pruned`. A prune error
   (`claude agents --json` or `gh pr list` failing, or git refusing a removal) exits 2 and
   starts no session; the gate's own checkout is never a candidate (#124)
+- Spec 004's build issues: #141 to #144 (#136)
 
 ## [0.17.0] - 2026-10-06
 
