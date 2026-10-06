@@ -7,6 +7,11 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- D-18: a Release run that finds a work branch no active run owns deletes it and pushes its
+  own, given `actions: read`; without it, the stop stays but is reported (#175)
+
 ## [0.22.0] - 2026-10-06
 
 ### Changed

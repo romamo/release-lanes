@@ -143,3 +143,11 @@ entry that supersedes it, never by editing an old one.
 - Why: The probe for #160 showed a `--bg` session reads `blocked` whenever its last reply asks for something, with no prompt pending, so a session that posts its question on GitHub would still hold the repo as WAITING until max_wait_minutes; `--bg` and `--print` refuse to combine, and a print session exits when its prompt is done, so it has no state in which it waits. The cost is `claude attach`: `claude --resume <id>` and the log replace it
 - Applies to: src/shipmill/gate.py, src/shipmill/launchd.py, [agents] mode, gate.json
 - Enforced by: tests/test_gate.py and tests/test_launchd.py (with the implementing PR)
+
+## D-18: A Release run recovers an orphaned work branch
+
+- Decided: 2026-10-06, in shipmill/shipmill#175
+- Rule: When prepare finds the shipmill/vX.Y.Z work branch on origin and no queued or in-progress run of the same release workflow owns it, it deletes the branch and pushes its own; this needs actions: read on the caller's prepare job, and without that permission prepare keeps the stop, with a warning annotation and a step-summary line naming the branch, and the run stays green
+- Why: A run cancelled before its cleanup job gets a runner can't clean up after itself, so recovery has to come from a later run; the permission is new for callers, so a caller that doesn't grant it keeps today's behaviour, visibly, instead of breaking
+- Applies to: src/shipmill/land.py, src/shipmill/cli.py, .github/workflows/release.yml, shipmill init, skills/github-ship-watch/scripts/watch_state.py
+- Enforced by: tests (with the implementing PR)
