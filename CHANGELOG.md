@@ -18,6 +18,12 @@ bot.
   off, with the command that turns it on: merged branches piled up unnoticed after a repo
   move, since only setup checked it. An action for a person, never an agent's (#194)
 
+### Fixed
+
+- github-ship-watch's SHIPMILL_OUTDATED no longer reports a plugin install keyed on a linked
+  git worktree, such as the gate's checkout: Claude Code loads the main checkout's install
+  there, so the leftover entry was never used and its update command couldn't clear it (#198)
+
 ## [0.24.0] - 2026-10-06
 
 ### Added
