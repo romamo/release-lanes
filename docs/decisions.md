@@ -117,3 +117,11 @@ entry that supersedes it, never by editing an old one.
 - Why: A silent fallback would make agent work look like the maintainer's again, defeating the metrics and the reviews that rely on telling the two apart, and would hand the session the maintainer's full token
 - Applies to: src/shipmill/gate.py, [agents] app_id, shipmill app-token
 - Enforced by: tests/test_gate.py (with the implementing PR)
+
+## D-15: Unattended agent sessions work only on trusted authors' items
+
+- Decided: 2026-10-06, in shipmill/shipmill#134
+- Rule: A shipmill gate session that nobody can watch ([agents] mode = "headless", and any later unattended mode) is started only for issues opened by an OWNER, MEMBER, or COLLABORATOR or by the gate's own App bot, and for pull requests whose head is in the repo; everything else waits for an interactive session
+- Why: An unattended session reads issue text with the whole workspace in reach and is allowed git, gh, and uv run, which can each run code; the tool allowlist only keeps prompts from blocking it, so who opened the item is the control that keeps an outsider's text from steering it
+- Applies to: src/shipmill/gate.py, skills/github-issue-triage/scripts/triage_state.py, skills/github-ship-watch/scripts/watch_state.py, [agents] mode
+- Enforced by: tests/test_gate.py and the triage_state.py and watch_state.py tests (with the implementing PR)

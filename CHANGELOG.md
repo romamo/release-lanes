@@ -17,6 +17,9 @@ bot.
   (`claude agents --json` or `gh pr list` failing, or git refusing a removal) exits 2 and
   starts no session; the gate's own checkout is never a candidate (#124)
 - Spec 004's build issues: #141 to #144 (#136)
+- Spec 005 for headless gate sessions: `[agents] mode = "headless"` starts sessions that
+  can't prompt, a decision for the user becomes a `needs-decision` comment and label the
+  gate waits on, and headless work is limited to trusted authors' items, with D-15 (#134)
 
 ## [0.17.0] - 2026-10-06
 
