@@ -299,4 +299,10 @@ an empty list when nothing waits or the tick didn't read the state.
 
 ## Issues
 
+- shipmill/shipmill#160: S-005-4
+- shipmill/shipmill#161: S-005-7, S-005-8, S-005-9, S-005-10, S-005-17
+- shipmill/shipmill#162: S-005-1, S-005-2, S-005-3, S-005-5, S-005-6, S-005-11
+- shipmill/shipmill#163: S-005-12, S-005-13, S-005-14, S-005-15
+- shipmill/shipmill#164: S-005-16, S-005-18
+
 ## Verification
