@@ -11,6 +11,8 @@ bot.
 
 ### Added
 
+- Spec 007 for `shipmill app-install`, which guides installing the gate's App on more repos
+  and accounts, and checks that it took
 - Spec 006 for `shipmill app-create`, which makes the gate's GitHub App in one click and
   picks its owner and visibility from where the gated repos are
 - `shipmill app-create` makes the gate's GitHub App in one click: it finds the accounts your
