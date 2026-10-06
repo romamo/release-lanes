@@ -7,6 +7,12 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- Spec 008 settled after review: `status` exits 2, not 1, when `watch_state.py` crashes
+  without printing a row; `watch_command` gains a `json` parameter for the table; the
+  origin and the repo check reuse `_origin_repo` and `check_checkout`
+
 ## [0.25.0] - 2026-10-06
 
 ### Added
