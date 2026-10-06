@@ -33,7 +33,21 @@ from pathlib import Path
 from typing import TextIO
 
 from shipmill.agents import AgentsConfig
-from shipmill.app import CACHE, Api, Openssl, Signer, UrllibApi, app_check, app_token, credential, default_key
+from shipmill.app import (
+    CACHE,
+    HELPERS,
+    Api,
+    Identity,
+    Openssl,
+    Signer,
+    UrllibApi,
+    app_check,
+    app_token,
+    check_key,
+    credential,
+    default_key,
+    prepare_session,
+)
 from shipmill.autonomy import Hold
 from shipmill.config import CONFIG_PATH, config_path
 from shipmill.doctor import CALLER, OPERATE_CALLER, doctor
@@ -239,6 +253,11 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--every", type=int, default=15, help="minutes between runs (default: 15)")
     p.add_argument("--tool", default=DEFAULT_TOOL, help=f"where uvx gets shipmill (default: {DEFAULT_TOOL})")
     p.add_argument("--claude-arg", action="append", default=[], help="extra flag for the session (repeatable)")
+    p.add_argument(
+        "--app-key",
+        type=Path,
+        help="pass the private key of the App in [agents] app_id to the job's gate (made absolute)",
+    )
     p.add_argument("--print", action="store_true", help="print the job's plist; install nothing")
     p.add_argument("--remove", action="store_true", help="unload and delete the repo's job")
     return parser
@@ -379,6 +398,12 @@ def main(
 
 def _gate(root: Path, args: argparse.Namespace, github: GitHub, sessions: Sessions) -> int:
     git = Git(root)
+    path = os.environ.get("PATH", "")
+
+    def session_env(identity: Identity) -> dict[str, str]:
+        """The helpers go in the checkout's state folder and run this very shipmill"""
+        return prepare_session(identity, state_dir(git) / HELPERS, Path(sys.executable), root, args.slug, path)
+
     decision, launched, waiting, pruned = gate(
         git,
         args.slug,
@@ -393,6 +418,7 @@ def _gate(root: Path, args: argparse.Namespace, github: GitHub, sessions: Sessio
         args.dry_run,
         app_check(args.slug, args.app_key, Path.home(), Openssl(), UrllibApi()),
         args.app_key is not None,
+        session_env,
     )
     if args.json:
         print(json.dumps(tick_record(decision, launched, waiting, pruned, args.dry_run), indent=2))
@@ -427,12 +453,17 @@ def _launchd(root: Path, args: argparse.Namespace) -> int:
         return 0
     git = Git(root)
     check_checkout(git, args.slug)
-    job = build(args.slug, root, args.every, args.tool, args.claude_arg, home, os.environ.get("PATH", ""))
+    key: Path | None = None if args.app_key is None else args.app_key.expanduser().resolve()
+    job = build(args.slug, root, args.every, args.tool, args.claude_arg, home, os.environ.get("PATH", ""), app_key=key)
     if args.print:
         sys.stdout.write(job.document.decode())
         return 0
     refresh(git)  # a dedicated checkout, at the default branch's head
     agents = AgentsConfig.load(root)  # the job would fail on every run without it
+    if key is not None:  # as would a key for no App, or one the gate refuses
+        if agents.app_id is None:
+            raise ReleaseError(f"--app-key names an App's key, but [agents] in {CONFIG_PATH} sets no app_id")
+        check_key(key)
     install(job)
     print(f"installed {job.plist}: every {args.every} min, log {job.log}")
     print(f"prompt: {agents.prompt}")
