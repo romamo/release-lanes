@@ -29,19 +29,34 @@ maintainer's reply.
 
 ### What Claude Code provides
 
-Checked on Claude Code 2.1.291 with `claude --help`: `--bg` takes the session flags
-`--permission-mode` (with the choice `dontAsk`), `--allowedTools <tools...>`, and
-`--disallowedTools <tools...>`, each a comma or space separated list such as
-`"Bash(git *) Edit"`. Both tool lists are variadic, so an argument that follows one is read
-as another tool name until the next flag. `--permission-prompts none`, which denies every
-prompt, applies only with `--print`, so it can't serve a `--bg` session.
+Checked on Claude Code 2.1.291 with `claude --help`: a session takes
+`--allowedTools <tools...>` and `--disallowedTools <tools...>`, each a comma or space
+separated list such as `"Bash(git *) Edit"`. Both tool lists are variadic, so an argument
+that follows one is read as another tool name until the next flag.
+`--permission-prompts none`, which denies every prompt, applies only with `--print`.
 
-In `dontAsk` mode Claude Code denies a tool call that no allow rule covers instead of
-prompting, and the session goes on with the denial as the call's result. The help text
-lists the mode without describing it. A probe session couldn't run where this spec was
-written, so the build's first issue checks on a real `claude --bg` that a denied call and
-a disallowed AskUserQuestion leave the session `working`, never `blocked`, before any
-other headless code merges.
+This spec first launched headless sessions with `claude --bg --permission-mode dontAsk`.
+The probe for shipmill/shipmill#160 (13 runs on 2.1.291) showed that can't work:
+
+- `dontAsk` denies a Bash call outside the allowlist without a prompt, and the session goes
+  on, as expected
+- `--disallowedTools AskUserQuestion` removes the tool: it isn't in the tool list and
+  ToolSearch can't find it
+- `state` in `claude agents --json` doesn't track pending prompts. A run whose last reply
+  delivers results reached `done` (6 of 6); a run whose last reply asks the user for
+  something read `blocked` and stayed there (4 of 4) with no prompt pending, including
+  one that ended with the headless paragraph's "Decision needed (@<login>): ..."
+
+So a `--bg` session that posts its question on GitHub would still read `blocked`, and spec
+003's waiting step would hold the repo as WAITING until `max_wait_minutes` passed.
+`--bg` and `--print` can't be combined: `claude --bg -p` refuses with "--bg and --print
+conflict: --print never starts the interactive session that `claude agents` attaches to".
+
+A headless session therefore runs as `claude -p` (D-17). A print session runs its prompt
+and exits; there is no state in which it waits on anyone. It isn't listed by
+`claude agents`, so the gate tracks the process itself (Tracking a headless session,
+below). `--session-id <uuid>` sets the session's id up front, and `claude --resume <id>`
+reopens its conversation after it ends.
 
 ### Config
 
@@ -58,8 +73,9 @@ mode = "headless"   # interactive (default): sessions ask you; headless: they as
 | `mode` | string | `"interactive"` | `"interactive"`, `"headless"` |
 
 The gate reads it each tick from the checkout as it stands after `--refresh`, as it reads
-the prompt. `shipmill launchd` doesn't change: the job reads the mode from the config, so
-switching modes is a reviewed config change and no job needs reinstalling. With
+the prompt. The launchd job reads the mode from the config, so switching modes is a
+reviewed config change (the one plist key headless needs is in Tracking a headless
+session, below). With
 `mode = "interactive"` everything in this spec stays off except the label rule in
 `triage_state.py` and `watch_state.py`, which honours a `needs-decision` label whoever set
 it.
@@ -69,11 +85,12 @@ it.
 On LAUNCH with `mode = "headless"`, `ClaudeCli.launch` in `src/shipmill/gate.py` runs:
 
 ```
-claude --bg --permission-mode dontAsk --allowedTools <ALLOWED> --disallowedTools AskUserQuestion
-       [--settings <spec 004's env>] -n <name> [--claude-arg flags] <prompt>
+claude -p --permission-prompts none --allowedTools <ALLOWED> --disallowedTools AskUserQuestion
+       --session-id <uuid> [--settings <spec 004's env>] -n <name> [--claude-arg flags] <prompt>
 ```
 
-The permission flags come before `-n`, so the prompt is never read as a tool name.
+`<uuid>` is a new random UUID per launch. The tool lists come before `--session-id`, so
+the prompt is never read as a tool name.
 `<ALLOWED>` is one argument, a fixed constant `HEADLESS_TOOLS` in `src/shipmill/gate.py`:
 
 ```
@@ -90,9 +107,10 @@ outsider's text from steering the session. A host that needs more tools (a repo 
 checks run `npm test`) adds `--claude-arg --allowedTools --claude-arg "Bash(npm *)"`.
 
 A headless gate refuses, with exit 2 before it stops or starts any session, a
-`--claude-arg` that is `--permission-mode`, `--dangerously-skip-permissions`, or
-`--allow-dangerously-skip-permissions` (alone or in `--flag=value` form): each would bring
-the prompts back or drop the allowlist.
+`--claude-arg` that is `--permission-mode`, `--permission-prompts`,
+`--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--bg`,
+`--background`, or `--session-id` (alone or in `--flag=value` form): each would bring the
+prompts back, drop the allowlist, or break how the gate tracks the session.
 
 The headless prompt is the mode 1 prompt with one paragraph added at its end:
 
@@ -106,6 +124,35 @@ needs-decision, and leave it.
 `<login>` is the host's `gh` login (`gh api user -q .login`), read by the gate with the
 host identity as its other reads are (S-004-12): the person who runs the gate is the one
 who decides. A failing read exits 2 and launches nothing.
+
+### Tracking a headless session
+
+The gate starts `claude -p` detached from the tick: in a new process session
+(`start_new_session`), with stdin from `/dev/null` and stdout and stderr appended to
+`<state dir>/sessions/<uuid>.log`, the state directory being the one that holds
+`gate.json`. It doesn't wait for it. Right after the start it reads the process's start
+time (`ps -p <pid> -o lstart=`) and records, in `gate.json`, the launch's `mode`
+(`"headless"`), the session id (`<uuid>`), the `pid`, and that start time, beside the
+fingerprint and `at` it records today.
+
+`shipmill launchd` writes `AbandonProcessGroup` as true in the job's plist, in either
+mode, so launchd doesn't end a session when the tick that started it exits. A job
+installed before this needs `shipmill launchd` run once more; the gate doesn't detect an
+old plist.
+
+Each tick, when the last launch is headless, the gate decides whether it still runs from
+the record alone: it runs when a process with that `pid` exists and its start time equals
+the recorded one (a different start time means the pid was reused). A running headless
+session reads RUNNING, reason
+`session <uuid> is still working: tail -f <log>`. An ended one is gone: there is nothing
+to stop before the next launch, and `claude --resume <uuid>` reopens its conversation. A
+headless session never reads WAITING, so spec 003's waiting step and `max_wait_minutes`
+don't apply to it.
+
+The gate still reads `claude agents --json` every tick, so a `--bg` session left over
+from interactive mode is still handled as spec 003 says. A
+`gate.json` without `mode` is an interactive launch. The gate never deletes a session's
+log.
 
 ### When a session needs a tool outside the list
 
@@ -226,8 +273,7 @@ no `--bot-login`, and the marker tells the question from the reply.
 A headless launch without `app_id` prints, under its decision line,
 `  no app_id: needs-decision comments post as <login>, so GitHub won't notify you`.
 
-A session that still blocks in headless mode (a Claude Code change, say) is handled by
-spec 003's waiting step, unchanged.
+A headless session can't block: it ends, and its question waits on GitHub.
 
 ### Output
 
@@ -262,9 +308,9 @@ an empty list when nothing waits or the tick didn't read the state.
 
 - S-005-1: `AgentsConfig` reads `mode` as `"interactive"` when `[agents]` omits it and as the given value when it is `"interactive"` or `"headless"`, and refuses any other value or a non-string with exit 2 naming the key
 - S-005-2: with `mode = "interactive"`, the gate's `claude --bg` command line and prompt are the ones it builds without this spec, and it calls `watch_state.py` without `--trusted-only` or `--bot-login`
-- S-005-3: on LAUNCH with `mode = "headless"`, `claude --bg` gets `--permission-mode dontAsk`, `--allowedTools` with exactly `HEADLESS_TOOLS` as one argument, and `--disallowedTools AskUserQuestion`, all before `-n <name>`, and the prompt is the last argument
-- S-005-4: `docs/design/agent-modes.md`, What Claude Code provides, names the Claude Code version on which a real `claude --bg` started with these flags met a denied Bash call and a disallowed AskUserQuestion and stayed `working` until `done`, never `blocked`; the build issue that delivers this merges before any other headless code
-- S-005-5: with `mode = "headless"`, a `--claude-arg` of `--permission-mode`, `--dangerously-skip-permissions`, or `--allow-dangerously-skip-permissions` (alone or as `--flag=value`) exits 2 naming the flag, and stops and launches no session
+- S-005-3: on LAUNCH with `mode = "headless"`, the gate runs `claude -p` (never `--bg`) with `--permission-prompts none`, `--allowedTools` with exactly `HEADLESS_TOOLS` as one argument, `--disallowedTools AskUserQuestion`, and `--session-id` with a new UUID, the tool lists before `--session-id`, and the prompt as the last argument
+- S-005-4: `docs/design/agent-modes.md`, What Claude Code provides, names the Claude Code version on which a real `claude -p` started with S-005-3's flags, detached as Tracking a headless session says, met a denied Bash call, had no AskUserQuestion, outlived the process that started it, and exited on its own; the build issue that delivers this merges before any other headless code
+- S-005-5: with `mode = "headless"`, a `--claude-arg` of `--permission-mode`, `--permission-prompts`, `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--bg`, `--background`, or `--session-id` (alone or as `--flag=value`) exits 2 naming the flag, and stops and launches no session
 - S-005-6: the headless prompt ends with the headless paragraph naming `@<login>` from `gh api user -q .login` and `references/needs-decision.md`; a failing login read exits 2 and launches nothing
 - S-005-7: `triage_state.py` reports an open issue labelled `needs-decision` whose question has no reply as `NEEDS_DECISION`, which doesn't make it exit 1, and an issue with a reply as the state it reads without the label
 - S-005-8: without `--bot-login`, the question is the newest comment whose first line is `<!-- shipmill:needs-decision -->` and a reply is a newer comment without it by an OWNER, MEMBER, or COLLABORATOR; with `--bot-login X`, the question is the newest comment by X and a reply is a newer comment by an OWNER, MEMBER, or COLLABORATOR other than X; in both, a comment by any other author association is never a reply, and a labelled issue with no question reads `NEEDS_DECISION`
@@ -278,6 +324,9 @@ an empty list when nothing waits or the tick didn't read the state.
 - S-005-16: `setup_state.py` with `[agents] mode = "headless"` reports `needs-decision` under `LABELS_MISSING` when the label is absent and `--fix` creates it; with `interactive` or no `[agents]` it doesn't want the label; headless with no `app_id` reads `AGENTS_NO_APP`, which leaves the exit code as `AGENTS_OK` would
 - S-005-17: `skills/github-issue-triage/references/needs-decision.md` defines the comment (the marker as its first line, the mention, the question, options with the recommendation first), the label, leaving the item, a denied tool call as a decision, and removing the label when an answered item is taken up, and the three SKILL.md files each carry a headless rule that links it
 - S-005-18: `docs/design/agent-modes.md`, `skills/shipmill-setup/SKILL.md`, and `docs/install.md` document `mode`, `HEADLESS_TOOLS` and how to widen it, the trust filter, the `needs-decision` label, and notifications with and without `app_id`
+- S-005-19: a headless launch starts the session in a new process session with stdin from `/dev/null` and its output appended to `<state dir>/sessions/<uuid>.log`, returns without waiting for it, and records in `gate.json` the `mode`, the session id, the `pid`, and the process's start time beside the fingerprint and `at`; `--dry-run` starts nothing and writes nothing
+- S-005-20: when the last launch is headless, a tick reads RUNNING with `session <uuid> is still working: tail -f <log>` while a process with the recorded `pid` and start time exists, and goes on to decide as if no session ran once it doesn't, including when the pid exists with another start time; a headless session never reads WAITING and is never stopped by `max_wait_minutes`; a `gate.json` without `mode` reads as an interactive launch
+- S-005-21: `shipmill launchd` writes `AbandonProcessGroup` as true in the plist it installs and in `--print`
 
 ## Out of scope
 
@@ -288,6 +337,9 @@ an empty list when nothing waits or the tick didn't read the state.
 - Mode 3 (GitHub Actions, `docs/design/ephemeral-mode.md`), budgets, turn limits, and attempt limits
 - A `--mode` flag on `shipmill gate` or `shipmill launchd`: the mode is the config's (Config)
 - Recording an answer in the decisions log automatically: the session does it with `decisions.py add`, as today
+- A time limit on a running headless session: it reads RUNNING until it exits, as an interactive session that keeps working does today
+- Removing old session logs: they stay under the state directory until someone deletes them
+- Detecting a launchd job installed without `AbandonProcessGroup`
 
 ## Decisions relied on
 
@@ -296,12 +348,13 @@ an empty list when nothing waits or the tick didn't read the state.
 - D-14
 - D-15
 - D-16
+- D-17
 
 ## Issues
 
 - shipmill/shipmill#160: S-005-4
 - shipmill/shipmill#161: S-005-7, S-005-8, S-005-9, S-005-10, S-005-17
-- shipmill/shipmill#162: S-005-1, S-005-2, S-005-3, S-005-5, S-005-6, S-005-11
+- shipmill/shipmill#162: S-005-1, S-005-2, S-005-3, S-005-5, S-005-6, S-005-11, S-005-19, S-005-20, S-005-21
 - shipmill/shipmill#163: S-005-12, S-005-13, S-005-14, S-005-15
 - shipmill/shipmill#164: S-005-16, S-005-18
 

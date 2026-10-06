@@ -135,3 +135,11 @@ entry that supersedes it, never by editing an old one.
 - Why: An unattended session reads issue text with the whole workspace in reach and is allowed git, gh, and uv run, which can each run code; the tool allowlist only keeps prompts from blocking it, so who opened the item is the control that keeps an outsider's text from steering it
 - Applies to: src/shipmill/gate.py, skills/github-issue-triage/scripts/triage_state.py, skills/github-ship-watch/scripts/watch_state.py, [agents] mode
 - Enforced by: tests/test_gate.py and the triage_state.py and watch_state.py tests (with the implementing PR)
+
+## D-17: Headless gate sessions run as claude -p, tracked by their process
+
+- Decided: 2026-10-06, in shipmill/shipmill#160
+- Rule: In [agents] mode = "headless", shipmill gate starts each session with `claude -p`, never `claude --bg`, detached from the tick with its output in a log under the state directory, and decides whether it still runs from the recorded pid and process start time, not from `claude agents`; a headless session never reads as waiting on the user
+- Why: The probe for #160 showed a `--bg` session reads `blocked` whenever its last reply asks for something, with no prompt pending, so a session that posts its question on GitHub would still hold the repo as WAITING until max_wait_minutes; `--bg` and `--print` refuse to combine, and a print session exits when its prompt is done, so it has no state in which it waits. The cost is `claude attach`: `claude --resume <id>` and the log replace it
+- Applies to: src/shipmill/gate.py, src/shipmill/launchd.py, [agents] mode, gate.json
+- Enforced by: tests/test_gate.py and tests/test_launchd.py (with the implementing PR)

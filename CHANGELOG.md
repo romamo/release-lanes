@@ -16,6 +16,11 @@ bot.
   numbered with the recommended one first and what each means for users, and how to answer
   (reply with a number). A reply on the issue counts as the answer, so the maintainer
   doesn't have to attach to the gate session; a held PR's decisions are asked the same way
+- Spec 005 now runs headless gate sessions as `claude -p` instead of `claude --bg`, after
+  the #160 probe found a `--bg` session reads `blocked` whenever its last reply asks for
+  something: the gate starts the session detached, logs its output under the state
+  directory, tracks it by pid, and never reads it as waiting; `shipmill launchd` sets
+  `AbandonProcessGroup` so a session outlives its tick (D-17)
 
 ## [0.20.0] - 2026-10-06
 
