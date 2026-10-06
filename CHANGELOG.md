@@ -22,6 +22,14 @@ bot.
   job) (S-005-1, S-005-2, S-005-3, S-005-5, S-005-6, S-005-11, S-005-19, S-005-20, S-005-21)
   (#162)
 
+### Changed
+
+- Spec 005's S-005-8 counts a `needs-decision` question only from a trusted author: an
+  owner, member, or collaborator, or with `--bot-login` the bot's own marker comment. An
+  outsider's marker comment can no longer re-park an answered item, and a maintainer's
+  question after a bot's triage comment no longer reads as its reply. The code follows in
+  #184
+
 ### Fixed
 
 - github-ship-watch no longer reports `WORK_BRANCH_STALE` for a work branch whose run is
