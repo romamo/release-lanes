@@ -28,6 +28,14 @@ bot.
   mention notifies on GitHub and the gate sends nothing; a headless launch without it says
   so. `--json` gains `mode` and a `decisions` list (S-005-12, S-005-13, S-005-14,
   S-005-15) (#163)
+- shipmill-setup's checklist knows headless mode: with `[agents] mode = "headless"` it wants
+  the `needs-decision` label (`--fix` creates it, color `d876e3`), and without `app_id` the
+  agents row reads `AGENTS_NO_APP`, counted as done, saying GitHub won't notify you of a
+  question posted as your own login. Interactive and no-`[agents]` setups see no new row,
+  and an `[agents]` `mode` no longer reads as the release mode. agent-modes.md, the
+  shipmill-setup skill, and install.md document headless mode: `HEADLESS_TOOLS` and how to
+  widen it (`--claude-arg=--allowedTools --claude-arg "Bash(npm *)"`), the trust filter, the
+  label, and notifications with and without an App (S-005-16, S-005-18) (#164)
 
 ### Changed
 

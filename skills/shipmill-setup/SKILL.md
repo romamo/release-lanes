@@ -247,7 +247,8 @@ or the tags are wrong; fix those, not the version.
    release commit in the run summary
 3. Run the checklist: `uv run --no-project python <skill>/scripts/setup_state.py <owner/repo>`.
    It reports releases, the `[agents]` section, the plugin in `.claude/settings.json`, and
-   the labels (`postponed`, `blocked`, `shipmill-hold`, and the blocker label), and
+   the labels (`postponed`, `blocked`, `shipmill-hold`, the blocker label, and with
+   `[agents] mode = "headless"` only, `needs-decision`), and
    whether GitHub deletes a pull request's branch when it merges (`BRANCH_DELETE_ON` or
    `BRANCH_DELETE_OFF`, the repo setting `delete_branch_on_merge`). That setting matters
    because github-pr-triage's stacked merges rely on GitHub retargeting a stacked PR when
@@ -383,24 +384,61 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
    to the user's login. The gate's own reads keep the host's `gh` login. A session that
    works on other repos (fleet mode) fails there, since the token is limited to this one.
    Without `app_id`, sessions launch as before, as the host's `gh` login
-4. **A dedicated checkout.** The session branches and commits where it starts, so never
+4. **Headless (optional).** On a machine nobody watches, a session that asks a question
+   holds the repo until someone attaches. Ask whether anyone watches this one; if not,
+   offer `mode = "headless"` in `[agents]` (spec 005, D-17), recommended with `app_id`.
+   Each launch then runs `claude -p` with no prompts, AskUserQuestion removed, and an
+   allowlist of tools; it can't wait on anyone, so it ends, and a decision for the user
+   becomes the needs-decision protocol
+   ([needs-decision.md](../github-issue-triage/references/needs-decision.md)): a comment
+   whose first line is `<!-- shipmill:needs-decision -->`, mentioning the host's `gh`
+   login, and the `needs-decision` label. The item waits on GitHub, out of the gate's work,
+   until an OWNER, MEMBER, or COLLABORATOR replies; the rest of the repo keeps moving. Tell
+   the user:
+   - **The allowlist** is `HEADLESS_TOOLS` in `src/shipmill/gate.py`: `Read Edit Write
+     Glob Grep Skill Agent SendMessage ListAgents TodoWrite Bash(gh *) Bash(git *) Bash(uv
+     *) Bash(uvx *)`. A call outside it is denied, and the session posts a needs-decision
+     comment naming the tool. To widen it, pass `--claude-arg=--allowedTools --claude-arg
+     "Bash(npm *)"` (the `=` matters: `--claude-arg --allowedTools` is an argument error)
+     to `gate`, and to `launchd` again so the job gets it. It is not a sandbox: `git`, `gh`,
+     and `uv run` run code. Headless refuses a `--claude-arg` of `--permission-mode`,
+     `--permission-prompts`, `--dangerously-skip-permissions`,
+     `--allow-dangerously-skip-permissions`, `--bg`, `--background`, or `--session-id`
+     with exit 2
+   - **The trust filter** (D-16): headless works only on issues opened by an OWNER,
+     MEMBER, or COLLABORATOR or by the App's bot, and on pull requests whose branch is in
+     the repo. The rest read UNTRUSTED (`watch_state.py --trusted-only`), start no session,
+     and wait for an interactive one; github-ship-watch reports them
+   - **The label:** `setup_state.py --fix` creates `needs-decision` in headless mode
+     only; it reads `LABELS_MISSING` until then. With `interactive` or no `[agents]` it
+     isn't wanted
+   - **Notifications:** with `app_id`, the question is `<slug>[bot]`'s, so its mention
+     notifies the user on GitHub and the gate sends no desktop notification. Without it,
+     the comment is the user's own and GitHub doesn't notify anyone of their own mention:
+     `setup_state.py` reads `AGENTS_NO_APP` (counted as done), a launch prints `no app_id:
+     needs-decision comments post as <login>, so GitHub won't notify you`, and with
+     `notify = true` the gate sends a desktop notification, `#<n> waits on your decision:
+     <url>`, at once and every `remind_hours` while the item waits. Either way it records
+     waiting items in `shipmill/needs-decision.json`, and `gate --json` reports `mode` (null
+     on a HELD, WAITING, or RUNNING tick, which reads no config) and `decisions`
+5. **A dedicated checkout.** The session branches and commits where it starts, so never
    use the user's working copy: `git worktree add --detach tmp/shipmill-gate
    origin/<default>` inside the trusted checkout (a worktree outside it would need its
    own trust prompt). If `git check-ignore tmp` prints nothing, add `tmp/` to
    `.git/info/exclude`, which stays local. The gate moves the checkout to the default
    branch's head before each launch
-5. **Try it once.** `$CR --repo tmp/shipmill-gate gate <owner/repo> --dry-run` prints the
+6. **Try it once.** `$CR --repo tmp/shipmill-gate gate <owner/repo> --dry-run` prints the
    decision and changes nothing. With `app_id` set, a tick that would launch also checks
    the key, the installation, and the permissions, writes no helpers and no token cache,
    and prints `would launch as <slug>[bot]`: that line proves the App's setup. A tick
    that would launch nothing checks no App
-6. **Schedule it.** `$CR --repo tmp/shipmill-gate launchd <owner/repo> --every 15` writes
+7. **Schedule it.** `$CR --repo tmp/shipmill-gate launchd <owner/repo> --every 15` writes
    `~/Library/LaunchAgents/dev.shipmill.gate.<owner>.<repo>.plist`, loads it, and runs
    it once now. Its log is under `~/Library/Logs/shipmill/`. `--remove` unloads it; on
    Linux, run the same `gate` command from a systemd timer. With an App whose key isn't at
    the default path, add `--app-key <path>`: the job's gate gets it, made absolute, and
    install refuses it when `app_id` is unset or the key is missing or readable by others
-7. **Hand over.** Tell the user how to see a session (`claude agents`, `claude attach
+8. **Hand over.** Tell the user how to see a session (`claude agents`, `claude attach
    <id>`), that a session waiting on a question holds the repo until they answer, that
    such a session sends a desktop notification at once and every `remind_hours` while it
    waits (`osascript` on macOS, `notify-send` elsewhere), that `max_wait_minutes` (15 by
@@ -408,7 +446,9 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
    shows its question), that with an App a session's work is `<slug>[bot]`'s, which they
    can approve and github-ship-watch's metrics count as a bot, that an open `shipmill-hold` issue stops every launch as well as
    every release but not that stop (D-15), and how to remove the job (`launchd
-   <owner/repo> --remove`)
+   <owner/repo> --remove`). In headless mode, tell them instead that a session never
+   waits: `tail -f` its log under `shipmill/sessions/`, `claude --resume <uuid>` reopens
+   it, and they answer a `needs-decision` item by replying on GitHub
 
 ## Migrating from hand-made or scripted releases
 

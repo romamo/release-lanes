@@ -1,6 +1,6 @@
 # S-005: Headless gate sessions with the needs-decision protocol
 
-status: approved
+status: built
 
 ## Problem
 
@@ -104,7 +104,8 @@ subagents they dispatch, peer messages, and `gh`, `git`, the skill scripts (`uv 
 keeps a prompt from blocking the session; it is not a sandbox. `git`, `gh`, and `uv run`
 can each run arbitrary code, so the trust filter below, not the allowlist, keeps an
 outsider's text from steering the session. A host that needs more tools (a repo whose
-checks run `npm test`) adds `--claude-arg --allowedTools --claude-arg "Bash(npm *)"`.
+checks run `npm test`) adds `--claude-arg=--allowedTools --claude-arg "Bash(npm *)"` (with
+`=`: argparse refuses a separate `--claude-arg` value that starts with a dash).
 
 A headless gate refuses, with exit 2 before it stops or starts any session, a
 `--claude-arg` that is `--permission-mode`, `--permission-prompts`,
@@ -367,3 +368,36 @@ an empty list when nothing waits or the tick didn't read the state.
 - shipmill/shipmill#164: S-005-16, S-005-18
 
 ## Verification
+
+Checked on main plus #191 (#164). The spec merged in #148, with its `claude -p` launch from
+#177 and the trusted-question rule from #188; the build issues landed in #178 (#160), #180
+(#161), #187 (#162), #190 (#163), and #191 (#164). `specs.py coverage --spec 005` names a
+passing test for every criterion. The probe behind S-005-4 ran a real `claude -p` on Claude
+Code 2.1.291; every other criterion is checked by its tests, with fakes for `claude`, `gh`,
+and the notifier. By hand: `shipmill launchd shipmill/shipmill --print` wrote
+`AbandonProcessGroup` true; `shipmill gate` parsed the documented widening,
+`--claude-arg=--allowedTools --claude-arg "Bash(npm *)"`, as both flags (a job installed
+with one needs #192's fix); and `setup_state.py shipmill/shipmill` on this interactive repo
+read the same five rows as before, exit 0.
+
+- S-005-1: `test_s005_1_mode_defaults_to_interactive_and_reads_what_is_given`, `test_s005_1_a_bad_mode_exits_2_naming_the_key`, `test_s005_1_mode_loads_from_the_config_file`, passing
+- S-005-2: `test_s005_2_interactive_launches_as_it_did_before`, `test_s005_2_interactive_reads_the_state_without_the_trust_filter`, `test_s005_2_interactive_with_an_app_reads_the_state_without_a_bot_login`, `test_s005_2_interactive_takes_the_flags_headless_refuses`, passing
+- S-005-3: `test_s005_3_headless_runs_claude_p_with_the_allowlist`, `test_s005_3_a_widened_allowlist_never_reads_the_prompt_as_a_tool`, `test_s005_3_the_allowlist_is_exactly_the_specs`, `test_s005_3_each_launch_gets_a_new_session_id`, `test_s005_3_with_an_app_the_settings_env_goes_before_the_name`, passing
+- S-005-4: the probe on Claude Code 2.1.291 (#160), recorded in agent-modes.md's What Claude Code provides; `test_s005_4_the_design_doc_records_the_print_probe`, passing
+- S-005-5: `test_s005_5_the_refused_flags_are_the_specs`, `test_s005_5_a_refused_claude_arg_exits_2_and_stops_and_starts_nothing`, `test_s005_5_a_refused_claude_arg_stops_no_waiting_session_either`, passing
+- S-005-6: `test_s005_6_the_headless_prompt_ends_with_the_paragraph_naming_the_login`, `test_s005_6_the_login_is_read_with_gh_api_user`, `test_s005_6_a_login_that_isnt_one_exits_2`, `test_s005_6_no_gh_exits_2`, `test_s005_6_a_failing_login_read_exits_2_and_launches_nothing`, passing
+- S-005-7: `test_s005_7_an_unanswered_question_reads_needs_decision_and_is_no_action`, `test_s005_7_a_reply_reads_the_state_it_would_without_the_label`, `test_s005_7_needs_decision_masks_other_states_only_while_it_waits`, passing
+- S-005-8: `test_s005_8_without_bot_login_the_question_is_the_newest_marker_comment`, `test_s005_8_a_trusted_comment_is_a_reply`, `test_s005_8_any_other_author_association_never_replies`, `test_s005_8_with_bot_login_the_question_is_the_bots_newest_marker_comment`, `test_s005_8_a_labelled_issue_with_no_question_waits`, `test_s005_8_an_outsiders_marker_comment_never_reparks_an_answered_issue`, `test_s005_8_an_outsiders_marker_comment_alone_is_no_question`, `test_s005_8_with_bot_login_a_persons_newer_question_leaves_no_question`, `test_s005_8_with_bot_login_a_bot_question_then_a_trusted_reply_no_longer_waits`, `test_s005_8_with_bot_login_a_plain_bot_comment_is_no_question`, `test_s005_8_the_rule_reads_the_comments_raw`, `test_s005_8_a_pr_follows_the_trusted_question_rule`, passing
+- S-005-9: `test_s005_9_waiting_items_leave_issues_and_prs_open_for_a_needs_decision_row`, `test_s005_9_a_waiting_pr_follows_the_bot_login`, `test_s005_9_a_repo_whose_only_work_waits_reads_quiet_at_the_gate`, `test_s005_9_a_waiting_item_does_not_change_the_gates_fingerprint`, passing
+- S-005-10: `test_s005_10_trusted_only_reads_an_outsiders_issue_as_untrusted`, `test_s005_10_trusted_authors_issues_read_as_usual`, `test_s005_10_the_bots_own_issue_is_trusted`, `test_s005_10_a_deleted_author_is_untrusted`, `test_s005_10_trusted_only_lists_fork_prs_as_untrusted`, passing
+- S-005-11: `test_s005_11_headless_reads_the_state_with_the_trust_filter`, `test_s005_11_headless_with_an_app_passes_its_bot_login`, `test_s005_11_watch_state_takes_the_flags_the_gate_passes`, `test_s005_11_a_failing_app_check_reads_no_state_and_launches_nothing`, `test_s005_11_headless_with_app_id_and_no_app_check_reads_no_state`, passing
+- S-005-12: `test_s005_12_a_newly_waiting_item_is_notified_once_and_recorded`, `test_s005_12_it_repeats_only_after_remind_hours`, `test_s005_12_a_new_item_beside_a_notified_one_is_notified_alone`, `test_s005_12_with_notify_false_it_sends_none_and_still_records`, `test_s005_12_a_launching_tick_notifies_too`, `test_s005_12_a_tick_that_reads_no_state_neither_notifies_nor_touches_the_file`, `test_s005_12_interactive_mode_neither_notifies_nor_writes_the_file`, passing
+- S-005-13: `test_s005_13_an_item_that_no_longer_waits_is_dropped`, `test_s005_13_the_file_goes_once_nothing_waits`, `test_s005_13_a_failed_send_is_printed_and_leaves_notified_unchanged`, `test_s005_13_a_malformed_file_exits_2_naming_its_path`, `test_s005_13_a_dry_run_sends_nothing_writes_nothing_and_says_it_would_notify`, `test_s005_13_a_dry_run_leaves_a_file_with_nothing_waiting`, `test_s005_13_a_watch_row_that_lists_anything_but_numbers_exits_2`, passing
+- S-005-14: `test_s005_14_with_app_id_no_desktop_notification_for_an_item`, `test_s005_14_a_headless_launch_without_app_id_warns_github_wont_notify`, `test_s005_14_an_interactive_launch_prints_no_such_warning`, passing
+- S-005-15: `test_s005_15_json_reports_mode_and_each_waiting_items_decision`, `test_s005_15_json_reports_an_empty_list_when_nothing_waits`, `test_s005_15_interactive_json_reports_its_mode`, `test_s005_15_a_tick_that_reads_no_config_reports_no_mode`, `test_s005_15_the_session_waiting_step_keeps_its_file_and_output`, passing
+- S-005-16: `test_s005_16_headless_wants_the_needs_decision_label`, `test_s005_16_interactive_or_no_agents_doesnt_want_the_label`, `test_s005_16_a_headless_mode_outside_agents_doesnt_count`, `test_s005_16_fix_creates_the_label_only_when_wanted`, `test_s005_16_headless_without_app_id_reads_agents_no_app_counted_done`, `test_s005_16_the_agents_mode_never_reads_as_the_release_mode`, passing; the existing setup_state tests for interactive and no-`[agents]` configs pass unchanged
+- S-005-17: `test_s005_17_the_reference_defines_the_protocol`, `test_s005_17_each_skill_carries_a_headless_rule_linking_it`, passing
+- S-005-18: read the three docs; `test_s005_18_the_docs_document_headless_mode` asserts each topic and every tool of `HEADLESS_TOOLS`, and `test_s005_18_the_needs_decision_reference_widens_with_the_working_flag`, passing
+- S-005-19: `test_s005_19_a_headless_launch_is_detached_logged_and_recorded`, `test_s005_19_a_dry_run_starts_and_writes_nothing`, `test_s005_19_the_session_runs_in_a_new_session_with_no_stdin_appending_its_log`, `test_s005_19_the_launch_returns_without_waiting_and_its_start_time_is_read`, `test_s005_19_a_command_that_cant_start_exits_2`, passing
+- S-005-20: `test_s005_20_a_running_headless_session_reads_running`, `test_s005_20_it_still_reads_running_after_the_mode_goes_back_to_interactive`, `test_s005_20_an_ended_session_or_a_reused_pid_decides_as_if_none_ran`, `test_s005_20_a_session_whose_start_time_wasnt_read_is_not_running`, `test_s005_20_a_headless_session_never_waits_and_is_never_stopped`, `test_s005_20_a_record_without_mode_is_an_interactive_launch`, `test_s005_20_a_malformed_headless_record_exits_2`, `test_s005_20_a_headless_record_needs_a_uuid_session`, `test_s005_20_a_headless_record_whose_session_isnt_a_string_exits_2`, passing
+- S-005-21: `test_s005_21_launchd_abandons_the_process_group`, passing; the `launchd --print` above showed `AbandonProcessGroup` true

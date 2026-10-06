@@ -204,3 +204,75 @@ def test_a_gh_api_failure_fails_loudly(ss: ModuleType) -> None:
     with pytest.raises(SystemExit) as exc:
         ss.branch_delete_row("me/demo", False, broken)
     assert exc.value.code == 2
+
+
+HEADLESS = '[agents]\nprompt = "/github-issue-triage {repo}"\nmode = "headless"\n'
+NO_APP = (
+    "headless without app_id: needs-decision comments post as you, so GitHub won't notify you;"
+    " desktop notifications only"
+)
+BASE_LABELS = {"postponed", "blocked", "shipmill-hold", "release-blocker"}
+
+
+def test_s005_16_headless_wants_the_needs_decision_label(ss: ModuleType, tmp_path: Path) -> None:
+    write(tmp_path, ".github/shipmill.toml", HEADLESS)
+    wanted = ss.wanted_labels(tmp_path)
+    assert set(wanted) == BASE_LABELS | {"needs-decision"}
+    assert wanted["needs-decision"] == ("d876e3", "A shipmill session asked a question here; waits for a reply")
+    row = ss.labels_row(["needs-decision"], wanted)
+    assert (row.state, row.detail) == ("LABELS_MISSING", "needs-decision")
+    assert ss.labels_row([], wanted).detail == (
+        "postponed, blocked, shipmill-hold, needs-decision, and the blocker label exist"
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["", 'mode = "release"\n', '[agents]\nprompt = "x"\n', '[agents]\nprompt = "x"\nmode = "interactive"\n'],
+)
+def test_s005_16_interactive_or_no_agents_doesnt_want_the_label(ss: ModuleType, tmp_path: Path, text: str) -> None:
+    write(tmp_path, ".github/shipmill.toml", text)
+    wanted = ss.wanted_labels(tmp_path)
+    assert set(wanted) == BASE_LABELS
+    assert ss.labels_row([], wanted).detail == "postponed, blocked, shipmill-hold, and the blocker label exist"
+    assert ss.agents_row(tmp_path).state in {"AGENTS_MISSING", "AGENTS_OK"}
+
+
+def test_s005_16_a_headless_mode_outside_agents_doesnt_count(ss: ModuleType, tmp_path: Path) -> None:
+    write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "x"\n[lanes.dev]\nmode = "headless"\n')
+    assert set(ss.wanted_labels(tmp_path)) == BASE_LABELS
+    assert ss.agents_row(tmp_path).state == "AGENTS_OK"
+
+
+def test_s005_16_fix_creates_the_label_only_when_wanted(ss: ModuleType, tmp_path: Path) -> None:
+    gh = FakeGh("")
+    write(tmp_path, ".github/shipmill.toml", HEADLESS)
+    ss.create_labels("me/demo", ss.wanted_labels(tmp_path), ["needs-decision"], gh)
+    description = "A shipmill session asked a question here; waits for a reply"
+    create = ["gh", "label", "create", "needs-decision", "-R", "me/demo", "--color", "d876e3"]
+    assert gh.calls == [[*create, "--description", description]]
+
+    write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "x"\nmode = "interactive"\n')
+    wanted = ss.wanted_labels(tmp_path)
+    gh.calls.clear()
+    ss.create_labels("me/demo", wanted, [name for name in wanted if name == "release-blocker"], gh)
+    assert [call[3] for call in gh.calls] == ["release-blocker"]
+
+
+def test_s005_16_headless_without_app_id_reads_agents_no_app_counted_done(ss: ModuleType, tmp_path: Path) -> None:
+    write(tmp_path, ".github/shipmill.toml", HEADLESS)
+    row = ss.agents_row(tmp_path)
+    assert (row.state, row.detail) == ("AGENTS_NO_APP", NO_APP)
+    assert {"AGENTS_NO_APP", "AGENTS_OK"} <= ss.DONE  # the exit code reads it as it reads AGENTS_OK
+    write(tmp_path, ".github/shipmill.toml", HEADLESS + "app_id = 123   # the App\n")
+    assert ss.agents_row(tmp_path).state == "AGENTS_OK"
+    write(tmp_path, ".github/shipmill.toml", HEADLESS + "# app_id = 123\n")
+    assert ss.agents_row(tmp_path).state == "AGENTS_NO_APP"
+
+
+def test_s005_16_the_agents_mode_never_reads_as_the_release_mode(ss: ModuleType, tmp_path: Path) -> None:
+    write(tmp_path, ".github/shipmill.toml", HEADLESS)
+    assert bot(ss, tmp_path) == "RELEASE_MISSING"
+    write(tmp_path, ".github/shipmill.toml", 'mode = "release"\n' + HEADLESS)
+    write(tmp_path, ".github/workflows/release.yml", CALLER)
+    assert bot(ss, tmp_path) == "RELEASE_READY"

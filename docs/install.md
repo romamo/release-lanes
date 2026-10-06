@@ -148,7 +148,7 @@ fix the bump lists or the tags, not the version.
    ```
 
 3. Create the labels the skills and gates read (`postponed`, `blocked`, `shipmill-hold`,
-   and the blocker label). The setup checklist reports what's missing, and `--fix` creates
+   the blocker label, and in [headless mode](#run-it-headless) `needs-decision`). The setup checklist reports what's missing, and `--fix` creates
    it:
 
    ```bash
@@ -237,7 +237,8 @@ the details.
    `$CR --repo tmp/shipmill-gate gate <owner/repo> --refresh` from a systemd timer
 
 5. **Watch a session** with `claude agents` and `claude attach <id>`. A session waiting on
-   your answer holds the repo until you give it
+   your answer holds the repo until you give it; on a machine nobody watches,
+   [run it headless](#run-it-headless)
 
 ### Give the sessions their own identity
 
@@ -336,6 +337,70 @@ or reuses a token through `shipmill app-token`, cached in `shipmill/app-token.js
 (mode `0600`) while it has at least 10 minutes left. A failed check starts no session and
 never falls back to your login. The gate's own reads still use your `gh` login. Remove
 `app_id` and sessions launch as before, as your `gh` login
+
+### Run it headless
+
+Optional, for a machine nobody watches. By default a session that asks you something
+waits, and the gate starts nothing else for the repo until you answer or
+`max_wait_minutes` stops it. With `mode = "headless"` in `[agents]`, merged like the rest
+of the section, each launch runs `claude -p` instead: no permission prompts, no
+AskUserQuestion, and a fixed list of tools. It can't wait on you, so it ends, and a
+decision for you becomes a comment on the issue or pull request plus the `needs-decision`
+label ([the protocol](../skills/github-issue-triage/references/needs-decision.md)). The
+comment's first line is `<!-- shipmill:needs-decision -->`, it mentions your `gh` login,
+and it gives the options with a recommendation. The item then waits on GitHub, out of the
+gate's work, while the rest of the repo keeps moving. Reply on the item (as an owner,
+member, or collaborator) and a later tick takes it up again; the session removes the label.
+A headless session isn't listed in `claude agents`: follow it with `tail -f` on its log in
+`$(git rev-parse --git-common-dir)/shipmill/sessions/`, and `claude --resume <uuid>`
+reopens it after it ends.
+
+1. **Create the label.** The setup checklist wants `needs-decision` in headless mode only;
+   `setup_state.py <owner/repo> --fix` creates it
+
+2. **Know the allowlist.** A headless session may use `HEADLESS_TOOLS`, defined in
+   `src/shipmill/gate.py`:
+
+   ```
+   Read Edit Write Glob Grep Skill Agent SendMessage ListAgents TodoWrite
+   Bash(gh *) Bash(git *) Bash(uv *) Bash(uvx *)
+   ```
+
+   Any other call is denied without a prompt, and the session posts a `needs-decision`
+   comment naming the tool and the command it tried. It is not a sandbox: `git`, `gh`, and
+   `uv run` can run code. To widen it, say for a repo whose checks run `npm test`, pass the
+   extra tools to the gate (the `=` matters; `--claude-arg --allowedTools` is an argument
+   error), and install the job again so it gets them too:
+
+   ```bash
+   $CR --repo tmp/shipmill-gate gate <owner/repo> --dry-run --claude-arg=--allowedTools --claude-arg "Bash(npm *)"
+   $CR --repo tmp/shipmill-gate launchd <owner/repo> --every 15 --claude-arg=--allowedTools --claude-arg "Bash(npm *)"
+   ```
+
+   A headless gate refuses a `--claude-arg` of `--permission-mode`, `--permission-prompts`,
+   `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--bg`,
+   `--background`, or `--session-id` with exit 2: each would bring the prompts back or
+   break how the gate tracks the session
+
+3. **Know what it skips.** Headless works only on trusted items (D-16): issues opened by an
+   owner, member, or collaborator, or by the App's bot, and pull requests whose branch is
+   in the repo rather than a fork. Every other open item reads UNTRUSTED, starts no
+   session, and waits for an interactive one; github-ship-watch lists them
+
+4. **Choose how you hear about a question.**
+   - **With `app_id`** (recommended): the comment comes from `<slug>[bot]`, so its mention
+     notifies you on GitHub like any other. The gate sends no desktop notification
+   - **Without it:** the comment is your own, and GitHub doesn't notify you of your own
+     mention. The checklist reads `AGENTS_NO_APP` (counted as done), and each launch
+     prints `no app_id: needs-decision comments post as <login>, so GitHub won't notify
+     you`. With `notify = true` the gate sends a desktop notification instead, `#<n>
+     waits on your decision: <url>`, at once and every `remind_hours` while the item
+     waits, and prints `notified #<n> (waiting <N>h)`
+
+   Either way a tick that reads the state records the waiting items in
+   `shipmill/needs-decision.json`, and `gate --json` reports `mode` and a `decisions` list
+   (`item`, `since`, `waited_hours`, `notified`, `error`). `mode` is null on a HELD,
+   WAITING, or RUNNING tick, which reads no config
 
 ## Pause or remove it
 

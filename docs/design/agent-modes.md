@@ -1,6 +1,7 @@
 # Design: agent modes
 
-Status: mode 1 built (`shipmill gate`, `shipmill launchd`), 2026-10-04
+Status: mode 1 built (`shipmill gate`, `shipmill launchd`), 2026-10-04; mode 2 built
+(`[agents] mode = "headless"`, spec 005), 2026-10-06
 
 shipmill is stateless code. It decides whether a repo needs an agent, and when it does, it
 starts a session in a **persistent Claude Code install**: Claude Code on your Mac, or on an
@@ -13,7 +14,7 @@ code decides when it runs and with what.
 | Mode | Session | Questions for you | Status |
 |---|---|---|---|
 | 1. Interactive | A new `claude --bg` session per launch: attachable, listed in `claude agents` | AskUserQuestion; the session waits, the gate notifies you and starts nothing for that repo until you answer or `max_wait_minutes` (15 by default) stops it | Built: `shipmill gate` |
-| 2. Noninteractive | The same, started with a tool allowlist, for a machine nobody watches | The `needs-decision` protocol: a label and a comment that mentions you; the item waits on GitHub and the session ends | Next, after mode 1 shows how often sessions wait on you |
+| 2. Headless | A new `claude -p` session per launch with a tool allowlist, for a machine nobody watches; tracked by its pid, not listed in `claude agents` | The `needs-decision` protocol: a label and a comment that mentions you; the item waits on GitHub and the session ends | Built: `mode = "headless"` (spec 005) |
 | 3. Ephemeral | A fresh container per job (GitHub Actions) | The same protocol | Parked: [ephemeral-mode.md](ephemeral-mode.md) |
 
 Mode 1 replaces `/loop`, whose iterations all run in one growing session. Each launch is a
@@ -105,6 +106,73 @@ With `mode = "headless"` (spec 005, D-17) the steps change in four places:
   `pid` and start time in `gate.json`. `claude --resume <uuid>` reopens the conversation
   after it ends
 
+A headless session can't block: it ends, and its question waits on GitHub. The rest of this
+section is what that takes.
+
+**The allowlist.** `HEADLESS_TOOLS`, a constant in `src/shipmill/gate.py`, is the
+`--allowedTools` argument:
+
+```
+Read Edit Write Glob Grep Skill Agent SendMessage ListAgents TodoWrite
+Bash(gh *) Bash(git *) Bash(uv *) Bash(uvx *)
+```
+
+These are the tools the skills call: the file tools, the skills and subagents they
+dispatch, peer messages, and `gh`, `git`, the skill scripts, and the checks run through
+`uv` or `uvx`. It keeps a prompt from blocking the session; it is not a sandbox, since
+`git`, `gh`, and `uv run` can each run arbitrary code (the trust filter below is what keeps
+an outsider's text out). A call outside it is denied without a prompt, and the session
+treats the denial as a decision for you: a `needs-decision` comment naming the tool and the
+command it tried, with the options (widen the allowlist, or do that step by hand). The list
+is code, not config. A host that needs more widens it with `--claude-arg`, written with `=`
+for the dash-led flag:
+
+```
+shipmill --repo <checkout> gate <owner/repo> --claude-arg=--allowedTools --claude-arg "Bash(npm *)"
+shipmill --repo <checkout> launchd <owner/repo> --every 15 --claude-arg=--allowedTools --claude-arg "Bash(npm *)"
+```
+
+`--claude-arg --allowedTools` with a space is an argument error. A scheduled job keeps the
+flags it was installed with, so run `shipmill launchd` again with the new ones. The gate
+passes the extra `--allowedTools` list after its own, before the `--` that ends the options.
+
+**Trust (D-16).** An unattended session reads issue text with the whole workspace in
+reach, so a headless gate calls `watch_state.py` with `--trusted-only`. It works only on
+issues opened by an OWNER, MEMBER, or COLLABORATOR, or by the App's bot (`--bot-login`),
+and on pull requests whose head branch is in the repo, not a fork. Every other open item
+goes to an `UNTRUSTED` row, `#N` only and `agent: false`: it starts no session and stays
+for an interactive one, and github-ship-watch reports it. An outsider's comment on a
+trusted issue still reaches the session, as data under the prompt's untrusted-text line.
+Mode 1 doesn't filter.
+
+**Waiting on GitHub.** A decision for you becomes the `needs-decision` protocol
+([needs-decision.md](../../skills/github-issue-triage/references/needs-decision.md)): one
+comment on the item whose first line is `<!-- shipmill:needs-decision -->`, mentioning
+`@<login>`, with the question and options, the recommendation first; the `needs-decision`
+label; and the session leaves the item. `watch_state.py` reports such an item in a
+`NEEDS_DECISION` row (`#N` only, `agent: false`) and leaves it out of ISSUES and PRS_OPEN,
+so it starts no session and doesn't change the fingerprint. Your reply, a newer comment
+without the marker by an OWNER, MEMBER, or COLLABORATOR, makes it work again on the next
+tick; the session that takes it up removes the label. A comment from anyone else never
+wakes it. With `app_id`, the question is the newest marker comment by the bot.
+`shipmill-setup`'s `setup_state.py --fix` creates the label in headless mode only.
+
+**Notifications.** With `app_id`, the question comes from `<slug>[bot]`, so its mention
+notifies you on GitHub and the gate sends no desktop notification for it. Without
+`app_id`, the comment is your own, and GitHub doesn't notify anyone of their own mention:
+a launch prints `no app_id: needs-decision comments post as <login>, so GitHub won't
+notify you`, and with `notify = true` the gate notifies instead, with the notifier above,
+titled `shipmill <owner/repo>` with the body `#<n> waits on your decision:
+https://github.com/<owner/repo>/issues/<n>`, at once and then every `remind_hours` while
+the item waits. Either way, a tick that reads the state records the waiting items in
+`needs-decision.json` (State, below). A failed send prints `notify failed for #<n>:
+<error>` and is tried next tick, a sent one prints `notified #<n> (waiting <N>h)`, and
+`--dry-run` prints `would notify #<n> (waiting <N>h)` and sends and writes nothing. HELD,
+WAITING, and RUNNING ticks read no state, so they don't notify for items. `--json` adds
+`mode` (`"interactive"` or `"headless"`; null on a tick that read no config: HELD, WAITING,
+RUNNING) and `decisions`, one `{"item", "since", "waited_hours", "notified", "error"}` per
+waiting item, an empty list when nothing waits or the tick read no state
+
 ### The session's identity
 
 Without `app_id`, a session uses `gh` and `git` as they're signed in on the host: the
@@ -141,7 +209,8 @@ absolute, in the job's gate arguments.
 `--dry-run` prints the decision and touches nothing: it sends no notification, stops no
 session, and writes no file, and says `would notify <id>` or `would stop <id>` instead.
 `--json` lists each blocked session under `waiting`. `--claude-arg` passes flags to the
-session, such as `--permission-mode`; it is the host's choice, so it stays a flag.
+session, such as `--claude-arg=--permission-mode=auto` (headless mode refuses that one);
+it is the host's choice, so it stays a flag.
 
 `shipmill launchd` writes `~/Library/LaunchAgents/dev.shipmill.gate.<owner>.<repo>.plist`
 with `StartInterval`, `RunAtLoad`, `AbandonProcessGroup` (so launchd doesn't end a
@@ -217,6 +286,10 @@ and shared by every worktree:
   hold no token
 - `sessions/<uuid>.log`, in headless mode: each session's output, appended; the gate never
   deletes one
+- `needs-decision.json`, in headless mode: one entry per item waiting on a decision,
+  `{"<n>": {"since": ..., "notified": ...}}`, with `waiting.json`'s rules: an entry is
+  dropped once its item no longer waits, and `notified` stays `null` with `app_id` set or
+  `notify = false`
 
 A file that isn't its shape exits 2 naming its path. Everything else comes from GitHub and
 from `claude agents`.
@@ -226,10 +299,10 @@ from `claude agents`.
 1. **Pull requests in the fingerprint:** `prs = true` counts open PRs by number, so a new
    push to an open PR waits for `retry_hours`. A `pr_state` that lists heads, reviews, and CI
    fixes that
-2. **Trust filter:** pass issues and PRs from owners and collaborators automatically;
-   leave the rest for an interactive session. An unattended session reads their text with
-   the whole workspace in reach
-3. **Mode 2:** the `needs-decision` protocol in the skills, then `--mode headless`
+2. **Trust filter for mode 1:** headless mode has it (D-16); an interactive session still
+   works on every author's items, since a person can watch it
+3. **Approving an untrusted item for headless work:** ephemeral mode's `shipmill:go`
+   label, so an outsider's issue needn't wait for an interactive session
 4. **Your own sessions:** the gate counts only the sessions it started. If you are
    triaging the same repo by hand, the launched session finds you through `ListAgents`, as
    the skills already require

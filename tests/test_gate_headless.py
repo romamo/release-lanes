@@ -292,7 +292,7 @@ def test_s005_3_headless_runs_claude_p_with_the_allowlist(checkout: Git) -> None
 
 
 def test_s005_3_a_widened_allowlist_never_reads_the_prompt_as_a_tool(checkout: Git) -> None:
-    """The documented widening, `--claude-arg --allowedTools --claude-arg "Bash(npm *)"`, ends
+    """The documented widening, `--claude-arg=--allowedTools --claude-arg "Bash(npm *)"`, ends
     with a variadic tool list; without `--` Claude Code 2.1.291 reads the prompt as one more
     tool and exits "Input must be provided" without running anything"""
     spawned = Spawned()
