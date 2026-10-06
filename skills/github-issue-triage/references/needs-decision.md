@@ -22,7 +22,7 @@ A headless session can't ask the user: nobody answers AskUserQuestion or a permi
 
 ## A denied tool call is a decision
 
-A headless session runs with an allowlist of tools and can't prompt for more, so Claude Code denies a call outside it. Don't retry it in another form or route around it. Treat the denial as a decision for the user: post the comment above on the item you were working on, naming the tool and the command you tried, with the options (widen the gate's allowlist with `--claude-arg --allowedTools --claude-arg "<tool>"`, or do that step by hand), add the label, and leave the item. The allowlist grows from these comments, in review, instead of from guesses.
+A headless session runs with an allowlist of tools and can't prompt for more, so Claude Code denies a call outside it. Don't retry it in another form or route around it. Treat the denial as a decision for the user: post the comment above on the item you were working on, naming the tool and the command you tried, with the options (widen the gate's allowlist with `--claude-arg=--allowedTools --claude-arg "<tool>"` on `shipmill gate` or `shipmill launchd`, or do that step by hand), add the label, and leave the item. The allowlist grows from these comments, in review, instead of from guesses.
 
 ## While it waits
 

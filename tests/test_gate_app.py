@@ -404,8 +404,7 @@ def test_s004_13_launchd_puts_app_key_in_the_gates_arguments(tmp_path: Path) -> 
         "--refresh",
         "--app-key",
         str(key),
-        "--claude-arg",
-        "--permission-mode=auto",
+        "--claude-arg=--permission-mode=auto",
     ]
 
 

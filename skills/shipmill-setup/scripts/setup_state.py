@@ -16,6 +16,9 @@ Releases (.github/shipmill.toml):
 Agents (the config's [agents] section, read by `shipmill gate`):
   AGENTS_MISSING   no [agents] section: the gate has no prompt. Fine when agents run
                    only on demand
+  AGENTS_NO_APP    a prompt and mode = "headless" but no app_id: needs-decision
+                   comments post as the host's gh login, so GitHub won't notify it;
+                   the gate's desktop notifications only. Counted as done
   AGENTS_OK        a section with a prompt
 
 Plugin (.claude/settings.json, so every session in the repo loads the skills):
@@ -25,9 +28,10 @@ Plugin (.claude/settings.json, so every session in the repo loads the skills):
   PLUGIN_OK        enabled
 
 Labels (the triage skills and shipmill read them):
-  LABELS_MISSING   some of postponed, blocked, shipmill-hold, and the config's
-                   blocker_label (default release-blocker) don't exist; --fix creates
-                   them on GitHub
+  LABELS_MISSING   some of postponed, blocked, shipmill-hold, the config's
+                   blocker_label (default release-blocker), and, with [agents]
+                   mode = "headless", needs-decision don't exist; --fix creates them
+                   on GitHub
   LABELS_OK        all exist
 
 Branches (the repo setting delete_branch_on_merge; github-pr-triage's stacked merges rely
@@ -35,8 +39,8 @@ on GitHub retargeting a stacked PR when the branch under it is deleted):
   BRANCH_DELETE_OFF  merged PR branches stay on GitHub; --fix turns the setting on
   BRANCH_DELETE_ON   GitHub deletes a PR's branch when it merges
 
-Exit 0 when every row is RELEASE_READY, AGENTS_OK, PLUGIN_OK, LABELS_OK, or
-BRANCH_DELETE_ON, 1 otherwise, 2 on bad input, a malformed settings.json, both config
+Exit 0 when every row is RELEASE_READY, AGENTS_OK, AGENTS_NO_APP, PLUGIN_OK, LABELS_OK,
+or BRANCH_DELETE_ON, 1 otherwise, 2 on bad input, a malformed settings.json, both config
 files, or a git or gh failure (a failed read of the repo setting never reads as off).
 Needs git and an authenticated gh. Python 3.10+, standard library only.
 """
@@ -66,7 +70,10 @@ LABELS = {
     "shipmill-hold": ("000000", "While open, no lane releases except a hotfix started by hand"),
 }
 BLOCKER = ("b60205", "Holds the release lanes the policy names until closed")
-DONE = {"RELEASE_READY", "AGENTS_OK", "PLUGIN_OK", "LABELS_OK", "BRANCH_DELETE_ON"}
+# Wanted only with [agents] mode = "headless" (spec 005): a session's question waits under it
+NEEDS_DECISION = "needs-decision"
+NEEDS_DECISION_LABEL = ("d876e3", "A shipmill session asked a question here; waits for a reply")
+DONE = {"RELEASE_READY", "AGENTS_OK", "AGENTS_NO_APP", "PLUGIN_OK", "LABELS_OK", "BRANCH_DELETE_ON"}
 
 
 @dataclass(frozen=True)
@@ -104,6 +111,25 @@ def policy_value(text: str, key: str) -> str | None:
     return found.group(1) if found else None
 
 
+def top_level(text: str) -> str:
+    """The config's keys before its first table: the release keys, never [agents]'s mode"""
+    return re.split(r"^\[", text, maxsplit=1, flags=re.MULTILINE)[0]
+
+
+def agents_section(repo_dir: Path) -> str | None:
+    """The [agents] section's body, or None without one"""
+    config = config_file(repo_dir)
+    text = config.read_text(encoding="utf-8") if config else ""
+    section = re.search(r"^\[agents\][^\n]*\n?(.*?)(?=^\[|\Z)", text, re.MULTILINE | re.DOTALL)
+    return section.group(1) if section else None
+
+
+def is_headless(repo_dir: Path) -> bool:
+    """[agents] mode = "headless" (spec 005); `shipmill gate` validates the value"""
+    section = agents_section(repo_dir)
+    return section is not None and policy_value(section, "mode") == "headless"
+
+
 def calls_shipmill(repo_dir: Path) -> bool:
     """release.yml calls shipmill's prepare workflow, from shipmill/shipmill (or its old
     path, romamo/shipmill) or, in shipmill itself and its forks, from a local copy"""
@@ -121,7 +147,7 @@ def calls_shipmill(repo_dir: Path) -> bool:
 
 def release_row(repo_dir: Path) -> Row:
     config = config_file(repo_dir)
-    mode = policy_value(config.read_text(encoding="utf-8"), "mode") if config else None
+    mode = policy_value(top_level(config.read_text(encoding="utf-8")), "mode") if config else None
     if config is None or mode is None:
         return Row("RELEASE_MISSING", f"no release keys in {CONFIG}: shipmill-setup steps 1 to 5")
     if not calls_shipmill(repo_dir):
@@ -136,12 +162,18 @@ def release_row(repo_dir: Path) -> Row:
 
 
 def agents_row(repo_dir: Path) -> Row:
-    """Presence only; `shipmill gate` and the release config loader validate the section"""
-    config = config_file(repo_dir)
-    text = config.read_text(encoding="utf-8") if config else ""
-    section = re.search(r"^\[agents\][^\n]*\n(.*?)(?=^\[|\Z)", text, re.MULTILINE | re.DOTALL)
-    if section is None or not re.search(r"^prompt\s*=", section.group(1), re.MULTILINE):
+    """Presence only; `shipmill gate` and the release config loader validate the section.
+    Headless without app_id is done too: it works, but GitHub won't notify the maintainer of
+    a question posted as their own login, so only the gate's desktop notification does"""
+    section = agents_section(repo_dir)
+    if section is None or not re.search(r"^prompt\s*=", section, re.MULTILINE):
         return Row("AGENTS_MISSING", f"no [agents] prompt in {CONFIG}: needed only for `shipmill gate`")
+    if is_headless(repo_dir) and not re.search(r"^app_id\s*=", section, re.MULTILINE):
+        return Row(
+            "AGENTS_NO_APP",
+            "headless without app_id: needs-decision comments post as you, so GitHub won't notify you;"
+            " desktop notifications only",
+        )
     return Row("AGENTS_OK", "[agents] has a prompt")
 
 
@@ -189,13 +221,25 @@ def wanted_labels(repo_dir: Path) -> dict[str, tuple[str, str]]:
     config = config_file(repo_dir)
     blocker = policy_value(config.read_text(encoding="utf-8"), "blocker_label") if config else None
     wanted[blocker or "release-blocker"] = BLOCKER
+    if is_headless(repo_dir):
+        wanted[NEEDS_DECISION] = NEEDS_DECISION_LABEL
     return wanted
 
 
-def labels_row(missing: list[str]) -> Row:
+def labels_row(missing: list[str], wanted: dict[str, tuple[str, str]]) -> Row:
     if missing:
         return Row("LABELS_MISSING", ", ".join(missing))
-    return Row("LABELS_OK", "postponed, blocked, shipmill-hold, and the blocker label exist")
+    extra = f" {NEEDS_DECISION}," if NEEDS_DECISION in wanted else ""
+    return Row("LABELS_OK", f"postponed, blocked, shipmill-hold,{extra} and the blocker label exist")
+
+
+def create_labels(
+    repo: str, wanted: dict[str, tuple[str, str]], missing: list[str], gh: Callable[[list[str]], str] = run
+) -> None:
+    """--fix: create each missing label with its color and description"""
+    for name in missing:
+        color, description = wanted[name]
+        gh(["gh", "label", "create", name, "-R", repo, "--color", color, "--description", description])
 
 
 def existing_labels(repo: str) -> set[str]:
@@ -265,16 +309,14 @@ def main() -> int:
     have = existing_labels(args.repo)
     missing = [name for name in wanted if name not in have]
     if args.fix:
-        for name in missing:
-            color, description = wanted[name]
-            run(["gh", "label", "create", name, "-R", args.repo, "--color", color, "--description", description])
+        create_labels(args.repo, wanted, missing)
         missing = []
 
     rows = [
         release_row(repo_dir),
         agents_row(repo_dir),
         plugin_row(settings),
-        labels_row(missing),
+        labels_row(missing, wanted),
         branch_delete_row(args.repo, args.fix),
     ]
     for row in rows:
