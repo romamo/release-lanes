@@ -16,6 +16,7 @@ from shipmill.app import (
     PERMISSIONS,
     Access,
     Answer,
+    Identity,
     Installation,
     Openssl,
     app_check,
@@ -46,6 +47,10 @@ def checkout(tmp_path: Path) -> Git:
 REPO = "romamo/demo"
 APP_ID = 123456
 GRANTED = {p.key: str(p.access) for p in PERMISSIONS}
+BOT = "demo-agent[bot]"
+BOT_ID = 987654
+BOT_PATH = "/users/demo-agent%5Bbot%5D"
+CHECKS = ["/app", f"/repos/{REPO}/installation", BOT_PATH]  # spec 004, At launch steps 3 and 4
 
 
 @dataclass
@@ -63,9 +68,10 @@ class FakeApi:
 
     installed: bool = True
     permissions: dict[str, str] = field(default_factory=lambda: dict(GRANTED))
-    calls: list[tuple[str, str]] = field(default_factory=list)
+    bot: Answer = field(default_factory=lambda: Answer(200, json.dumps({"login": BOT, "id": BOT_ID, "type": "Bot"})))
+    calls: list[tuple[str, str | None]] = field(default_factory=list)
 
-    def get(self, path: str, token: str) -> Answer:
+    def get(self, path: str, token: str | None) -> Answer:
         self.calls.append((path, token))
         if path == "/app":
             return Answer(200, json.dumps({"slug": "demo-agent", "id": APP_ID}))
@@ -73,6 +79,8 @@ class FakeApi:
             if not self.installed:
                 return Answer(404, '{"message": "Not Found"}')
             return Answer(200, json.dumps({"id": 77, "permissions": self.permissions}))
+        if path == BOT_PATH:
+            return self.bot
         raise AssertionError(f"unexpected GET {path}")
 
     def post(self, path: str, token: str, body: Mapping[str, object]) -> Answer:
@@ -180,24 +188,25 @@ def test_s004_2_app_key_is_checked_against_the_refreshed_config(tmp_path: Path) 
     api = FakeApi()
     check = app_check(REPO, key_file(tmp_path), tmp_path, FakeSigner(), api)
     claude = FakeClaude([bg("old", "idle", "done")])
-    with pytest.raises(ReleaseError, match="can't launch a session as an App yet"):
-        gate(
-            git,
-            REPO,
-            lambda: AgentsConfig.load(root),
-            claude,
-            lambda: [ISSUES],
-            NOW,
-            Hold,
-            FakeNotifier(),
-            NO_PRUNE,
-            refresh_checkout=True,
-            app=check,
-            app_key_named=True,
-        )
+    decision, launched, _, _ = gate(
+        git,
+        REPO,
+        lambda: AgentsConfig.load(root),
+        claude,
+        lambda: [ISSUES],
+        NOW,
+        Hold,
+        FakeNotifier(),
+        NO_PRUNE,
+        refresh_checkout=True,
+        app=check,
+        app_key_named=True,
+        app_env=lambda identity: {"GIT_AUTHOR_NAME": identity.login},
+    )
     assert AgentsConfig.load(root).app_id == APP_ID  # the checkout moved
-    assert [path for path, _ in api.calls] == ["/app", f"/repos/{REPO}/installation"]
-    assert (claude.launched, claude.stopped) == ([], [])
+    assert [path for path, _ in api.calls] == CHECKS
+    assert (decision.identity, launched, claude.stopped) == (BOT, "s1", ["old"])
+    assert claude.envs == [{"GIT_AUTHOR_NAME": BOT}]
 
 
 def test_s004_2_without_app_key_the_gate_reads_the_default_path(tmp_path: Path) -> None:
@@ -340,7 +349,7 @@ def test_s004_5_the_installation_is_read_with_the_jwt() -> None:
 )
 def test_a_bad_app_answer_is_refused(answer: Answer, message: str) -> None:
     class Api:
-        def get(self, path: str, token: str) -> Answer:
+        def get(self, path: str, token: str | None) -> Answer:
             return answer
 
         def post(self, path: str, token: str, body: Mapping[str, object]) -> Answer:
@@ -355,33 +364,11 @@ def test_an_unknown_access_is_refused() -> None:
         installation(APP_ID, REPO, "t", FakeApi(permissions=dict(GRANTED, contents="owner")))
 
 
-# D-14 until the launch as the App lands: checks that pass still start nothing
-
-
-def test_with_app_id_set_a_passing_check_still_launches_nothing(checkout: Git, tmp_path: Path) -> None:
-    claude = FakeClaude([bg("old", "idle", "done")])
-    check = app_check(REPO, key_file(tmp_path), tmp_path, FakeSigner(), FakeApi())
-    for dry_run in (False, True):
-        with pytest.raises(ReleaseError, match="app_id 123456 is set .* can't launch a session as an App yet"):
-            gate(
-                checkout,
-                REPO,
-                app_cfg,
-                claude,
-                lambda: [ISSUES],
-                NOW,
-                Hold,
-                FakeNotifier(),
-                NO_PRUNE,
-                dry_run=dry_run,
-                app=check,
-            )
-    assert (claude.launched, claude.stopped) == ([], [])
-    assert not (state_dir(checkout) / RECORD).exists()
+# Only a launch checks the App, and only with app_id set
 
 
 def test_with_app_id_set_a_tick_that_launches_nothing_checks_nothing(checkout: Git) -> None:
-    def unchecked(app_id: int, now: dt.datetime) -> Installation:
+    def unchecked(app_id: int, now: dt.datetime) -> Identity:
         raise AssertionError("only a launch checks the App")
 
     decision, _, _, _ = gate(
@@ -396,7 +383,7 @@ def test_with_app_id_set_a_tick_that_launches_nothing_checks_nothing(checkout: G
 
 
 def test_with_app_id_unset_the_app_is_never_checked(checkout: Git) -> None:
-    def unchecked(app_id: int, now: dt.datetime) -> Installation:
+    def unchecked(app_id: int, now: dt.datetime) -> Identity:
         raise AssertionError("no app_id, no App check")
 
     claude = FakeClaude()

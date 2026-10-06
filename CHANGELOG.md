@@ -17,12 +17,11 @@ bot.
   (`claude agents --json` or `gh pr list` failing, or git refusing a removal) exits 2 and
   starts no session; the gate's own checkout is never a candidate (#124)
 - Spec 004's build issues: #141 to #144 (#136)
-- `[agents] app_id` names the GitHub App gated sessions will write as, and `shipmill gate
+- `[agents] app_id` names the GitHub App gated sessions write as, and `shipmill gate
   --app-key <path>` its private key (default `~/.config/shipmill/app-<app_id>.pem`). On a
   launch with `app_id` set, the gate checks the key's mode, signs the App's JWT with
   `openssl`, and checks the App is installed on the repo with every permission spec 004
-  lists, exiting 2 naming what failed. Launching as the App isn't in this version yet, so
-  with `app_id` set a launch still exits 2 and starts nothing (D-14) (#141)
+  lists, exiting 2 naming what failed (D-14) (#141)
 - github-ship-watch's `watch_state.py` reports a `WORKTREE_STALE` row, report-only
   (`agent: false`, never an action), for each worktree under `.claude/worktrees/` or
   `tmp/wt-*` that `shipmill worktrees` keeps and that is over 7 days old, naming its path
@@ -41,6 +40,19 @@ bot.
   `store`, `erase`, and other operations print nothing. `python -m shipmill` now runs the
   CLI, and the session's `gh` and `git-credential-shipmill` helpers, which hold no token,
   can be written for the gate's launch (#142)
+- With `[agents] app_id` set, `shipmill gate` starts its session as the App's bot. After
+  the App's checks it reads the bot account's id, writes the `gh` and git credential
+  helpers to `$(git rev-parse --git-common-dir)/shipmill/bin/`, and launches `claude --bg`
+  with `--settings` env that puts that folder first on `PATH`, makes `<slug>[bot]` and
+  `<id>+<slug>[bot]@users.noreply.github.com` the git author and committer, and, through
+  `GIT_CONFIG_*`, replaces the host's github.com credential helpers with the App's and
+  sends `git@github.com:` and `ssh://git@github.com/` remotes over https. The env holds no
+  token, and the gate's own reads keep the host's `gh` login. Any failure exits 2 before a
+  session is stopped or started. The decision line ends ` as <slug>[bot]`, `--json` gains
+  `identity` (`null` without an App), and `--dry-run` runs the checks, writes nothing, and
+  prints `would launch as <slug>[bot]`. With `app_id` unset the launch is unchanged.
+  `shipmill launchd --app-key <path>` passes the key, made absolute, to the job's gate,
+  and refuses it when `app_id` is unset or the key is missing or readable by others (#143)
 
 ### Changed
 

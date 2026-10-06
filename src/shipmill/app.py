@@ -25,6 +25,7 @@ import shutil
 import stat
 import subprocess
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -130,8 +131,9 @@ class Answer:
 
 
 class Api(Protocol):
-    def get(self, path: str, token: str) -> Answer:
-        """GET api.github.com's path with the token as a bearer; an error status is an Answer"""
+    def get(self, path: str, token: str | None) -> Answer:
+        """GET api.github.com's path with the token as a bearer, or anonymously with None; an
+        error status is an Answer"""
         ...
 
     def post(self, path: str, token: str, body: Mapping[str, object]) -> Answer:
@@ -141,19 +143,20 @@ class Api(Protocol):
 
 
 class UrllibApi:
-    def get(self, path: str, token: str) -> Answer:
+    def get(self, path: str, token: str | None) -> Answer:
         return self._send("GET", path, token, None)
 
     def post(self, path: str, token: str, body: Mapping[str, object]) -> Answer:
         return self._send("POST", path, token, json.dumps(body).encode())
 
-    def _send(self, method: str, path: str, token: str, data: bytes | None) -> Answer:
+    def _send(self, method: str, path: str, token: str | None, data: bytes | None) -> Answer:
         headers = {
             "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {token}",
             "User-Agent": "shipmill-gate",
             "X-GitHub-Api-Version": "2022-11-28",
         }
+        if token is not None:
+            headers["Authorization"] = f"Bearer {token}"
         if data is not None:
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(API + path, data=data, headers=headers, method=method)
@@ -252,16 +255,57 @@ def installation(app_id: int, repo: str, token: str, api: Api) -> Installation:
     return Installation(slug, number, granted)
 
 
-AppCheck = Callable[[int, dt.datetime], Installation]
+NOREPLY = "users.noreply.github.com"
+
+
+@dataclass(frozen=True, slots=True)
+class Identity:
+    """Who a gated session writes as: the App's bot account, and the key its helpers mint with"""
+
+    app_id: int
+    slug: str
+    bot_id: int  # the bot account's user id, not the App's id
+    key: Path
+
+    @property
+    def login(self) -> str:
+        return f"{self.slug}[bot]"
+
+    @property
+    def email(self) -> str:
+        """The bot's noreply address, which GitHub links its commits to"""
+        return f"{self.bot_id}+{self.login}@{NOREPLY}"
+
+
+def bot_id(slug: str, app_id: int, api: Api) -> int:
+    """Spec 004, At launch step 4: the user id of the App's bot account. A public read, made
+    without the JWT, which GitHub accepts only on the App's own endpoints"""
+    login = f"{slug}[bot]"
+    path = f"/users/{urllib.parse.quote(login)}"
+    answer = api.get(path, None)
+    if answer.status == 404:
+        raise ReleaseError(f"GitHub has no bot account {login} for app_id {app_id}")
+    found = _ok(answer, path, app_id)
+    number = found.get("id")
+    if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+        raise ReleaseError(f"GET {path} gave no user id")
+    if found.get("login") != login:
+        raise ReleaseError(f"GET {path} answered for {found.get('login')!r}, not {login}")
+    return number
+
+
+AppCheck = Callable[[int, dt.datetime], Identity]
 
 
 def app_check(repo: str, key: Path | None, home: Path, signer: Signer, api: Api) -> AppCheck:
-    """The gate's App check for repo: the key (`--app-key`, else the default path for the
-    App's id), the JWT, then the installation. Any failure raises ReleaseError (exit 2)"""
+    """The gate's App check for repo, spec 004's At launch steps 1 to 4: the key (`--app-key`,
+    else the default path for the App's id), the JWT, the installation, then the bot account.
+    Any failure raises ReleaseError (exit 2). It writes nothing, so a dry run runs it too"""
 
-    def check(app_id: int, now: dt.datetime) -> Installation:
+    def check(app_id: int, now: dt.datetime) -> Identity:
         path = check_key(key if key is not None else default_key(app_id, home))
-        return installation(app_id, repo, jwt(app_id, path, now, signer), api)
+        found = installation(app_id, repo, jwt(app_id, path, now, signer), api)
+        return Identity(app_id, found.slug, bot_id(found.slug, app_id, api), path)
 
     return check
 
@@ -480,3 +524,48 @@ def write_helpers(folder: Path, python: Path, checkout: Path, repo: str, app_id:
     _write_atomic(helpers.gh, gh.encode(), 0o700)
     _write_atomic(helpers.git_credential, credential_helper.encode(), 0o700)
     return helpers
+
+
+CREDENTIAL_KEY = "credential.https://github.com.helper"
+INSTEAD_OF = "url.https://github.com/.insteadOf"
+SSH_REMOTES = ("git@github.com:", "ssh://git@github.com/")  # sent over https, so a push goes through the App
+
+
+def _helper_value(helper: Path) -> str:
+    """credential.helper's value for an absolute path: git runs it through the shell, so a
+    path that needs quoting goes in as a `!` shell command"""
+    quoted = shlex.quote(str(helper))
+    return quoted if quoted == str(helper) else f"!{quoted}"
+
+
+def session_env(identity: Identity, helpers: Helpers, path: str) -> dict[str, str]:
+    """Spec 004, At launch step 5: the env a session's `--settings` carries. The helpers'
+    folder goes first on PATH, the git author and committer are the App's bot, and git's
+    config, through GIT_CONFIG_*, drops the host's credential helpers for github.com, adds
+    the App's, and sends SSH remotes over https. It holds no token"""
+    config = [
+        (CREDENTIAL_KEY, ""),
+        (CREDENTIAL_KEY, _helper_value(helpers.git_credential)),
+        *((INSTEAD_OF, remote) for remote in SSH_REMOTES),
+    ]
+    env = {
+        "PATH": os.pathsep.join([str(helpers.folder), path]) if path else str(helpers.folder),
+        "GIT_AUTHOR_NAME": identity.login,
+        "GIT_AUTHOR_EMAIL": identity.email,
+        "GIT_COMMITTER_NAME": identity.login,
+        "GIT_COMMITTER_EMAIL": identity.email,
+        "GIT_CONFIG_COUNT": str(len(config)),
+    }
+    for index, (key, value) in enumerate(config):
+        env[f"GIT_CONFIG_KEY_{index}"] = key
+        env[f"GIT_CONFIG_VALUE_{index}"] = value
+    return env
+
+
+def prepare_session(
+    identity: Identity, folder: Path, python: Path, checkout: Path, repo: str, path: str
+) -> dict[str, str]:
+    """Write the session's helpers to folder, then give the env that puts them to work.
+    python is the gate's own interpreter, so the helpers run the same shipmill"""
+    helpers = write_helpers(folder.resolve(), python, checkout, repo, identity.app_id, identity.key, path)
+    return session_env(identity, helpers, path)
