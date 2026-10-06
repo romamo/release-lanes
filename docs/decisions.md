@@ -121,7 +121,7 @@ entry that supersedes it, never by editing an old one.
 
 ## D-15: A session waiting on the user is stopped after 15 minutes unless configured
 
-- Decided: 2026-10-06, by the maintainer after a gate session waited about 10 hours
+- Decided: 2026-10-06, in shipmill/shipmill#147
 - Rule: While an issue labelled shipmill-hold is open, shipmill gate starts no Claude Code session for the repo (it reports HELD); a session already running is left to finish, and the gate names it so a person can stop it. A session that has waited on the user for [agents] max_wait_minutes is stopped, held or not; the key counts minutes, defaults to 15, and 0 never stops one
 - Why: The gate runs one session per repo, so a session waiting on a question stops triage, landing, and shipped notices for every issue; with no limit by default, one unanswered question stalled the repo for 10 hours. A stopped session keeps its conversation, so `claude attach <id>` still shows the question, and the next tick can start fresh work
 - Applies to: src/shipmill/agents.py, src/shipmill/gate.py, shipmill-hold label, [agents] max_wait_minutes
