@@ -310,29 +310,77 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
    notify = true      # a desktop notification when a session waits on you
    remind_hours = 4   # repeat it while the session still waits
    max_wait_minutes = 15 # stop a session that waited this long; 0: never
+   # app_id = 123456  # sessions write as this GitHub App; unset: as the host's gh login
    ```
 
    A session that waits on a question holds the repo, so by default the gate stops it
    after 15 minutes. Ask whether the user answers questions sooner or later than that; set
    `max_wait_minutes` (0..10080) to match, or 0 to never stop one
-3. **A dedicated checkout.** The session branches and commits where it starts, so never
+3. **Its own identity (optional).** Without `app_id`, a session writes as the host's `gh`
+   login: its pull requests, comments, merges, and commits read as the user's own, and
+   the user can't approve its pull requests. To have them made by a GitHub App's bot
+   instead (D-14), the user creates the App once in GitHub's settings (Developer settings,
+   GitHub Apps, New GitHub App); shipmill doesn't create it:
+   - **No webhook:** clear Webhook's Active box; the App needs no callback URL either
+   - **These repository permissions, and no others:**
+
+     | Permission | Access | Why |
+     |---|---|---|
+     | Contents | write | push branches, merge |
+     | Pull requests | write | open, review, and merge pull requests |
+     | Issues | write | comments, labels, closing |
+     | Actions | write | rerun a failed release job (github-ship-watch) |
+     | Workflows | write | push a change under `.github/workflows/` |
+     | Checks | read | CI state |
+     | Commit statuses | read | CI state |
+     | Discussions | read | product-intake's input |
+     | Metadata | read | required by GitHub |
+
+   - **Install it only on the repos the gate works on** ("Only select repositories")
+   - **The private key:** generate one on the App's page, move the download to
+     `~/.config/shipmill/app-<app_id>.pem`, and `chmod 600` it. The key is a host secret
+     and never goes in the repo; a key elsewhere goes to `gate --app-key <path>`
+   - **`app_id`:** the App ID from its settings page (not the client ID), set in
+     `[agents]` in the same PR as the rest of the section
+
+   With `app_id` set, each launch reads the key (missing, or readable by group or others:
+   exit 2 naming its path), signs the App's JWT with `openssl dgst -sha256 -sign`, checks
+   that the App is installed on the repo with every permission above, and starts the
+   session as `<slug>[bot]`, with `<id>+<slug>[bot]@users.noreply.github.com` as its git
+   author and committer. The session holds no token: the gate writes two helpers, mode
+   `0700`, to `$(git rev-parse --git-common-dir)/shipmill/bin/` (a `gh` wrapper and
+   `git-credential-shipmill`), puts that folder first on the session's `PATH`, and sends
+   `git@github.com:` remotes over https so a push goes through the helper too. Each call
+   runs `shipmill app-token`, which mints an installation token limited to this one repo
+   and caches it in `shipmill/app-token.json` (mode `0600`) next to them while it has at
+   least 10 minutes left. Any failure exits 2 and starts no session; it never falls back
+   to the user's login. The gate's own reads keep the host's `gh` login. A session that
+   works on other repos (fleet mode) fails there, since the token is limited to this one.
+   Without `app_id`, sessions launch as before, as the host's `gh` login
+4. **A dedicated checkout.** The session branches and commits where it starts, so never
    use the user's working copy: `git worktree add --detach tmp/shipmill-gate
    origin/<default>` inside the trusted checkout (a worktree outside it would need its
    own trust prompt). If `git check-ignore tmp` prints nothing, add `tmp/` to
    `.git/info/exclude`, which stays local. The gate moves the checkout to the default
    branch's head before each launch
-4. **Try it once.** `$CR --repo tmp/shipmill-gate gate <owner/repo> --dry-run` prints the
-   decision and changes nothing
-5. **Schedule it.** `$CR --repo tmp/shipmill-gate launchd <owner/repo> --every 15` writes
+5. **Try it once.** `$CR --repo tmp/shipmill-gate gate <owner/repo> --dry-run` prints the
+   decision and changes nothing. With `app_id` set, a tick that would launch also checks
+   the key, the installation, and the permissions, writes no helpers and no token cache,
+   and prints `would launch as <slug>[bot]`: that line proves the App's setup. A tick
+   that would launch nothing checks no App
+6. **Schedule it.** `$CR --repo tmp/shipmill-gate launchd <owner/repo> --every 15` writes
    `~/Library/LaunchAgents/dev.shipmill.gate.<owner>.<repo>.plist`, loads it, and runs
    it once now. Its log is under `~/Library/Logs/shipmill/`. `--remove` unloads it; on
-   Linux, run the same `gate` command from a systemd timer
-6. **Hand over.** Tell the user how to see a session (`claude agents`, `claude attach
+   Linux, run the same `gate` command from a systemd timer. With an App whose key isn't at
+   the default path, add `--app-key <path>`: the job's gate gets it, made absolute, and
+   install refuses it when `app_id` is unset or the key is missing or readable by others
+7. **Hand over.** Tell the user how to see a session (`claude agents`, `claude attach
    <id>`), that a session waiting on a question holds the repo until they answer, that
    such a session sends a desktop notification at once and every `remind_hours` while it
    waits (`osascript` on macOS, `notify-send` elsewhere), that `max_wait_minutes` (15 by
    default; 0 never stops) stops it with `claude stop` so the repo moves again (`claude attach <id>` still
-   shows its question), that an open `shipmill-hold` issue stops every launch as well as
+   shows its question), that with an App a session's work is `<slug>[bot]`'s, which they
+   can approve and github-ship-watch's metrics count as a bot, that an open `shipmill-hold` issue stops every launch as well as
    every release but not that stop (D-15), and how to remove the job (`launchd
    <owner/repo> --remove`)
 
