@@ -120,7 +120,7 @@ entry that supersedes it, never by editing an old one.
 
 ## D-15: Unattended agent sessions work only on trusted authors' items
 
-- Decided: 2026-10-06, in shipmill/shipmill#134
+- Decided: 2026-10-06, in shipmill/shipmill#148
 - Rule: A shipmill gate session that nobody can watch ([agents] mode = "headless", and any later unattended mode) is started only for issues opened by an OWNER, MEMBER, or COLLABORATOR or by the gate's own App bot, and for pull requests whose head is in the repo; everything else waits for an interactive session
 - Why: An unattended session reads issue text with the whole workspace in reach and is allowed git, gh, and uv run, which can each run code; the tool allowlist only keeps prompts from blocking it, so who opened the item is the control that keeps an outsider's text from steering it
 - Applies to: src/shipmill/gate.py, skills/github-issue-triage/scripts/triage_state.py, skills/github-ship-watch/scripts/watch_state.py, [agents] mode
