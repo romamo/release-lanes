@@ -17,52 +17,77 @@ CI job, has no command for "is anything stuck?".
 ### The command
 
 ```
-shipmill status [owner/name] [--json]
+shipmill [--repo PATH] status [owner/name] [--json]
 ```
 
-A new subcommand in `src/shipmill/cli.py`. It runs the wheel's
-`skills/github-ship-watch/scripts/watch_state.py` for the repo on the current checkout, the
-way the gate does (`watch_command` in `src/shipmill/gate.py`, shared rather than copied),
-and prints its rows: the table by default, JSON lines with `--json`, exactly as
-`watch_state.py` prints them.
+A new subcommand in `src/shipmill/cli.py`. As with `gate`, the global `--repo` is the
+checkout (default: the current directory) and the positional `owner/name` is the GitHub
+repo. It runs the wheel's `skills/github-ship-watch/scripts/watch_state.py` for that repo
+with `--repo-dir` set to the checkout's top level (`git rev-parse --show-toplevel`), so
+running it from a subdirectory works. It prints the script's rows exactly as the script
+prints them: the table by default, JSON lines with `--json`.
 
-With no repo it takes the checkout's `origin` repo; outside a GitHub checkout and with no
-repo it exits 2 saying to name one. A named repo must match the checkout's `origin`, since
-the report reads the checkout (tags, the policy, worktrees); otherwise it exits 2 naming
-both.
+The command is built by `watch_command` in `src/shipmill/gate.py`, which the gate already
+uses. That function gains a `json` parameter: the gate passes true, and `status` passes its
+own `--json`. Today it always adds `--json`.
+
+With no repo, status takes the checkout's `origin` through `_origin_repo` in
+`src/shipmill/cli.py` (as `app-install` does). Outside a GitHub checkout and with no repo,
+it exits 2 saying to name one. A named repo must match the checkout's `origin`, checked by
+the gate's `check_checkout` in `src/shipmill/gate.py`, since the report reads the checkout
+(tags, the policy, worktrees); otherwise it exits 2 naming both. No third origin parser is
+written.
 
 ### What it reads and writes
 
-The same as `watch_state.py`: `gh` and `git fetch` against origin, nothing else. `status`
-never repairs, reruns, comments, or starts a session; it is ship-watch's "status" scope, not
-its "watch" scope. Untrusted issue text is never printed beyond what `watch_state.py`
-already prints.
+Whatever `watch_state.py` reads, and nothing more:
+
+- `gh` for the repo, its runs, issues, and pull requests, and `git fetch` against origin
+- PyPI's JSON API for the published versions
+- `uvx --from <tool> shipmill plan` and `shipmill worktrees`, with the script's default
+  `--tool` (the `v0` tag), as the gate runs it
+- `claude plugin list`, `launchctl`, and the bundled `triage_state.py` and `shipped.py`,
+  where present
+
+`status` never repairs, reruns, comments, or starts a session; it is ship-watch's "status"
+scope, not its "watch" scope. Untrusted issue text is never printed beyond what
+`watch_state.py` already prints.
 
 ### Exit codes
 
-- 0: no row is an action state
-- 1: some row is an action state (`watch_state.py`'s `ACTION` and `TRIAGE_ACTION`), as
-  `doctor` exits 1 on a failure, so a CI job or a script can gate on it
-- 2: bad input, no `gh`, or `watch_state.py` failed; its stderr is shown, cut to 500
-  characters as the gate cuts it
+`status` passes through `watch_state.py`'s exit code, with one guard:
+
+- 0: the script exited 0
+- 1: the script exited 1 and printed at least one row. The script exits 1 when a row's state
+  is in its `ACTION` set. That set includes `SHIPMILL_OUTDATED` and `BRANCH_DELETE_OFF`, so
+  an outdated plugin on the host is enough. A CI job or a script can gate on this, as on
+  `doctor`'s exit 1
+- 2: bad input, no `gh`, the script exited with any other code, or the script exited 1 with
+  no row printed. The script prints its rows only once they are all read, so an uncaught
+  exception (a network error reaching PyPI, say) exits 1 with nothing on stdout. That is a
+  failure, not a report. Its stderr is shown, cut to 500 characters as the gate cuts it
 
 The module docstring's command list and exit codes in `src/shipmill/cli.py` name `status`.
 
 ## Acceptance criteria
 
 - S-008-1: `shipmill status` with no repo runs `watch_state.py` for the checkout's `origin`
-  repo with `--repo-dir` set to the checkout root
+  repo with `--repo-dir` set to the checkout's top level, also when run from a subdirectory
 - S-008-2: `shipmill status` outside a GitHub checkout and with no repo exits 2 saying to
   name one
 - S-008-3: `shipmill status owner/name` exits 2 naming both repos when it differs from the
   checkout's `origin`
 - S-008-4: `shipmill status` prints `watch_state.py`'s table unchanged, and `--json` prints
   its JSON lines unchanged
-- S-008-5: `shipmill status` exits 1 when `watch_state.py` exits 1, and 0 when it exits 0
+- S-008-5: `shipmill status` exits 1 when `watch_state.py` exits 1 having printed a row, and
+  0 when it exits 0
 - S-008-6: `shipmill status` exits 2 with the script's stderr when `watch_state.py` exits
-  with any other code
-- S-008-7: the gate and `status` build the `watch_state.py` command through one function
+  with any code but 0 or 1, or exits 1 with no row printed
+- S-008-7: the gate and `status` build the `watch_state.py` command through
+  `watch_command`, whose `json` parameter decides `--json`; the gate's command is unchanged
 - S-008-8: the `src/shipmill/cli.py` docstring lists `status` and its exit code 1
+- S-008-9: `status` takes the origin through `_origin_repo` and checks a named repo through
+  `check_checkout`
 
 ## Out of scope
 
@@ -72,11 +97,18 @@ The module docstring's command list and exit codes in `src/shipmill/cli.py` name
 - `--trusted-only` and `--bot-login`: the gate's flags for unattended sessions (D-16); a
   person reading the report sees every row
 - Folding `doctor`'s checks into the report: setup and pipeline state stay two commands
+- Pinning `--tool` to the installed shipmill: a development build has no tag to pin to, and
+  the gate runs the default too; one change can move both later
+- Making `watch_state.py` itself exit 2 on unexpected errors: the guard above covers
+  `status`, and the script's other callers are their own change
 
 ## Decisions relied on
 
 - D-3: prose calls the release automation shipmill
 - D-4: the policy is read from `.github/shipmill.toml`, through `watch_state.py`
+- D-12: `status` creates no worktree of its own; the plan's worktree stays the script's to
+  remove
+- D-14: `status` writes nothing, so it runs as the user's `gh` and needs no App
 - D-16: unattended sessions work only on trusted authors' items; `status` starts none
 
 ## Issues
