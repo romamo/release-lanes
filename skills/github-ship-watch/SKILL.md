@@ -54,6 +54,8 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | LOOP | The launchd job running `shipmill gate` for the repo on this Mac: its interval, state, last exit, and the gate's last decision, or "none". Add this session's own loops (CronList) and any `/schedule` routine the user named, which no script can read. Report only |
 | HOST_UNKNOWN | `claude` isn't on PATH, as in a cloud session, so the agent sessions weren't read: say so rather than "no agents". Report only |
 | BRANCH_DELETE_OFF | The repo's `delete_branch_on_merge` is off, so merged branches pile up and a stacked PR isn't retargeted. The watch never changes repo settings: recommend the command in the row (`gh repo edit <repo> --delete-branch-on-merge`), or shipmill-setup's `setup_state.py --fix`. An action (exit 1), never an agent's |
+| SHIPMILL_VERSION | The latest shipmill release, the `shipmill@shipmill` plugin installs that apply to the repo on this host (user scope, and local or project scope in the checkout or the gate's working directory), and a marketplace still on an old repo name. Report only |
+| SHIPMILL_OUTDATED | One of those installs is older than the latest release, so the skills it runs are stale: an install in the gate's working directory means the gate's sessions run them. Give the user the row's command (`claude plugin update shipmill@shipmill --scope <scope>`, in the folder it names; a restart applies it). The watch never updates a plugin. An action (exit 1), never an agent's |
 | PRS_OPEN, BOT_OK, BOT_NONE, NO_REGISTRY | Report only |
 
 `--json` prints one JSON object per row: `state`, `subject`, `detail`, and `agent`, which says whether the row needs an agent. `shipmill gate` starts a session only on `agent: true` rows (plus PRS_OPEN with `[agents] prs = true`), and refuses a row without the field. The script's `AGENT` set decides it, next to this table; change both together:
@@ -65,6 +67,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | `true` | INCIDENT_OPEN | An agent works the incident: diagnosis, then a hotfix or a revert |
 | `false` | PROMOTION_DUE | Only a person approves; an agent would wake every retry window for nothing |
 | `false` | BRANCH_DELETE_OFF | A repo setting only a person changes |
+| `false` | SHIPMILL_OUTDATED | A person updates the plugin and restarts the session |
 | `false` | UNHEALTHY | Operate owns it and rolls back after `rollback_after` failures; past that, the incident it opens reads INCIDENT_OPEN |
 | `false` | HOLD | Report only; the gate checks `shipmill-hold` itself before anything else (D-15) |
 | `false` | WORKTREE_STALE | Only a person knows whether kept work is wanted; the gate's prune already removes what landed |
@@ -79,7 +82,7 @@ HOLD and POSTMORTEM_DUE show for every repo with a shipmill config, since a hold
 
 ## Report
 
-Every report the user asks for covers the open issues (ISSUES and ISSUES_OPEN), the workflow runs (RUNS_ACTIVE), and the agents: the triage mode (TRIAGE_MODE), the sessions (AGENT_SESSION), and the loops (LOOP, plus this session's own). Say "none open", "nothing running", or "no agents" when a row is absent; a status report that leaves one out reads as complete when it isn't.
+Every report the user asks for covers the open issues (ISSUES and ISSUES_OPEN), the workflow runs (RUNS_ACTIVE), and the agents: the triage mode (TRIAGE_MODE), the sessions (AGENT_SESSION), and the loops (LOOP, plus this session's own); and whether this host's shipmill is current (SHIPMILL_VERSION, SHIPMILL_OUTDATED). Say "none open", "nothing running", or "no agents" when a row is absent; a status report that leaves one out reads as complete when it isn't.
 
 Under /loop, a quiet pass (exit 0) is one line: "Nothing owed: bot OK, <latest tag> published and announced, no issues waiting." (add "held by #N" when a HOLD row shows). Otherwise lead with open incidents and holds, then what needs the user (each with a recommendation), then what the pass repaired with links, then what it left for the next pass.
 

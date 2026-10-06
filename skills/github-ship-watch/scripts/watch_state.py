@@ -99,6 +99,14 @@ Agents (all reported, never an action by itself):
                   session or the cloud, where no script reads it
   HOST_UNKNOWN    the agent sessions weren't read: claude isn't on PATH (a cloud session)
 
+shipmill on this host (from `claude plugin list --json` and `claude plugin marketplace list --json`):
+  SHIPMILL_VERSION   the latest shipmill release, the shipmill@shipmill plugin's installs
+                  that apply to the repo (user scope, and local or project scope in the
+                  checkout or the gate's launchd working directory), and the marketplace's
+                  source when it isn't shipmill/shipmill (reported, never an action)
+  SHIPMILL_OUTDATED  an install of those older than the latest release, with the command
+                  that updates it: an action for a person, never an agent's
+
 --incident-label names the label the repo's incidents carry, in place of the config's
 [operate] incident_label (fleet.py passes a fleet file's incident_label this way).
 
@@ -173,6 +181,8 @@ def triage_module() -> ModuleType:
 TRIAGE = triage_module()
 GATE_SESSION = "shipmill "  # shipmill gate names its sessions "shipmill <owner/repo> ..."
 LAUNCH_AGENTS = Path.home() / "Library" / "LaunchAgents"
+SHIPMILL_REPO = "shipmill/shipmill"  # where shipmill releases
+PLUGIN = "shipmill@shipmill"  # the Claude Code plugin, in its marketplace
 # the gate log's decision lines: QUIET, LAUNCH, RUNNING, WAITING, UNCHANGED, HELD, or an error
 GATE_DECISION = re.compile(r"^(?:[A-Z]+|error): ")
 VERSION_TAG = re.compile(r"^v\d+\.\d+")  # skips moving major tags such as v0
@@ -190,6 +200,7 @@ ACTION = {
     "POSTMORTEM_DUE",
     "NEEDS_DECISION",
     "BRANCH_DELETE_OFF",
+    "SHIPMILL_OUTDATED",
 }
 # the states whose row needs an agent: --json marks each row's "agent" from this, and
 # shipmill gate starts a session on those rows (SKILL.md's repair table says what it does)
@@ -1194,6 +1205,18 @@ def loop_row(
     return Row("LOOP", label, "; ".join(parts))
 
 
+def gate_plist(repo: str) -> dict[str, object] | None:
+    """The gate's launchd job for the repo, on a Mac; None without one"""
+    path = LAUNCH_AGENTS / f"{gate_label(repo)}.plist"
+    if sys.platform != "darwin" or not path.is_file():
+        return None
+    with path.open("rb") as handle:
+        found = plistlib.load(handle)
+    if not isinstance(found, dict):
+        raise Refused(f"error: {path} is not a launchd job")
+    return found
+
+
 def agent_rows(repo: str, repo_dir: Path, now: dt.datetime) -> list[Row]:
     """The sessions and, on a Mac, the gate's launchd job; what this host can see"""
     claude = shutil.which("claude")
@@ -1204,11 +1227,9 @@ def agent_rows(repo: str, repo_dir: Path, now: dt.datetime) -> list[Row]:
     if sys.platform != "darwin":
         return rows
     label = gate_label(repo)
-    path = LAUNCH_AGENTS / f"{label}.plist"
-    if not path.is_file():
+    plist = gate_plist(repo)
+    if plist is None:
         return [*rows, loop_row(label, None, None, None, now)]
-    with path.open("rb") as handle:
-        plist = plistlib.load(handle)
     proc = subprocess.run(
         ["launchctl", "print", f"gui/{os.getuid()}/{label}"], capture_output=True, text=True, check=False
     )
@@ -1216,6 +1237,69 @@ def agent_rows(repo: str, repo_dir: Path, now: dt.datetime) -> list[Row]:
     log_path = plist.get("StandardOutPath")
     log = Path(log_path).read_text(errors="replace") if isinstance(log_path, str) and Path(log_path).is_file() else None
     return [*rows, loop_row(label, plist, printed, log, now)]
+
+
+def plugin_rows(plugins: object, marketplaces: object, latest: str, folders: list[Path]) -> list[Row]:
+    """The plugin's installs that apply to the repo, against the latest release: from `claude
+    plugin list --json` and `claude plugin marketplace list --json`, parsed (None when claude
+    isn't on PATH). An install applies at user scope, or at local or project scope in one of
+    the folders"""
+    newest = version_key(latest)
+    if newest is None:
+        raise Refused(f"error: {SHIPMILL_REPO}'s latest release {latest!r} is not a version tag")
+    if plugins is None:
+        return [Row("SHIPMILL_VERSION", "shipmill", f"latest {latest}; plugin: claude isn't on PATH, not read")]
+    if not isinstance(plugins, list):
+        raise Refused("error: claude plugin list --json: expected a JSON array")
+    installs = []
+    for e in plugins:
+        if not isinstance(e, dict) or e.get("id") != PLUGIN:
+            continue
+        if not isinstance(e.get("scope"), str) or not isinstance(e.get("version"), str):
+            raise Refused(f"error: claude plugin list --json: {PLUGIN} install {e!r}")
+        where = e.get("projectPath")
+        if e["scope"] == "user" or (isinstance(where, str) and Path(where) in folders):
+            installs.append((e["scope"], e["version"], where if isinstance(where, str) else None))
+    rows = []
+    for scope, version, where in installs:
+        key = version_key(f"v{version}")
+        if key is None:
+            raise Refused(f"error: {PLUGIN} {scope} install has version {version!r}")
+        if key < newest:
+            update = f"claude plugin update {PLUGIN} --scope {scope}"
+            fix = f"in {where}: {update}" if where else update
+            rows.append(Row("SHIPMILL_OUTDATED", f"plugin {scope}", f"{version}, latest {latest}; {fix}"))
+    found = ", ".join(f"{scope} {version}" + (f" ({where})" if where else "") for scope, version, where in installs)
+    detail = f"latest {latest}; plugin: {found or 'not installed for this repo on this host'}"
+    market = PLUGIN.partition("@")[2]
+    for m in marketplaces if isinstance(marketplaces, list) else []:
+        origin = m.get("repo") if isinstance(m, dict) and m.get("name") == market else None
+        if isinstance(origin, str) and origin.lower() != SHIPMILL_REPO:
+            detail += f"; marketplace source {origin}, now {SHIPMILL_REPO}"
+    return [Row("SHIPMILL_VERSION", "shipmill", detail), *rows]
+
+
+def claude_json(claude: str, *args: str) -> object:
+    out = run([claude, *args, "--json"])
+    try:
+        return json.loads(out)
+    except json.JSONDecodeError as exc:
+        raise Refused(f"error: claude {' '.join(args)} --json printed no JSON: {exc}") from None
+
+
+def shipmill_rows(repo: str, repo_dir: Path) -> list[Row]:
+    """The host's shipmill plugin against shipmill's latest release"""
+    latest = run(["gh", "release", "view", "-R", SHIPMILL_REPO, "--json", "tagName", "-q", ".tagName"]).strip()
+    folders = [repo_dir]
+    plist = gate_plist(repo)
+    workdir = plist.get("WorkingDirectory") if plist else None
+    if isinstance(workdir, str):
+        folders.append(Path(workdir))
+    claude = shutil.which("claude")
+    if claude is None:
+        return plugin_rows(None, None, latest, folders)
+    plugins = claude_json(claude, "plugin", "list")
+    return plugin_rows(plugins, claude_json(claude, "plugin", "marketplace", "list"), latest, folders)
 
 
 # -- repository settings -------------------------------------------------------------------
@@ -1335,6 +1419,7 @@ def main() -> int:
     rows += intake_rows(args.repo, args.bot_login, args.trusted_only)
     rows += active_rows(fetch_active(args.repo), now)
     rows += agent_rows(args.repo, repo_dir, now)
+    rows += shipmill_rows(args.repo, repo_dir)
     for row in ordered(rows):
         print(json.dumps(row.json(), sort_keys=True) if args.json else row.text())
     return 1 if any(r.state in ACTION for r in rows) else 0

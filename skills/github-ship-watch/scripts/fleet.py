@@ -89,6 +89,7 @@ ACTION = frozenset(
         "POSTMORTEM_DUE",
         "NEEDS_DECISION",
         "BRANCH_DELETE_OFF",
+        "SHIPMILL_OUTDATED",
     }
 )
 REPO_ERROR = "REPO_ERROR"

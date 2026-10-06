@@ -612,6 +612,8 @@ REPORT_ROWS = [
     "ISSUES_OPEN",
     "RUNS_ACTIVE",
     "BRANCH_DELETE_OFF",
+    "SHIPMILL_VERSION",
+    "SHIPMILL_OUTDATED",
     "POSTMORTEM_DUE",
     "BOT_OK",
     "PUBLISHED",
@@ -863,3 +865,75 @@ def test_delete_branch_on_merge_on_prints_no_row(ws: ModuleType) -> None:
 def test_a_setting_that_is_not_a_boolean_is_refused(ws: ModuleType) -> None:
     with pytest.raises(ws.Refused):
         ws.settings_rows("o/r", None)
+
+
+def install(scope: str, version: str, where: str | None = None, plugin: str = "shipmill@shipmill") -> dict[str, str]:
+    """One install as `claude plugin list --json` prints it"""
+    return {"id": plugin, "scope": scope, "version": version, **({"projectPath": where} if where else {})}
+
+
+def registry(*entries: dict[str, str]) -> list[dict[str, str]]:
+    return [*entries, install("user", "0.1.0", plugin="other@x")]
+
+
+MARKETPLACE = [{"name": "shipmill", "source": "github", "repo": "shipmill/shipmill"}]
+FOLDERS = [Path("/work/r"), Path("/work/r/tmp/shipmill-gate")]
+
+
+def test_an_install_behind_the_latest_release_needs_an_update(ws: ModuleType) -> None:
+    # #196: the gate's checkout had a local install pinned at 0.14.0 while v0.24.0 was out
+    installed = registry(install("user", "0.24.0"), install("local", "0.14.0", "/work/r/tmp/shipmill-gate"))
+    rows = ws.plugin_rows(installed, MARKETPLACE, "v0.24.0", FOLDERS)
+    assert [(r.state, r.subject, r.detail) for r in rows] == [
+        (
+            "SHIPMILL_VERSION",
+            "shipmill",
+            "latest v0.24.0; plugin: user 0.24.0, local 0.14.0 (/work/r/tmp/shipmill-gate)",
+        ),
+        (
+            "SHIPMILL_OUTDATED",
+            "plugin local",
+            "0.14.0, latest v0.24.0; in /work/r/tmp/shipmill-gate: "
+            "claude plugin update shipmill@shipmill --scope local",
+        ),
+    ]
+    assert "SHIPMILL_OUTDATED" in ws.ACTION and "SHIPMILL_OUTDATED" not in ws.AGENT
+    assert "SHIPMILL_VERSION" not in ws.ACTION
+
+
+def test_installs_for_other_folders_are_left_out(ws: ModuleType) -> None:
+    installed = registry(install("local", "0.1.0", "/elsewhere"), install("project", "0.2.0", "/work/r/.claude/wt"))
+    rows = ws.plugin_rows(installed, MARKETPLACE, "v0.24.0", FOLDERS)
+    assert [(r.state, r.detail) for r in rows] == [
+        ("SHIPMILL_VERSION", "latest v0.24.0; plugin: not installed for this repo on this host")
+    ]
+
+
+def test_a_current_install_is_only_reported(ws: ModuleType) -> None:
+    rows = ws.plugin_rows(registry(install("user", "0.25.0")), MARKETPLACE, "v0.24.0", FOLDERS)
+    assert states(rows) == ["SHIPMILL_VERSION"]
+
+
+def test_a_marketplace_on_the_old_repo_name_is_named(ws: ModuleType) -> None:
+    old = [{"name": "shipmill", "source": "github", "repo": "romamo/shipmill"}, {"name": "x", "repo": "a/b"}]
+    rows = ws.plugin_rows(registry(install("user", "0.24.0")), old, "v0.24.0", FOLDERS)
+    assert rows[0].detail.endswith("; marketplace source romamo/shipmill, now shipmill/shipmill")
+
+
+def test_without_claude_the_plugin_is_not_read(ws: ModuleType) -> None:
+    rows = ws.plugin_rows(None, None, "v0.24.0", FOLDERS)
+    assert [r.detail for r in rows] == ["latest v0.24.0; plugin: claude isn't on PATH, not read"]
+
+
+@pytest.mark.parametrize(
+    ("installed", "latest"),
+    [
+        ([{"id": "shipmill@shipmill", "scope": "user"}], "v0.24.0"),
+        ({"plugins": []}, "v0.24.0"),
+        (registry(install("user", "weird")), "v0.24.0"),
+        (registry(install("user", "0.24.0")), "latest"),
+    ],
+)
+def test_a_malformed_plugin_list_or_release_is_refused(ws: ModuleType, installed: object, latest: str) -> None:
+    with pytest.raises(ws.Refused):
+        ws.plugin_rows(installed, MARKETPLACE, latest, FOLDERS)
