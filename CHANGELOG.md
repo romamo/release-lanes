@@ -22,6 +22,16 @@ bot.
   job) (S-005-1, S-005-2, S-005-3, S-005-5, S-005-6, S-005-11, S-005-19, S-005-20, S-005-21)
   (#162)
 
+### Fixed
+
+- github-ship-watch no longer reports `WORK_BRANCH_STALE` for a work branch whose run is
+  still alive behind ten or more newer runs: with a work branch on origin, it asks GitHub
+  for the release workflow's unfinished runs by status (queued, in progress, waiting,
+  pending, requested), as `prepare` does, instead of reading the newest ten, and a failed
+  query stops the watch (exit 2) rather than reading as no owner. The row's re-check before
+  deleting the branch asks by status the same way. A pass with no work branch makes no
+  extra calls (#185)
+
 ## [0.23.0] - 2026-10-06
 
 ### Added
