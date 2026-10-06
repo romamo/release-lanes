@@ -9,6 +9,17 @@ bot.
 
 ### Added
 
+- The needs-decision protocol for headless sessions: a question for the user becomes a
+  comment whose first line is `<!-- shipmill:needs-decision -->` and a `needs-decision`
+  label, and the item waits on GitHub (`references/needs-decision.md`, linked from a headless
+  rule in github-issue-triage, github-issue-resolve, and github-pr-triage).
+  `triage_state.py` reads such an issue as NEEDS_DECISION, no action, until an OWNER,
+  MEMBER, or COLLABORATOR replies, and gains `--bot-login` and `--trusted-only` (an outside
+  author's issue reads UNTRUSTED). `watch_state.py` passes both through, leaves waiting
+  issues and pull requests out of ISSUES and PRS_OPEN, and lists them in a NEEDS_DECISION
+  row (an action, `agent: false`) and, with `--trusted-only`, outsiders' issues and fork pull
+  requests in an UNTRUSTED row, so `shipmill gate` reads a repo whose only work waits as
+  QUIET (S-005-7, S-005-8, S-005-9, S-005-10, S-005-17) (#161)
 - D-18: a Release run that finds a work branch no active run owns deletes it and pushes its
   own, given `actions: read`; without it, the stop stays but is reported (#175)
 
