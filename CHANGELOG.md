@@ -21,6 +21,13 @@ bot.
   `shipmill launchd` now writes `AbandonProcessGroup` (run it once more for an installed
   job) (S-005-1, S-005-2, S-005-3, S-005-5, S-005-6, S-005-11, S-005-19, S-005-20, S-005-21)
   (#162)
+- A headless `shipmill gate` without `app_id` notifies you of each item that waits on your
+  needs-decision reply, since GitHub doesn't notify you of a comment under your own login:
+  on a tick that reads the state, at once and then every `remind_hours`, recorded in
+  `needs-decision.json` beside `waiting.json` and under its rules. With `app_id` the bot's
+  mention notifies on GitHub and the gate sends nothing; a headless launch without it says
+  so. `--json` gains `mode` and a `decisions` list (S-005-12, S-005-13, S-005-14,
+  S-005-15) (#163)
 
 ### Changed
 

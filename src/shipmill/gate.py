@@ -5,11 +5,12 @@ asks Claude Code which of its own sessions are alive, and launches a background 
 (`claude --bg`, or in headless mode a detached `claude -p` tracked by its process, D-17)
 only when there is work, no earlier session is still running or waiting on the user, and
 the work changed since the last launch. Everything it knows comes from
-GitHub and from Claude Code; the two files it writes, under the checkout's git directory,
-keep an unchanged state from starting a session on every tick and time how long a session
-has waited on the user, so a reminder repeats only every few hours and an optional limit
-stops it. Each tick also prunes the repository's worktrees that provably landed (spec
-S-002), held or not, before it decides anything.
+GitHub and from Claude Code; the files it writes, under the checkout's git directory,
+keep an unchanged state from starting a session on every tick and time how long a session,
+or in headless mode an item's needs-decision question, has waited on the user, so a
+reminder repeats only every few hours and an optional limit stops a session. Each tick
+also prunes the repository's worktrees that provably landed (spec S-002), held or not,
+before it decides anything.
 """
 
 import datetime as dt
@@ -38,6 +39,8 @@ from shipmill.worktrees import Judged, Sessions, Verdict, judge, prune
 
 RECORD = "gate.json"
 WAITING = "waiting.json"  # one entry per blocked gate session (spec 003)
+DECISIONS = "needs-decision.json"  # one entry per item that waits on a decision (spec 005)
+NEEDS_DECISION = "NEEDS_DECISION"  # watch_state.py's items waiting on a reply, `#N` only (S-005-9)
 PRS_OPEN = "PRS_OPEN"  # watch_state.py's open pull requests: work only with [agents] prs = true
 SESSIONS = "sessions"  # a headless session's log, <uuid>.log, under the state directory (D-17)
 
@@ -146,6 +149,9 @@ class Decision:
     stop: tuple[str, ...] = ()  # finished sessions to stop before launching
     identity: str | None = None  # the App bot a launch writes as (spec 004); None: the host's gh login
     follow: str | None = None  # how to follow a headless launch (`tail -f <log>`); None: claude attach
+    mode: Mode | None = None  # the config's mode on a tick that read the state; None: it didn't
+    decisions: tuple[Asked, ...] = ()  # what the tick did for each item waiting on a decision (spec 005)
+    asks_as: str | None = None  # a headless launch without an App: the login its questions post as
 
 
 def fingerprint(work: Iterable[Finding]) -> str:
@@ -528,6 +534,25 @@ def _moment(value: object, what: str) -> dt.datetime:
     return moment
 
 
+def due(wait: Wait, now: dt.datetime, remind: dt.timedelta) -> bool:
+    """A wait is notified at once, then again once remind_hours passed since the last send"""
+    return wait.notified is None or now - wait.notified >= remind
+
+
+def send(
+    notifier: Notifier, title: str, body: str, wait: Wait, now: dt.datetime, dry_run: bool
+) -> tuple[Wait, str | None]:
+    """One due notification, on a real run only: the wait with notified moved to now, or the
+    failed send's error with notified unchanged, so the next tick tries again"""
+    if dry_run:
+        return wait, None
+    try:
+        notifier.send(title, body)
+    except NotifyFailed as exc:
+        return wait, str(exc)
+    return Wait(wait.since, now), None
+
+
 def load_waiting(path: Path) -> dict[str, Wait]:
     """waiting.json, refused unless every entry is exactly {since, notified}"""
     if not path.is_file():
@@ -603,20 +628,110 @@ def attend(
                     raise
         else:
             body = f"session {s.id} waits on you ({span(minutes)}): claude attach {s.id}"
-        due = agents.notify and (expired or wait.notified is None or now - wait.notified >= remind)
+        notifying = agents.notify and (expired or due(wait, now, remind))
         error = None
-        if due and not dry_run:
-            try:
-                notifier.send(f"shipmill {repo}", body)
-            except NotifyFailed as exc:
-                error = str(exc)
-            else:
-                wait = Wait(wait.since, now)
+        if notifying:
+            wait, error = send(notifier, f"shipmill {repo}", body, wait, now, dry_run)
         if not expired:  # a stopped session's entry is dropped
             waits[s.id] = wait
-        report.append(Waiting(s.id, s.name, wait.since, minutes, due and error is None, expired, error))
+        report.append(Waiting(s.id, s.name, wait.since, minutes, notifying and error is None, expired, error))
     if not dry_run:
         save_waiting(path, waits)
+    return tuple(report)
+
+
+@dataclass(frozen=True, slots=True)
+class Asked:
+    """What one tick did for one item waiting on a decision (spec 005); on a dry run, what it
+    would have done"""
+
+    item: int
+    since: dt.datetime
+    waited_hours: int
+    notified: bool
+    error: str | None
+
+    def line(self, dry_run: bool) -> str | None:
+        """Only a send, or a failed one, makes a line: an item that waits unnotified is quiet"""
+        if self.error is not None:
+            return f"notify failed for #{self.item}: {self.error}"
+        if not self.notified:
+            return None
+        verb = "would notify" if dry_run else "notified"
+        return f"{verb} #{self.item} (waiting {self.waited_hours}h)"
+
+    def record(self) -> dict[str, object]:
+        return {
+            "item": self.item,
+            "since": self.since.isoformat(),
+            "waited_hours": self.waited_hours,
+            "notified": self.notified,
+            "error": self.error,
+        }
+
+
+def waiting_items(findings: Iterable[Finding]) -> list[int]:
+    """The items watch_state.py's NEEDS_DECISION row lists as `#N`; any other token is refused"""
+    items: set[int] = set()
+    for f in findings:
+        if f.state != NEEDS_DECISION:
+            continue
+        for token in f.detail.split():
+            if not re.fullmatch(r"#[1-9][0-9]*", token):
+                raise ReleaseError(f"watch_state.py's {NEEDS_DECISION} row lists {token[:50]!r}, not #N")
+            items.add(int(token[1:]))
+    return sorted(items)
+
+
+def load_decisions(path: Path) -> dict[int, Wait]:
+    """needs-decision.json: waiting.json's shape, keyed by item number"""
+    waits = load_waiting(path)
+    for key in waits:
+        if not re.fullmatch(r"[1-9][0-9]*", key):
+            raise ReleaseError(f"{path} is malformed ({key[:50]!r} is not an item number); delete it to start over")
+    return {int(key): wait for key, wait in waits.items()}
+
+
+def save_decisions(path: Path, waits: Mapping[int, Wait]) -> None:
+    save_waiting(path, {str(item): wait for item, wait in waits.items()})
+
+
+def ask(
+    path: Path,
+    repo: str,
+    findings: Sequence[Finding],
+    agents: AgentsConfig,
+    notifier: Notifier,
+    now: dt.datetime,
+    dry_run: bool,
+) -> tuple[Asked, ...]:
+    """Spec 005's notifications, on a headless tick that read the state: record each item of
+    the NEEDS_DECISION row in needs-decision.json and, without app_id and with notify, notify
+    for it at once and then every remind_hours. With app_id the bot's mention notifies on
+    GitHub, so the gate sends nothing. With no item waiting it only drops the record and
+    reads nothing. A failed send is reported, never raised, and tried again next tick"""
+    items = waiting_items(findings)
+    if not items:
+        if path.exists() and not dry_run:
+            path.unlink()
+        return ()
+    remind = dt.timedelta(hours=agents.remind_hours)
+    notify = agents.notify and agents.app_id is None
+    known = load_decisions(path)
+    waits: dict[int, Wait] = {}  # only the waiting items: any other entry is dropped
+    report = []
+    for item in items:
+        wait = known.get(item) or Wait(now, None)
+        hours = max(0, int((now - wait.since).total_seconds() // 3600))
+        notifying = notify and due(wait, now, remind)
+        error = None
+        if notifying:
+            body = f"#{item} waits on your decision: https://github.com/{repo}/issues/{item}"
+            wait, error = send(notifier, f"shipmill {repo}", body, wait, now, dry_run)
+        waits[item] = wait
+        report.append(Asked(item, wait.since, hours, notifying and error is None, error))
+    if not dry_run:
+        save_decisions(path, waits)
     return tuple(report)
 
 
@@ -725,7 +840,10 @@ def gate(
     --trusted-only, and with app_id set first checks the App, so a failure reads no state,
     and passes --bot-login <slug>[bot]. A headless LAUNCH reads the host's login, dry run or
     not, and on a real run starts `claude -p` detached under a new_session id, its output in
-    the state directory's sessions/<id>.log, and records its pid and start time"""
+    the state directory's sessions/<id>.log, and records its pid and start time. A headless
+    tick that reads the state records the items of its NEEDS_DECISION row in
+    needs-decision.json and, without app_id, notifies for them (spec 005); the decision
+    carries the mode it read and what it did for each item"""
     check_checkout(git, repo)
     config = checked(config, claude.args)
     state = state_dir(git)
@@ -757,7 +875,9 @@ def gate(
         identity = None if agents.app_id is None else as_app(agents.app_id, now, app)
         read = StateRead(trusted_only=True, bot_login=None if identity is None else identity.login)
     retry = dt.timedelta(hours=agents.retry_hours)
-    decision = decide(findings(read), sessions, last, now, retry, agents.prs)
+    rows = findings(read)
+    asked = ask(state / DECISIONS, repo, rows, agents, notifier, now, dry_run) if headless else ()
+    decision = replace(decide(rows, sessions, last, now, retry, agents.prs), mode=agents.mode, decisions=asked)
     if decision.action is not Action.LAUNCH:
         return decision, None, waiting, pruned
     if not headless:
@@ -768,7 +888,10 @@ def gate(
     if headless:
         if login is None:
             raise ReleaseError("headless mode mentions your gh login, but no login read was given; no session starts")
-        text = headless_prompt(agents.prompt, repo, decision.work, now, login())
+        host = login()
+        text = headless_prompt(agents.prompt, repo, decision.work, now, host)
+        if identity is None:  # GitHub doesn't notify anyone of their own mention (spec 005)
+            decision = replace(decision, asks_as=host)
     if dry_run:
         return decision, None, waiting, pruned
     env = None
@@ -805,6 +928,8 @@ def tick_record(
         "identity": decision.identity,
         "waiting": [w.record() for w in waiting],
         "pruned": [j.path for j in pruned],
+        "mode": None if decision.mode is None else decision.mode.value,
+        "decisions": [a.record() for a in decision.decisions],
     }
 
 
@@ -815,10 +940,13 @@ def tick_lines(
     line per blocked session, then one per pruned worktree"""
     who = f" as {decision.identity}" if decision.identity is not None else ""
     lines = [f"{decision.action.value}: {decision.reason}{who}"]
+    if decision.asks_as is not None:
+        lines.append(f"  no app_id: needs-decision comments post as {decision.asks_as}, so GitHub won't notify you")
     for w in waiting:
         lines.append(f"  {w.line(dry_run)}")
         if w.stopped and w.error is not None:  # the stop line above leaves out the failed send
             lines.append(f"  notify failed for {w.session}: {w.error}")
+    lines += [f"  {line}" for a in decision.decisions if (line := a.line(dry_run)) is not None]
     verb = "would prune" if dry_run else "pruned"
     lines += [f"  {verb} {j.path} ({j.worktree.branch})" for j in pruned]
     lines += [f"  {f.line()}" for f in decision.work]
