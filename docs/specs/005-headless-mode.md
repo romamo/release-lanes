@@ -374,10 +374,11 @@ Checked on main plus #191 (#164). The spec merged in #148, with its `claude -p` 
 (#161), #187 (#162), #190 (#163), and #191 (#164). `specs.py coverage --spec 005` names a
 passing test for every criterion. The probe behind S-005-4 ran a real `claude -p` on Claude
 Code 2.1.291; every other criterion is checked by its tests, with fakes for `claude`, `gh`,
-and the notifier. By hand: `shipmill launchd shipmill/shipmill --print` with
-`--claude-arg=--allowedTools --claude-arg "Bash(npm *)"` wrote `AbandonProcessGroup` and
-both flags in `--claude-arg=` form, and `setup_state.py shipmill/shipmill` on this
-interactive repo read the same five rows as before, exit 0.
+and the notifier. By hand: `shipmill launchd shipmill/shipmill --print` wrote
+`AbandonProcessGroup` true; `shipmill gate` parsed the documented widening,
+`--claude-arg=--allowedTools --claude-arg "Bash(npm *)"`, as both flags (a job installed
+with one needs #192's fix); and `setup_state.py shipmill/shipmill` on this interactive repo
+read the same five rows as before, exit 0.
 
 - S-005-1: `test_s005_1_mode_defaults_to_interactive_and_reads_what_is_given`, `test_s005_1_a_bad_mode_exits_2_naming_the_key`, `test_s005_1_mode_loads_from_the_config_file`, passing
 - S-005-2: `test_s005_2_interactive_launches_as_it_did_before`, `test_s005_2_interactive_reads_the_state_without_the_trust_filter`, `test_s005_2_interactive_with_an_app_reads_the_state_without_a_bot_login`, `test_s005_2_interactive_takes_the_flags_headless_refuses`, passing
@@ -396,7 +397,7 @@ interactive repo read the same five rows as before, exit 0.
 - S-005-15: `test_s005_15_json_reports_mode_and_each_waiting_items_decision`, `test_s005_15_json_reports_an_empty_list_when_nothing_waits`, `test_s005_15_interactive_json_reports_its_mode`, `test_s005_15_a_tick_that_reads_no_config_reports_no_mode`, `test_s005_15_the_session_waiting_step_keeps_its_file_and_output`, passing
 - S-005-16: `test_s005_16_headless_wants_the_needs_decision_label`, `test_s005_16_interactive_or_no_agents_doesnt_want_the_label`, `test_s005_16_a_headless_mode_outside_agents_doesnt_count`, `test_s005_16_fix_creates_the_label_only_when_wanted`, `test_s005_16_headless_without_app_id_reads_agents_no_app_counted_done`, `test_s005_16_the_agents_mode_never_reads_as_the_release_mode`, passing; the existing setup_state tests for interactive and no-`[agents]` configs pass unchanged
 - S-005-17: `test_s005_17_the_reference_defines_the_protocol`, `test_s005_17_each_skill_carries_a_headless_rule_linking_it`, passing
-- S-005-18: read the three docs; `test_s005_18_the_docs_document_headless_mode` asserts each topic and every tool of `HEADLESS_TOOLS`, `test_s005_18_the_needs_decision_reference_widens_with_the_working_flag`, and `test_s005_18_the_jobs_claude_args_parse_back_as_the_gates` that the documented widening parses through `shipmill gate` and a `launchd` job, passing
+- S-005-18: read the three docs; `test_s005_18_the_docs_document_headless_mode` asserts each topic and every tool of `HEADLESS_TOOLS`, and `test_s005_18_the_needs_decision_reference_widens_with_the_working_flag`, passing
 - S-005-19: `test_s005_19_a_headless_launch_is_detached_logged_and_recorded`, `test_s005_19_a_dry_run_starts_and_writes_nothing`, `test_s005_19_the_session_runs_in_a_new_session_with_no_stdin_appending_its_log`, `test_s005_19_the_launch_returns_without_waiting_and_its_start_time_is_read`, `test_s005_19_a_command_that_cant_start_exits_2`, passing
 - S-005-20: `test_s005_20_a_running_headless_session_reads_running`, `test_s005_20_it_still_reads_running_after_the_mode_goes_back_to_interactive`, `test_s005_20_an_ended_session_or_a_reused_pid_decides_as_if_none_ran`, `test_s005_20_a_session_whose_start_time_wasnt_read_is_not_running`, `test_s005_20_a_headless_session_never_waits_and_is_never_stopped`, `test_s005_20_a_record_without_mode_is_an_interactive_launch`, `test_s005_20_a_malformed_headless_record_exits_2`, `test_s005_20_a_headless_record_needs_a_uuid_session`, `test_s005_20_a_headless_record_whose_session_isnt_a_string_exits_2`, passing
 - S-005-21: `test_s005_21_launchd_abandons_the_process_group`, passing; the `launchd --print` above showed `AbandonProcessGroup` true

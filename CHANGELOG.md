@@ -35,9 +35,7 @@ bot.
   and an `[agents]` `mode` no longer reads as the release mode. agent-modes.md, the
   shipmill-setup skill, and install.md document headless mode: `HEADLESS_TOOLS` and how to
   widen it (`--claude-arg=--allowedTools --claude-arg "Bash(npm *)"`), the trust filter, the
-  label, and notifications with and without an App. `shipmill launchd` now writes each
-  `--claude-arg` as `--claude-arg=<flag>`, since the job's gate refused the separate form
-  on every tick; run it once more for a job installed with one (S-005-16, S-005-18) (#164)
+  label, and notifications with and without an App (S-005-16, S-005-18) (#164)
 
 ### Changed
 

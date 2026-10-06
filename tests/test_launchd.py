@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from shipmill.cli import _parser
 from shipmill.errors import ReleaseError
 from shipmill.launchd import BASE_PATH, build, find_tool, is_temporary, label
 
@@ -63,26 +62,13 @@ def test_the_job_runs_the_gate_with_a_stable_path(tmp_path: Path) -> None:
         "gate",
         "romamo/treaty",
         "--refresh",
-        "--claude-arg=--permission-mode=auto",
+        "--claude-arg",
+        "--permission-mode=auto",
     ]
     assert data["StartInterval"] == 900 and data["WorkingDirectory"] == str(checkout)
     assert data["EnvironmentVariables"]["PATH"].split(os.pathsep) == [str(local), str(brew), *BASE_PATH]
     assert job.plist == tmp_path / "Library" / "LaunchAgents" / "dev.shipmill.gate.romamo.treaty.plist"
     assert data["StandardOutPath"] == data["StandardErrorPath"] == str(job.log)
-
-
-def test_s005_18_the_jobs_claude_args_parse_back_as_the_gates(tmp_path: Path) -> None:
-    """The documented widening, `--claude-arg=--allowedTools --claude-arg "Bash(npm *)"`, reaches
-    the job's gate as the same flags: a `--claude-arg` followed by a separate dash-led value is
-    an argparse error, which would fail every tick"""
-    path = os.pathsep.join([str(tools(tmp_path / "bin", "claude", "uvx", "gh", "git"))])
-    widen = ["--allowedTools", "Bash(npm *)"]
-    job = build("romamo/treaty", tmp_path / "gate", 15, "x", widen, tmp_path, path, nothing)
-    args = plistlib.loads(job.document)["ProgramArguments"]
-    parsed = _parser().parse_args(args[args.index("--repo") :])
-    assert parsed.command == "gate" and parsed.claude_arg == widen
-    documented = ["gate", "romamo/treaty", "--claude-arg=--allowedTools", "--claude-arg", "Bash(npm *)"]
-    assert _parser().parse_args(documented).claude_arg == widen
 
 
 def test_the_interval_is_bounded(tmp_path: Path) -> None:
