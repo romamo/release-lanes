@@ -611,6 +611,7 @@ REPORT_ROWS = [
     "PRS_OPEN",
     "ISSUES_OPEN",
     "RUNS_ACTIVE",
+    "BRANCH_DELETE_OFF",
     "POSTMORTEM_DUE",
     "BOT_OK",
     "PUBLISHED",
@@ -845,3 +846,20 @@ def test_an_unloaded_or_missing_gate_loop_says_so(ws: ModuleType) -> None:
 @pytest.mark.parametrize("state", ["TRIAGE_MODE", "AGENT_SESSION", "LOOP", "HOST_UNKNOWN"])
 def test_the_agent_rows_are_report_only(ws: ModuleType, state: str) -> None:
     assert state not in ws.ACTION and state not in ws.AGENT
+
+
+def test_delete_branch_on_merge_off_is_an_action_for_a_person(ws: ModuleType) -> None:
+    # #194: the setting was off after a repo move and 74 merged branches piled up unnoticed
+    rows = ws.settings_rows("o/r", False)
+    assert [(r.state, r.subject) for r in rows] == [("BRANCH_DELETE_OFF", "o/r")]
+    assert "gh repo edit o/r --delete-branch-on-merge" in rows[0].detail
+    assert "BRANCH_DELETE_OFF" in ws.ACTION and "BRANCH_DELETE_OFF" not in ws.AGENT
+
+
+def test_delete_branch_on_merge_on_prints_no_row(ws: ModuleType) -> None:
+    assert ws.settings_rows("o/r", True) == []
+
+
+def test_a_setting_that_is_not_a_boolean_is_refused(ws: ModuleType) -> None:
+    with pytest.raises(ws.Refused):
+        ws.settings_rows("o/r", None)
