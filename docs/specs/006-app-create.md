@@ -49,20 +49,29 @@ each must be in an account the login administers, or the command exits 2 naming 
 ### 2. Plan
 
 The plan is the App's owner, its visibility, its name, and the gated repos it is for.
-Unless the flags say otherwise:
 
-| Gated repos found | Owner | Visibility |
-|---|---|---|
-| all in one account | that account | private |
-| in several accounts | the account with the most of them; on a tie, the owner of the checkout's `origin` if it is among them, else the first by name | public |
-| none | the owner of the checkout's `origin`, if the login administers it | private |
+**Owner.** The App is the login's own by default: the person who runs the command manages
+the App and holds its key, and GitHub can transfer it to an org later. `--owner` names an
+org the login administers instead; one it doesn't administer exits 2 naming the account
+and the role it needs. Without `--owner`, an interactive run (stdin a terminal, no
+`--dry-run` or `--json`) lists the accounts and asks:
 
-`--owner` sets the owner and `--public` or `--private` the visibility; the repos are still
-discovered, since the install step checks them. With no gated repo found, no `--owner`, and a
-checkout whose `origin` owner the login doesn't administer (or no checkout), the command
-exits 2 saying to pass `--owner`. An `--owner` the login doesn't administer exits 2 naming
-the account and the role it needs. `--private` with gated repos outside the owner account
-prints a warning naming each repo the App can't be installed on, and goes on.
+```
+Who should own the App?
+  1. romamo (personal) (default)
+  2. cli-agent-spec (org, 1 gated repo)
+  3. shipmill (org, 1 gated repo)
+Owner [1-3, Enter for romamo]:
+```
+
+Enter keeps the personal account; a number or a login picks another; anything else exits 2
+saying to pass `--owner`. A run that isn't interactive takes the personal account.
+
+**Visibility.** Private, unless a gated repo is outside the owner account: a private App
+installs only on its owner, so then the App is public, and the reason says how many repos
+are elsewhere. `--public` or `--private` sets it; `--private` with gated repos outside the
+owner prints a warning naming each repo the App can't be installed on, and goes on. The
+repos are discovered either way, since the install step checks them.
 
 Without `--name`, the App is named `shipmill-<owner>` (lowercased), except under the
 `shipmill` account, where it is `shipmill-agent`: the name tells which account's bot made
@@ -157,9 +166,9 @@ then prove it: shipmill --repo <gate checkout> gate <owner/repo> --dry-run
 - S-006-1: the accounts are the login and each org where its membership is active with role `admin`; an org where it is a member only is left out, and a token without `read:org` exits 2 saying `gh auth refresh -s read:org`
 - S-006-2: a repo is gated when `.github/shipmill.toml` exists on its default branch through the contents API; archived repos are skipped, a 404 is not gated, and any other status exits 2 naming the repo
 - S-006-3: `--repos` replaces the discovery of repos, and a listed repo outside the administered accounts exits 2 naming it
-- S-006-4: with gated repos in one account, the plan is a private App owned by that account
-- S-006-5: with gated repos in several accounts, the plan is a public App owned by the account with the most, a tie going to the checkout's `origin` owner when it is among them and otherwise to the first by name
-- S-006-6: with no gated repo, the plan is a private App owned by the checkout's `origin` owner when the login administers it; otherwise, without `--owner`, the command exits 2 saying to pass `--owner`
+- S-006-4: without `--owner` the App is owned by the login's personal account, and private when every gated repo is in it (or none is found)
+- S-006-5: with a gated repo outside the owner account the App is public by default, the reason saying how many repos are elsewhere
+- S-006-6: the owner menu lists the login first as the default and each administered org with its gated repos; Enter keeps the default, a number or a login picks one, and anything else exits 2 saying to pass `--owner`
 - S-006-7: `--owner` and `--public`/`--private` override the plan; an `--owner` the login doesn't administer exits 2 naming it and the role needed; `--private` with gated repos outside the owner prints a warning naming each
 - S-006-8: the plan is printed before anything is created, and `--dry-run` prints it, starts no server, opens no browser, and writes nothing
 - S-006-9: the manifest's permissions are exactly `PERMISSIONS` from `src/shipmill/app.py`, its webhook is inactive with no events, its `public` and `name` come from the plan, and it is posted to the org's or the user's new-App URL as the owner type requires
@@ -173,6 +182,7 @@ then prove it: shipmill --repo <gate checkout> gate <owner/repo> --dry-run
 - S-006-17: without `--name` the name is `shipmill-<owner>` (`shipmill-agent` under `shipmill`), else `shipmill-<login>` with a note when the first is taken; a free `--name` is kept; when those are taken the command exits 2 naming the free alternatives
 - S-006-18: the local page runs no script and sends nothing until the button is clicked; it shows the name, owner, visibility, repos, and each permission with its access and use, and tells the maintainer to come back and click again after a sign-in on GitHub
 - S-006-19: each line the command prints is flushed as it is printed, so a piped or backgrounded run shows the plan and the URL at once
+- S-006-20: a run without `--owner` whose stdin is a terminal, and without `--dry-run` or `--json`, shows the owner menu and plans with the account picked; other runs ask nothing
 
 ## Out of scope
 
@@ -192,6 +202,7 @@ then prove it: shipmill --repo <gate checkout> gate <owner/repo> --dry-run
 
 - shipmill/shipmill#155: S-006-1, S-006-2, S-006-3, S-006-4, S-006-5, S-006-6, S-006-7, S-006-8, S-006-9, S-006-10, S-006-11, S-006-12, S-006-13, S-006-14, S-006-15, S-006-16
 - shipmill/shipmill#157: S-006-17, S-006-18, S-006-19
+- shipmill/shipmill#167: S-006-20
 
 ## Verification
 
@@ -202,9 +213,9 @@ discovery and the plan also ran against GitHub for real (`shipmill app-create --
 - S-006-1: `test_s006_1_the_accounts_are_the_login_and_the_orgs_it_administers` and `test_s006_1_without_read_org_the_command_says_how_to_grant_it`, passing; the real dry run found romamo and the three orgs it administers, not theagenttimes, where it is a member
 - S-006-2: `test_s006_2_a_repo_is_gated_when_its_config_exists_and_archived_ones_are_skipped` and `test_s006_2_any_other_status_names_the_repo`, passing; the real dry run found cli-agent-spec/cli-agent-spec and shipmill/shipmill
 - S-006-3: `test_s006_3_repos_replaces_discovery_and_refuses_another_account`, passing
-- S-006-4: `test_s006_4_repos_in_one_account_plan_a_private_app_there`, passing
-- S-006-5: `test_s006_5_repos_in_several_accounts_plan_a_public_app_under_the_most`, passing; the real dry run planned `shipmill-agent under shipmill, public`, the tie going to this checkout's owner
-- S-006-6: `test_s006_6_no_gated_repo_plans_private_under_the_checkouts_owner_or_asks`, passing
+- S-006-4: `test_s006_4_the_app_is_personal_and_private_by_default`, passing
+- S-006-5: `test_s006_5_gated_repos_outside_the_owner_make_it_public`, passing
+- S-006-6: `test_s006_6_an_org_owner_is_asked_for_with_the_personal_account_first`, passing
 - S-006-7: `test_s006_7_flags_override_the_plan_and_a_private_app_warns_about_other_accounts`, passing
 - S-006-8: `test_s006_8_a_dry_run_prints_the_plan_and_creates_nothing`, passing; the real dry run made no POST and wrote no key
 - S-006-9: `test_s006_9_the_manifest_holds_exactly_the_gates_permissions_and_no_webhook`, passing; the manifest's permissions come from `PERMISSIONS` in `src/shipmill/app.py`
@@ -218,3 +229,4 @@ discovery and the plan also ran against GitHub for real (`shipmill app-create --
 - S-006-17: `test_s006_17_the_default_name_is_shipmill_owner_then_shipmill_login`, `test_s006_17_with_both_taken_it_exits_2_suggesting_free_alternatives`, and `test_s006_17_a_taken_chosen_name_exits_2_suggesting_free_ones`, passing
 - S-006-18: `test_s006_18_the_page_reviews_the_plan_and_waits_for_a_click`, passing; the first real run, on the auto-submitting page this replaces, lost the manifest behind GitHub's sign-in and showed *We didn't find an App Manifest*
 - S-006-19: `test_s006_19_each_line_is_flushed_as_it_happens`, passing; the first real run, backgrounded, had printed nothing after two minutes
+- S-006-20: `test_s006_20_an_interactive_run_asks_for_the_owner`, passing; `main` passes `input` only when stdin is a terminal and `--owner` is unset

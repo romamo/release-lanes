@@ -31,7 +31,9 @@ from shipmill.app_create import (
     given_repos,
     manifest,
     new_app_url,
+    owner_menu,
     page,
+    pick_owner,
     plan,
     save_key,
     slug,
@@ -45,6 +47,9 @@ PEM = "-----BEGIN RSA PRIVATE KEY-----\nsecret\n-----END RSA PRIVATE KEY-----\n"
 ME = Account("romamo", "User")
 SHIPMILL = Account("shipmill", "Organization")
 CAS = Account("cli-agent-spec", "Organization")
+PERSONAL_PUBLIC = (
+    "your personal account (--owner picks an org you administer); public, since 2 gated repos are elsewhere"
+)
 
 
 @dataclass
@@ -160,39 +165,44 @@ def test_s006_3_repos_replaces_discovery_and_refuses_another_account() -> None:
         given_repos(["theagenttimes/site"], (ME, SHIPMILL))
 
 
-def test_s006_4_repos_in_one_account_plan_a_private_app_there() -> None:
-    planned = plan((ME, SHIPMILL), ("shipmill/a", "shipmill/b"), "romamo", None, None, "shipmill-agent")
-    assert (planned.owner, planned.public, planned.warnings) == (SHIPMILL, False, ())
+def test_s006_4_the_app_is_personal_and_private_by_default() -> None:
+    planned = plan((ME, SHIPMILL), ("romamo/notes",), None, None, None)
+    assert (planned.owner, planned.public, planned.name, planned.warnings) == (ME, False, "shipmill-romamo", ())
+    assert planned.reason == "your personal account (--owner picks an org you administer)"
+    assert plan((ME, SHIPMILL), (), None, None, None).owner == ME
 
 
-def test_s006_5_repos_in_several_accounts_plan_a_public_app_under_the_most() -> None:
+def test_s006_5_gated_repos_outside_the_owner_make_it_public() -> None:
+    planned = plan((ME, CAS, SHIPMILL), ("cli-agent-spec/x", "shipmill/a"), None, None, None)
+    assert (planned.owner, planned.public) == (ME, True)
+    assert planned.reason.endswith("; public, since 2 gated repos are elsewhere")
+    assert planned.installable == ("cli-agent-spec/x", "shipmill/a")
+    org = plan((ME, SHIPMILL), ("shipmill/a", "shipmill/b"), "shipmill", None, None)
+    assert (org.owner, org.public, org.name) == (SHIPMILL, False, "shipmill-agent")
+
+
+def test_s006_6_an_org_owner_is_asked_for_with_the_personal_account_first() -> None:
     found = (ME, CAS, SHIPMILL)
-    planned = plan(found, ("cli-agent-spec/x", "shipmill/a", "shipmill/b"), None, None, None, "n")
-    assert (planned.owner, planned.public) == (SHIPMILL, True)
-    assert planned.reason == "gated repos in 2 accounts (cli-agent-spec 1, shipmill 2)"
-    tie = ("cli-agent-spec/x", "shipmill/a")
-    assert plan(found, tie, "shipmill", None, None, "n").owner == SHIPMILL  # the checkout's owner
-    assert plan(found, tie, "romamo", None, None, "n").owner == CAS  # else the first by name
-
-
-def test_s006_6_no_gated_repo_plans_private_under_the_checkouts_owner_or_asks() -> None:
-    planned = plan((ME, SHIPMILL), (), "shipmill", None, None, "n")
-    assert (planned.owner, planned.public) == (SHIPMILL, False)
-    with pytest.raises(ReleaseError, match=r"pass --owner"):
-        plan((ME, SHIPMILL), (), "someone-else", None, None, "n")
-    with pytest.raises(ReleaseError, match=r"pass --owner"):
-        plan((ME, SHIPMILL), (), None, None, None, "n")
+    assert owner_menu(found, ("shipmill/a", "shipmill/b", "cli-agent-spec/x")) == [
+        "Who should own the App?",
+        "  1. romamo (personal) (default)",
+        "  2. cli-agent-spec (org, 1 gated repo)",
+        "  3. shipmill (org, 2 gated repos)",
+    ]
+    assert [pick_owner(found, a) for a in ("", "3", "Shipmill")] == ["romamo", "shipmill", "shipmill"]
+    with pytest.raises(ReleaseError, match=r"no account '9' in the list; pass --owner"):
+        pick_owner(found, "9")
 
 
 def test_s006_7_flags_override_the_plan_and_a_private_app_warns_about_other_accounts() -> None:
     repos = ("cli-agent-spec/x", "shipmill/a")
-    forced = plan((ME, CAS, SHIPMILL), repos, None, "romamo", True, "n")
+    forced = plan((ME, CAS, SHIPMILL), repos, "romamo", True, "n")
     assert (forced.owner, forced.public) == (ME, True)
-    private = plan((ME, CAS, SHIPMILL), repos, None, "shipmill", False, "n")
+    private = plan((ME, CAS, SHIPMILL), repos, "shipmill", False, "n")
     assert private.warnings == ("a private App can't be installed on cli-agent-spec/x, outside shipmill",)
     assert private.installable == ("shipmill/a",)
     with pytest.raises(ReleaseError, match=r"doesn't administer theagenttimes; .*owner role"):
-        plan((ME, SHIPMILL), repos, None, "theagenttimes", None, "n")
+        plan((ME, SHIPMILL), repos, "theagenttimes", None, "n")
 
 
 def args(**given: object) -> argparse.Namespace:
@@ -218,21 +228,21 @@ def test_s006_8_a_dry_run_prints_the_plan_and_creates_nothing(
     assert code == 0 and opened == [] and not keys.exists()
     assert not any(method == "POST" for method, _, _ in hub.calls)
     assert capsys.readouterr().out.splitlines()[1:4] == [
-        "plan: shipmill-cli-agent-spec under cli-agent-spec, public",
-        "  why: gated repos in 2 accounts (cli-agent-spec 1, shipmill 1)",
+        "plan: shipmill-romamo under romamo, public",
+        f"  why: {PERSONAL_PUBLIC}",
         "  repos: cli-agent-spec/cli-agent-spec, shipmill/shipmill",
     ]
 
 
 def test_s006_9_the_manifest_holds_exactly_the_gates_permissions_and_no_webhook() -> None:
-    planned = plan((ME, SHIPMILL), ("shipmill/shipmill",), None, None, None, "shipmill-agent")
+    planned = plan((ME, SHIPMILL), ("shipmill/shipmill",), "shipmill", None, "shipmill-agent")
     made = manifest(planned, "http://127.0.0.1:9/callback")
     assert made["default_permissions"] == {p.key: p.access.value for p in PERMISSIONS}
     assert made["hook_attributes"] == {"url": "https://example.invalid/shipmill-no-webhook", "active": False}
     assert (made["default_events"], made["public"], made["name"]) == ([], False, "shipmill-agent")
     assert made["redirect_url"] == "http://127.0.0.1:9/callback"
     assert new_app_url(planned, "s") == "https://github.com/organizations/shipmill/settings/apps/new?state=s"
-    mine = plan((ME,), ("romamo/notes",), None, None, None, "n")
+    mine = plan((ME,), ("romamo/notes",), None, None, "n")
     assert new_app_url(mine, "s") == "https://github.com/settings/apps/new?state=s"
 
 
@@ -267,7 +277,7 @@ class Clicker:
 
 
 def test_s006_10_the_server_is_local_and_a_forged_callback_is_refused() -> None:
-    planned = plan((ME, SHIPMILL), ("shipmill/shipmill",), None, None, None, "shipmill-agent")
+    planned = plan((ME, SHIPMILL), ("shipmill/shipmill",), "shipmill", None, "shipmill-agent")
     clicker = Clicker()
     assert create(planned, clicker, seconds=10) == "the-code"
     assert clicker.host == "127.0.0.1" and clicker.bad == 400
@@ -296,7 +306,7 @@ def test_s006_11_the_key_is_saved_0600_in_0700_and_the_secrets_never_appear(
 
 
 def test_s006_12_no_callback_means_no_app() -> None:
-    planned = plan((ME, SHIPMILL), ("shipmill/shipmill",), None, None, None, "n")
+    planned = plan((ME, SHIPMILL), ("shipmill/shipmill",), "shipmill", None, "n")
     with pytest.raises(ReleaseError, match=r"no App was created"):
         create(planned, lambda url: None, seconds=0.2)
 
@@ -355,11 +365,11 @@ def test_s006_14_a_real_run_prints_the_app_id_line_and_edits_no_config(
     assert "  app_id = 4242" in out.err.splitlines()
     data = json.loads(out.out)
     assert data == {
-        "owner": "cli-agent-spec",
-        "owner_type": "Organization",
+        "owner": "romamo",
+        "owner_type": "User",
         "public": True,
-        "name": "shipmill-cli-agent-spec",
-        "reason": "gated repos in 2 accounts (cli-agent-spec 1, shipmill 1)",
+        "name": "shipmill-romamo",
+        "reason": PERSONAL_PUBLIC,
         "repos": ["cli-agent-spec/cli-agent-spec", "shipmill/shipmill"],
         "app_id": 4242,
         "slug": "shipmill-agent",
@@ -373,7 +383,7 @@ def test_s006_14_a_real_run_prints_the_app_id_line_and_edits_no_config(
 def test_s006_15_json_on_a_dry_run_is_the_plan_alone(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     code = _app_create(tmp_path, args(dry_run=True, json=True), FakeHub(), FakeSigner(), TOKEN, None, tmp_path / "k")
     out = capsys.readouterr()
-    assert code == 0 and "plan: shipmill-cli-agent-spec under cli-agent-spec, public" in out.err.splitlines()
+    assert code == 0 and "plan: shipmill-romamo under romamo, public" in out.err.splitlines()
     assert set(json.loads(out.out)) == {"owner", "owner_type", "public", "name", "reason", "repos"}
 
 
@@ -410,9 +420,9 @@ def test_s006_16_the_docs_document_app_create() -> None:
 
 def test_s006_17_the_default_name_is_shipmill_owner_then_shipmill_login() -> None:
     acme = Account("acme", "Organization")
-    planned = plan((ME, acme), ("acme/web",), None, None, None, None)
+    planned = plan((ME, acme), ("acme/web",), "acme", None, None)
     assert planned.name == "shipmill-acme"
-    assert plan((ME, SHIPMILL), ("shipmill/shipmill",), None, None, None, None).name == "shipmill-agent"
+    assert plan((ME, SHIPMILL), ("shipmill/shipmill",), "shipmill", None, None).name == "shipmill-agent"
     assert free_name(FakeHub(), TOKEN, planned, "romamo", chosen=False) == ("shipmill-acme", None)
     assert free_name(FakeHub(taken_slugs={"shipmill-acme"}), TOKEN, planned, "romamo", chosen=False) == (
         "shipmill-romamo",
@@ -423,7 +433,7 @@ def test_s006_17_the_default_name_is_shipmill_owner_then_shipmill_login() -> Non
 
 def test_s006_17_with_both_taken_it_exits_2_suggesting_free_alternatives() -> None:
     acme = Account("acme", "Organization")
-    planned = plan((ME, acme), ("acme/web",), None, None, None, None)
+    planned = plan((ME, acme), ("acme/web",), "acme", None, None)
     hub = FakeHub(taken_slugs={"shipmill-acme", "shipmill-romamo", "shipmill-acme-agent"})
     with pytest.raises(
         ReleaseError,
@@ -435,7 +445,7 @@ def test_s006_17_with_both_taken_it_exits_2_suggesting_free_alternatives() -> No
 
 def test_s006_17_a_taken_chosen_name_exits_2_suggesting_free_ones() -> None:
     hub = FakeHub(taken_slugs={"bot", "bot-agent"})
-    planned = plan((ME, SHIPMILL), ("shipmill/shipmill",), None, None, None, "bot")
+    planned = plan((ME, SHIPMILL), ("shipmill/shipmill",), "shipmill", None, "bot")
     with pytest.raises(
         ReleaseError, match=r"the App name bot is taken; free: shipmill-agent, shipmill-romamo, shipmill-romamo-agent;"
     ):
@@ -444,7 +454,7 @@ def test_s006_17_a_taken_chosen_name_exits_2_suggesting_free_ones() -> None:
 
 
 def test_s006_18_the_page_reviews_the_plan_and_waits_for_a_click() -> None:
-    planned = plan((ME, CAS, SHIPMILL), ("cli-agent-spec/x", "shipmill/a"), "shipmill", None, None, "shipmill-agent")
+    planned = plan((ME, CAS, SHIPMILL), ("cli-agent-spec/x", "shipmill/a"), "shipmill", None, "shipmill-agent")
     shown = page(planned, "https://github.com/x", "{}")
     assert "<script" not in shown and "Create on GitHub" in shown
     assert "Public: it can be installed on any account" in shown
@@ -452,7 +462,7 @@ def test_s006_18_the_page_reviews_the_plan_and_waits_for_a_click() -> None:
     for perm in PERMISSIONS:
         assert f"<td>{perm.label}</td><td>{perm.access.value}</td>" in shown
     assert "We didn't find an App Manifest" in shown and "click the button again" in shown
-    private = plan((ME, SHIPMILL), ("shipmill/a",), None, None, None, "n")
+    private = plan((ME, SHIPMILL), ("shipmill/a",), "shipmill", None, "n")
     assert "Private: it can be installed only on shipmill" in page(private, "a", "b")
 
 
@@ -473,3 +483,27 @@ def test_s006_19_each_line_is_flushed_as_it_happens(tmp_path: Path) -> None:
     lines = stream.getvalue().splitlines()
     assert lines[0].startswith("looking for the accounts you administer")
     assert [f.count("\n") for f in stream.flushed] == list(range(1, len(lines) + 1))
+
+
+def test_s006_20_an_interactive_run_asks_for_the_owner(tmp_path: Path) -> None:
+    stream = Recorder()
+    asked: list[str] = []
+
+    def answer(prompt: str) -> str:
+        asked.append(prompt)
+        return "3"
+
+    hub = FakeHub(installed=["shipmill/shipmill"])
+    browser = Clicker()
+
+    def local(url: str) -> None:
+        if url.startswith("http://127.0.0.1"):
+            browser(url)
+
+    keys = tmp_path / "keys"
+    _app_create(tmp_path, args(), hub, FakeSigner(), TOKEN, local, keys, install_seconds=0, out=stream, ask=answer)
+    lines = stream.getvalue().splitlines()
+    assert asked == ["Owner [1-3, Enter for romamo]: "]
+    assert "  1. romamo (personal) (default)" in lines
+    assert "plan: shipmill-agent under shipmill, public" in lines
+    assert "  why: shipmill, as chosen; public, since 1 gated repo is elsewhere" in lines

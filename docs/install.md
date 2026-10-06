@@ -257,9 +257,11 @@ refresh -s read:org`) and the repos in them holding `.github/shipmill.toml`, the
 
 | Your gated repos | The App |
 |---|---|
-| all in one account | private, owned by that account |
-| in several accounts | public, owned by the account with the most of them |
-| none yet | private, owned by the checkout's owner |
+| all in your personal account, or none yet | yours, private |
+| any in an org | yours, public, so it installs on the org |
+
+It asks who should own it, your personal account first as the default; pick an org you
+administer to have the org own it, or pass `--owner`.
 
 A private App can be installed only on the account that owns it; a public one on any
 account, but only you hold its key, so nobody else can use it. The App is named

@@ -157,40 +157,58 @@ def given_repos(repos: Sequence[str], found: Sequence[Account]) -> tuple[str, ..
 def plan(
     found: Sequence[Account],
     repos: Sequence[str],
-    origin_owner: str | None,
     owner: str | None,
     public: bool | None,
     name: str | None,
 ) -> Plan:
-    """S-006-4 to S-006-7: who owns the App and whether it is public"""
-    by_login = {a.login.lower(): a for a in found}
-    counts = Counter(_owner(r).lower() for r in repos)
-    if owner is not None:
-        chosen = by_login.get(owner.lower())
-        if chosen is None:
+    """S-006-4 to S-006-7: the App is the login's own unless --owner names an org it
+    administers, and public only when a gated repo is outside the owner, since a private App
+    installs on its owner alone"""
+    if owner is None:
+        chosen = found[0]
+        reason = "your personal account (--owner picks an org you administer)"
+    else:
+        match = {a.login.lower(): a for a in found}.get(owner.lower())
+        if match is None:
             raise ReleaseError(
                 f"your gh login doesn't administer {owner}; creating an App under an org needs its owner role"
             )
-        reason = f"--owner {owner}"
-    elif not counts:
-        chosen = by_login.get(origin_owner.lower()) if origin_owner else None
-        if chosen is None:
-            raise ReleaseError("no repo with .github/shipmill.toml found; pass --owner to say who owns the App")
-        reason = "no gated repos found; the checkout's owner"
-    else:
-        top = max(counts.values())
-        tied = sorted(login for login, n in counts.items() if n == top)
-        origin = origin_owner.lower() if origin_owner else None
-        chosen = by_login[origin if origin in tied else tied[0]]
-        spread = ", ".join(f"{by_login[k].login} {n}" for k, n in sorted(counts.items()))
-        reason = f"gated repos in {len(counts)} account{'s' if len(counts) > 1 else ''} ({spread})"
+        chosen, reason = match, f"{match.login}, as chosen"
+    outside = [r for r in repos if _owner(r).lower() != chosen.login.lower()]
     if public is None:
-        public = len(counts) > 1
+        public = bool(outside)
+        if outside:
+            reason += f"; public, since {len(outside)} gated repo{'s are' if len(outside) > 1 else ' is'} elsewhere"
     warnings: tuple[str, ...] = ()
     if not public:
-        outside = [r for r in repos if _owner(r).lower() != chosen.login.lower()]
         warnings = tuple(f"a private App can't be installed on {r}, outside {chosen.login}" for r in outside)
     return Plan(chosen, public, name or default_name(chosen.login), reason, tuple(repos), warnings)
+
+
+def owner_menu(found: Sequence[Account], repos: Sequence[str]) -> list[str]:
+    """S-006-20: the accounts to pick the owner from, the login first as the default"""
+    counts = Counter(_owner(r).lower() for r in repos)
+    lines = ["Who should own the App?"]
+    for index, account in enumerate(found, 1):
+        kind = "personal" if not account.is_org else "org"
+        n = counts.get(account.login.lower(), 0)
+        gated = f", {n} gated repo{'s' if n != 1 else ''}" if n else ""
+        default = " (default)" if index == 1 else ""
+        lines.append(f"  {index}. {account.login} ({kind}{gated}){default}")
+    return lines
+
+
+def pick_owner(found: Sequence[Account], answer: str) -> str:
+    """S-006-20: the menu's answer: empty for the default, else a number or a login"""
+    text = answer.strip()
+    if not text:
+        return found[0].login
+    if text.isdigit() and 1 <= int(text) <= len(found):
+        return found[int(text) - 1].login
+    for account in found:
+        if account.login.lower() == text.lower():
+            return account.login
+    raise ReleaseError(f"no account {text!r} in the list; pass --owner")
 
 
 def slug(name: str) -> str:
