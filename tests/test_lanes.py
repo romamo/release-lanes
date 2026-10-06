@@ -7,10 +7,13 @@ from pathlib import Path
 import pytest
 
 from shipmill.changelog import Changelog
+from shipmill.cli import main
 from shipmill.errors import ReleaseError
-from shipmill.land import cleanup, land, prepare, work_branch
+from shipmill.github import WorkflowRun
+from shipmill.gitrepo import Git
+from shipmill.land import ActionsRun, Stop, cleanup, land, prepare, work_branch
 from shipmill.planner import Decision, Event, Hotfix, Planner
-from shipmill.policy import Lane, Mode, Style
+from shipmill.policy import Lane, Mode, Policy, Style
 from shipmill.version import Version
 
 from .conftest import Repo, at_day
@@ -349,3 +352,124 @@ def test_land_deploys_each_environment_that_takes_the_lane(repo: Repo) -> None:
         ("preview.yml", "v1.1.0rc1", "v1.1.0rc1", {"environment": "preview"}),
     ]
     assert landed.published == ("github-release", "deploy.yml@staging", "preview.yml@preview")
+
+
+# A Release run whose cleanup never got a runner leaves its work branch (#175, D-18)
+WORKFLOW_REF = "o/demo/.github/workflows/release.yml@refs/heads/main"
+THIS_RUN = ActionsRun("release.yml", 20)
+
+
+Args = tuple[Git, Policy, Lane, Version, str, dt.date]  # prepare's positional arguments
+
+
+def _orphan(repo: Repo) -> tuple[Args, str, str]:
+    """A due rc whose work branch an earlier run left on origin: prepare's arguments, the
+    work branch, and the commit it holds"""
+    repo.merge(1, "Added", "Feature A")
+    decision = plan(repo, at_day(1))
+    assert decision.version is not None and decision.lane is not None
+    work = work_branch(decision.version)
+    left = repo.git.sha("origin/main")
+    repo.git.run("push", "-q", "origin", f"{left}:refs/heads/{work}")
+    args: Args = (repo.git, repo.policy, decision.lane, decision.version, decision.base, at_day(1).date())
+    return args, work, left
+
+
+def _run(number: int, status: str = "in_progress") -> WorkflowRun:
+    return WorkflowRun(number, status, at_day(1))
+
+
+@pytest.mark.parametrize("status", ["queued", "in_progress", "waiting"])
+def test_prepare_leaves_a_work_branch_another_active_run_may_own(repo: Repo, status: str) -> None:
+    args, work, left = _orphan(repo)
+    repo.github.active["release.yml"] = [_run(20), _run(19, status)]
+    prepared = prepare(*args, commit=True, push=True, github=repo.github, run=THIS_RUN)
+    assert (prepared.pushed, prepared.stop, prepared.found) == (False, Stop.OWNED, left)
+    assert repo.git.remote_branch(work) == left
+
+
+def test_prepare_replaces_a_work_branch_no_other_run_owns(repo: Repo) -> None:
+    args, work, left = _orphan(repo)
+    repo.github.active["release.yml"] = [_run(20)]  # this run alone; other workflows' runs don't count
+    repo.github.active["ci.yml"] = [_run(21)]
+    prepared = prepare(*args, commit=True, push=True, github=repo.github, run=THIS_RUN)
+    assert prepared.pushed and prepared.recovered and prepared.stop is None
+    assert prepared.found == left and prepared.sha != left
+    assert repo.git.remote_branch(work) == prepared.sha
+
+
+def test_prepare_stops_when_the_token_cant_list_runs(repo: Repo) -> None:
+    args, work, left = _orphan(repo)
+    repo.github.actions_error = "Resource not accessible by integration (HTTP 403)"
+    prepared = prepare(*args, commit=True, push=True, github=repo.github, run=THIS_RUN)
+    assert (prepared.pushed, prepared.stop, prepared.found) == (False, Stop.FORBIDDEN, left)
+    assert repo.git.remote_branch(work) == left
+
+
+def test_prepare_fails_on_any_other_error_listing_runs(repo: Repo) -> None:
+    args, work, left = _orphan(repo)
+    repo.github.actions_error = "HTTP 404: Not Found"
+    with pytest.raises(ReleaseError, match="HTTP 404"):
+        prepare(*args, commit=True, push=True, github=repo.github, run=THIS_RUN)
+    assert repo.git.remote_branch(work) == left
+
+
+def test_prepare_outside_actions_leaves_the_work_branch(repo: Repo) -> None:
+    args, work, left = _orphan(repo)
+    prepared = prepare(*args, commit=True, push=True, github=repo.github)
+    assert (prepared.pushed, prepared.stop) == (False, Stop.OUTSIDE)
+    assert repo.git.remote_branch(work) == left
+
+
+def test_prepare_without_push_never_asks_for_runs(repo: Repo) -> None:
+    args, work, left = _orphan(repo)
+    repo.github.actions_error = "must not be called"
+    prepared = prepare(*args, commit=True, github=repo.github, run=THIS_RUN)
+    assert prepared.sha and not prepared.pushed and prepared.stop is None
+    assert repo.git.remote_branch(work) == left
+
+
+def test_actions_run_is_read_from_githubs_variables() -> None:
+    assert ActionsRun.parse(WORKFLOW_REF, "37362724489") == ActionsRun("release.yml", 37362724489)
+    assert ActionsRun.parse("", "") is None
+    for ref, run_id in [(WORKFLOW_REF, ""), ("release.yml", "1"), (WORKFLOW_REF, "x")]:
+        with pytest.raises(ReleaseError, match="name no workflow run"):
+            ActionsRun.parse(ref, run_id)
+
+
+def _cli_prepare(repo: Repo, tmp_path: Path, run_id: str) -> tuple[str, str]:
+    """`shipmill prepare --push` as the workflow runs it: its GITHUB_OUTPUT, stdout, and step summary"""
+    decision = plan(repo, at_day(1))
+    assert decision.version is not None and decision.lane is not None
+    output, summary = tmp_path / "output", tmp_path / "summary"
+    argv = [
+        "--repo", str(repo.root), "prepare", "--lane", decision.lane.value, "--version", str(decision.version),
+        "--base", decision.base, "--date", "2026-10-06", "--push", "--github-output", str(output),
+        "--workflow-ref", WORKFLOW_REF, "--run-id", run_id, "--step-summary", str(summary),
+    ]  # fmt: skip
+    assert main(argv, repo.github) == 0
+    return output.read_text("utf-8"), summary.read_text("utf-8") if summary.exists() else ""
+
+
+def test_cli_warns_about_a_held_work_branch_and_stays_green(
+    repo: Repo, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _, work, left = _orphan(repo)
+    repo.github.actions_error = "Resource not accessible by integration (HTTP 403)"
+    output, summary = _cli_prepare(repo, tmp_path, "20")
+    out = capsys.readouterr()
+    assert "sha=\n" in output
+    assert f"::warning title=Work branch held::{work} is on origin at {left[:12]};" in out.out
+    assert "grant `actions: read` to the prepare job in .github/workflows/release.yml" in out.out
+    assert summary.startswith(f"Work branch held: {work} is on origin at {left[:12]};")
+    assert "grant `actions: read`" in out.err
+
+
+def test_cli_reports_a_replaced_work_branch(repo: Repo, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _, work, left = _orphan(repo)
+    repo.github.active["release.yml"] = [_run(20)]
+    output, summary = _cli_prepare(repo, tmp_path, "20")
+    sha = repo.git.remote_branch(work)
+    assert sha is not None and sha != left and f"sha={sha}\n" in output
+    assert "::notice title=Orphaned work branch replaced::" in capsys.readouterr().out
+    assert "no other run of release.yml is queued or in progress" in summary

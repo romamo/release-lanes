@@ -42,6 +42,7 @@ jobs:
       contents: write
       issues: write
       pull-requests: read
+      actions: read
 
   ci:
     needs: prepare

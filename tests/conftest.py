@@ -13,6 +13,7 @@ from shipmill.github import (
     Deployment,
     DeploymentState,
     DeploymentStatus,
+    Forbidden,
     Issue,
     Milestone,
     PullRequest,
@@ -121,6 +122,8 @@ class FakeGitHub:
     scan_limit: int = 500  # the newest open issues find_issue reads, as gh lists them
     pulls: list[PullRequest] = field(default_factory=list)  # open pull requests
     pulls_error: str = ""  # when set, listing the open pull requests fails with it, as gh would
+    active: dict[str, list[WorkflowRun]] = field(default_factory=dict)  # unfinished runs by workflow file
+    actions_error: str = ""  # when set, listing runs fails with it: Forbidden when it holds "(HTTP 403)"
 
     def deploy(self, environment: str, ref: str, at: dt.datetime, *states: DeploymentState) -> int:
         """Record a deployment of ref, with its statuses one minute apart from at; its id"""
@@ -203,6 +206,13 @@ class FakeGitHub:
     def create_deployment_status(self, deployment: int, state: DeploymentState, description: str) -> None:
         self.status_writes.append((deployment, state, description))
         self._status(deployment, state, description, self.now)
+
+    def active_runs(self, workflow: str) -> list[WorkflowRun]:
+        if "(HTTP 403)" in self.actions_error:
+            raise Forbidden(f"gh api -X GET failed: {self.actions_error}")
+        if self.actions_error:
+            raise ReleaseError(f"gh api -X GET failed: {self.actions_error}")
+        return sorted(self.active.get(workflow, []), key=lambda r: -r.id)
 
     def open_pull_requests(self) -> list[PullRequest]:
         if self.pulls_error:

@@ -424,6 +424,12 @@ or a state shipmill refuses to act on.
 
 - GitHub's token can't push past branch protection: let `github-actions[bot]` bypass the
   rules on main and `release/*`, or the landing fails
+- A run cancelled before its cleanup job gets a runner leaves its `shipmill/<tag>` work
+  branch on origin. The next run's prepare deletes it and pushes its own when no other run
+  of your Release workflow is queued or in progress, which takes `actions: read` on the
+  prepare job in `.github/workflows/release.yml` (`shipmill init` writes it). Without that
+  permission the run stops at the branch, stays green, and says so in a "Work branch held"
+  warning and the run summary; delete the branch by hand, or add the permission
 - A push made with the workflow token starts no workflow: that is why publishing goes
   through `dispatch`, and why the sync commit on main runs no CI of its own
 - A publish workflow must accept a tag whose commit is not on main: pre-releases and

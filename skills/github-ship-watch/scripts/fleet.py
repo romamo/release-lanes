@@ -78,6 +78,7 @@ ACTION = frozenset(
     {
         "BOT_FAILED",
         "BOT_STALLED",
+        "WORK_BRANCH_STALE",
         "NOT_PUBLISHED",
         "UNANNOUNCED",
         "ISSUES",

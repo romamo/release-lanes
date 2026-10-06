@@ -23,6 +23,19 @@ bot.
 - D-18: a Release run that finds a work branch no active run owns deletes it and pushes its
   own, given `actions: read`; without it, the stop stays but is reported (#175)
 
+### Fixed
+
+- A work branch left on origin by a Release run cancelled before its cleanup job got a
+  runner no longer stalls the lane: the next run's `prepare` deletes it and pushes its own
+  when no other queued or in-progress run of the Release workflow could own it (D-18). This
+  takes `actions: read` on the caller's prepare job, which `shipmill init` now writes; the
+  reusable prepare job takes the caller's grant instead of setting its own, so a caller
+  without it still runs. Every stop at a held work branch is now visible: a warning
+  annotation and a run-summary line naming the branch and its commit, saying to grant
+  `actions: read` when that is the cause; the run stays green. github-ship-watch reports
+  `WORK_BRANCH_STALE` for a `shipmill/v*` branch no active run owns, and deletes it and
+  starts the lane (#175)
+
 ## [0.22.0] - 2026-10-06
 
 ### Changed

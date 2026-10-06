@@ -194,6 +194,7 @@ jobs:
       contents: write # pushes the release commit's work branch
       issues: write # blockers and milestones; opens the issue a hold or release = "propose" leads to
       pull-requests: read # a hotfix's merge commits
+      actions: read # replaces a work branch a cancelled run left, once no other run owns it
 
   ci:
     needs: prepare
