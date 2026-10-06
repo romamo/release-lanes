@@ -99,7 +99,8 @@ With `mode = "headless"` (spec 005, D-17) the steps change in four places:
   github-issue-triage's `references/needs-decision.md`, and starts `claude -p
   --permission-prompts none --allowedTools "<HEADLESS_TOOLS>" --disallowedTools
   AskUserQuestion --session-id <uuid> [--settings <env>] -n <name> [--claude-arg flags]
-  <prompt>` in a new process session, stdin from `/dev/null`, output appended to
+  -- <prompt>` in a new process session (`--` ends the options, so a `--claude-arg`
+  `--allowedTools` list that widens the allowlist never reads the prompt as a tool), stdin from `/dev/null`, output appended to
   `sessions/<uuid>.log` in the state directory. It doesn't wait for it, and records the
   `pid` and start time in `gate.json`. `claude --resume <uuid>` reopens the conversation
   after it ends

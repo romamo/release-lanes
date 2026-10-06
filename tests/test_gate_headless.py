@@ -282,12 +282,24 @@ def test_s005_3_headless_runs_claude_p_with_the_allowlist(checkout: Git) -> None
         NAME,
         "--allowedTools",
         "Bash(npm *)",
+        "--",
         text,
     ]
     assert "--bg" not in cmd and cmd[-1] == text
     assert cmd.index("--disallowedTools") < cmd.index("--session-id")
     assert (cwd, log) == (checkout.root, log_of(checkout))
     assert spawned.run == [["claude", "agents", "--json", "--cwd", str(checkout.root)]]  # no claude --bg
+
+
+def test_s005_3_a_widened_allowlist_never_reads_the_prompt_as_a_tool(checkout: Git) -> None:
+    """The documented widening, `--claude-arg --allowedTools --claude-arg "Bash(npm *)"`, ends
+    with a variadic tool list; without `--` Claude Code 2.1.291 reads the prompt as one more
+    tool and exits "Input must be provided" without running anything"""
+    spawned = Spawned()
+    claude = ClaudeCli(["--allowedTools", "Bash(npm *)"], run=spawned.runner, spawn=spawned)
+    tick(checkout, headless(), claude, Reads())
+    [(cmd, _, _)] = spawned.commands
+    assert cmd[-2] == "--" and cmd.count("--") == 1
 
 
 def test_s005_3_the_allowlist_is_exactly_the_specs() -> None:
@@ -625,6 +637,16 @@ def test_s005_20_a_headless_record_needs_a_uuid_session(checkout: Git) -> None:
     path.parent.mkdir(parents=True)
     record = {"fingerprint": "f", "session": "s1", "at": NOW.isoformat(), "mode": "headless", "pid": 1, "started": "x"}
     path.write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(ReleaseError, match="is malformed"):
+        load_launch(path)
+
+
+@pytest.mark.parametrize("session", [5, None, ["x"]])
+def test_s005_20_a_headless_record_whose_session_isnt_a_string_exits_2(checkout: Git, session: object) -> None:
+    path = state_dir(checkout) / RECORD
+    path.parent.mkdir(parents=True)
+    record = {"fingerprint": "f", "session": session, "at": NOW.isoformat(), "mode": "headless", "pid": 1}
+    path.write_text(json.dumps({**record, "started": "x"}), encoding="utf-8")
     with pytest.raises(ReleaseError, match="is malformed"):
         load_launch(path)
 

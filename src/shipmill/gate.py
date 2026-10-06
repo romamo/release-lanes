@@ -372,11 +372,12 @@ class ClaudeCli:
         self, workspace: Path, name: str, text: str, session: uuid.UUID, log: Path, env: Mapping[str, str] | None = None
     ) -> int:
         """`claude -p` (spec 005): no prompt can block it and AskUserQuestion is gone; the tool
-        lists come before --session-id, so the prompt, last, is never read as a tool name"""
+        lists come before --session-id, and `--` ends the options before the prompt, so a
+        --claude-arg tool list that widens the allowlist never reads the prompt as a tool name"""
         settings = [] if env is None else ["--settings", json.dumps({"env": dict(env)})]
         tools = ["--allowedTools", HEADLESS_TOOLS, "--disallowedTools", "AskUserQuestion"]
         head = ["claude", "-p", "--permission-prompts", "none", *tools, "--session-id", str(session)]
-        return self._spawn([*head, *settings, "-n", name, *self.args, text], workspace, log)
+        return self._spawn([*head, *settings, "-n", name, *self.args, "--", text], workspace, log)
 
     def stop(self, session: str) -> None:
         self._run(["claude", "stop", session], Path.cwd())
@@ -434,6 +435,8 @@ def load_launch(path: Path) -> Launch | None:
             raise ValueError("expected a JSON object")
         process = None
         if Mode(data.get("mode", Mode.INTERACTIVE.value)) is Mode.HEADLESS:
+            if not isinstance(data["session"], str):
+                raise TypeError(f"session must be a string, got {data['session']!r}")
             uuid.UUID(data["session"])
             process = Process(data["pid"], data["started"])
         return Launch(str(data["fingerprint"]), str(data["session"]), dt.datetime.fromisoformat(data["at"]), process)
