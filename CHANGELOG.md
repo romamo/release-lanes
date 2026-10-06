@@ -19,6 +19,9 @@ bot.
   `~/.config/shipmill/app-<app_id>.pem` with mode `0600`, waits for the installations, and
   prints the `app_id` line to commit; exit 1 names a repo still missing the App. The setup
   skill and `docs/install.md` use it first, the manual steps as the fallback (#155)
+- Spec 005 for headless gate sessions: `[agents] mode = "headless"` starts sessions that
+  can't prompt, a decision for the user becomes a `needs-decision` comment and label the
+  gate waits on, and headless work is limited to trusted authors' items, with D-16 (#134)
 
 ### Fixed
 
