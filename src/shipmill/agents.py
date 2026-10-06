@@ -4,6 +4,7 @@ green" or not), so it is a reviewed, committed decision like [autonomy]. Where t
 runs (which machine, which scheduler) is not here: that belongs to the host"""
 
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 
 from shipmill.config import CONFIG_PATH, Table, config_path, read
@@ -12,6 +13,13 @@ from shipmill.errors import ReleaseError
 _MAX_HOURS = 7 * 24  # a week
 _REMIND_HOURS = 4
 _MAX_WAIT_MINUTES = 15
+
+
+class Mode(StrEnum):
+    """How a gate session meets a decision for the user (spec 005)"""
+
+    INTERACTIVE = "interactive"  # `claude --bg`: it asks you and waits
+    HEADLESS = "headless"  # `claude -p`: it asks on GitHub and ends (D-17)
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,10 +31,11 @@ class AgentsConfig:
     remind_hours: int = _REMIND_HOURS  # repeat it while the session still waits
     max_wait_minutes: int = _MAX_WAIT_MINUTES  # stop a session that waited this long; 0: never
     app_id: int | None = None  # sessions write as this GitHub App (spec 004, D-14); None: the host's gh login
+    mode: Mode = Mode.INTERACTIVE  # headless: `claude -p`, decisions as needs-decision comments (spec 005)
 
     @classmethod
     def parse(cls, table: Table) -> AgentsConfig:
-        table.allow("prompt", "prs", "retry_hours", "notify", "remind_hours", "max_wait_minutes", "app_id")
+        table.allow("prompt", "prs", "retry_hours", "notify", "remind_hours", "max_wait_minutes", "app_id", "mode")
         prompt = table.string("prompt").strip()
         if not prompt:
             raise ReleaseError(f"{table.where}: prompt must not be empty")
@@ -42,6 +51,7 @@ class AgentsConfig:
             remind_hours=remind,
             max_wait_minutes=max_wait,
             app_id=table.integer("app_id", default=None, low=1, high=None),
+            mode=table.enum("mode", Mode, default=Mode.INTERACTIVE),
         )
 
     @classmethod

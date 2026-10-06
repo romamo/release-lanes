@@ -77,8 +77,9 @@ class Table:
             raise ReleaseError(f"{self.where}: {key} must be a list of non-empty strings")
         return tuple(value)
 
-    def enum[E: StrEnum](self, key: str, kind: type[E]) -> E:
-        value = self.string(key)
+    def enum[E: StrEnum](self, key: str, kind: type[E], default: E | None = None) -> E:
+        """default None: the key is required"""
+        value = self.string(key) if default is None else self.string(key, default=default.value)
         try:
             return kind(value)
         except ValueError:

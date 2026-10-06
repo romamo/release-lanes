@@ -34,6 +34,7 @@ from shipmill.gate import (
     ClaudeCli,
     Decision,
     Finding,
+    StateRead,
     gate,
     prompt,
     state_dir,
@@ -97,7 +98,7 @@ def launch_as_app(
         REPO,
         app_cfg,
         claude,
-        lambda: [ISSUES],
+        lambda _: [ISSUES],
         NOW,
         Hold,
         FakeNotifier(),
@@ -194,7 +195,7 @@ def test_s004_6_helpers_that_cant_be_written_stop_and_start_nothing(checkout: Gi
             REPO,
             app_cfg,
             claude,
-            lambda: [ISSUES],
+            lambda _: [ISSUES],
             NOW,
             Hold,
             FakeNotifier(),
@@ -210,7 +211,7 @@ def test_s004_6_with_app_id_set_and_no_session_env_nothing_starts(checkout: Git,
     claude = FakeClaude([bg("old", "idle", "done")])
     check = app_check(REPO, key_file(tmp_path), tmp_path, FakeSigner(), FakeApi())
     with pytest.raises(ReleaseError, match="no session env was given; no session starts"):
-        gate(checkout, REPO, app_cfg, claude, lambda: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE, app=check)
+        gate(checkout, REPO, app_cfg, claude, lambda _: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE, app=check)
     assert (claude.launched, claude.stopped) == ([], [])
 
 
@@ -276,7 +277,7 @@ def test_s004_7_with_app_id_unset_the_launch_is_todays(checkout: Git, tmp_path: 
         REPO,
         lambda: app_cfg(None),
         ClaudeCli(["--permission-mode=auto"], run=recorder),
-        lambda: [ISSUES],
+        lambda _: [ISSUES],
         NOW,
         Hold,
         FakeNotifier(),
@@ -304,7 +305,7 @@ def test_s004_11_a_launch_as_the_app_names_the_bot(checkout: Git, tmp_path: Path
 
 def test_s004_11_with_app_id_unset_identity_is_null(checkout: Git) -> None:
     decision, launched, _, _ = gate(
-        checkout, REPO, lambda: app_cfg(None), FakeClaude(), lambda: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE
+        checkout, REPO, lambda: app_cfg(None), FakeClaude(), lambda _: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE
     )
     assert tick_lines(decision, launched, (), (), dry_run=False)[0] == "LAUNCH: 1 finding(s) need an agent"
     record = json.loads(json.dumps(tick_record(decision, launched, (), (), dry_run=False)))
@@ -339,7 +340,7 @@ def test_s004_12_the_gates_own_reads_keep_the_hosts_environment(checkout: Git, t
     host = dict(os.environ)
     seen: list[dict[str, str]] = []
 
-    def findings() -> list[Finding]:
+    def findings(read: StateRead) -> list[Finding]:
         seen.append(dict(os.environ))
         return [ISSUES]
 
@@ -373,7 +374,7 @@ def test_s004_12_with_app_id_unset_the_reads_keep_the_hosts_environment(checkout
     host = dict(os.environ)
     seen: list[dict[str, str]] = []
 
-    def findings() -> list[Finding]:
+    def findings(read: StateRead) -> list[Finding]:
         seen.append(dict(os.environ))
         return [ISSUES]
 

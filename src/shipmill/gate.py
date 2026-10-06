@@ -2,8 +2,9 @@
 
 The gate is code: it reads the repo's state through github-ship-watch's watch_state.py,
 asks Claude Code which of its own sessions are alive, and launches a background session
-(`claude --bg`) only when there is work, no earlier session is still running or waiting on
-the user, and the work changed since the last launch. Everything it knows comes from
+(`claude --bg`, or in headless mode a detached `claude -p` tracked by its process, D-17)
+only when there is work, no earlier session is still running or waiting on the user, and
+the work changed since the last launch. Everything it knows comes from
 GitHub and from Claude Code; the two files it writes, under the checkout's git directory,
 keep an unchanged state from starting a session on every tick and time how long a session
 has waited on the user, so a reminder repeats only every few hours and an optional limit
@@ -19,12 +20,13 @@ import os
 import re
 import subprocess
 import sys
+import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Protocol
 
-from shipmill.agents import AgentsConfig
+from shipmill.agents import AgentsConfig, Mode
 from shipmill.app import AppCheck, Identity
 from shipmill.autonomy import Hold
 from shipmill.config import CONFIG_PATH
@@ -37,6 +39,25 @@ from shipmill.worktrees import Judged, Sessions, Verdict, judge, prune
 RECORD = "gate.json"
 WAITING = "waiting.json"  # one entry per blocked gate session (spec 003)
 PRS_OPEN = "PRS_OPEN"  # watch_state.py's open pull requests: work only with [agents] prs = true
+SESSIONS = "sessions"  # a headless session's log, <uuid>.log, under the state directory (D-17)
+
+# The tools a headless session may use without a prompt (spec 005): the file tools, skills and
+# subagents, peer messages, and gh, git, and uv. Not a sandbox: the trust filter is (D-16)
+HEADLESS_TOOLS = (
+    "Read Edit Write Glob Grep Skill Agent SendMessage ListAgents TodoWrite"
+    " Bash(gh *) Bash(git *) Bash(uv *) Bash(uvx *)"
+)
+# --claude-arg flags a headless gate refuses, alone or as --flag=value: each brings prompts
+# back, drops the allowlist, or breaks how the gate tracks the session
+HEADLESS_REFUSED = (
+    "--permission-mode",
+    "--permission-prompts",
+    "--dangerously-skip-permissions",
+    "--allow-dangerously-skip-permissions",
+    "--bg",
+    "--background",
+    "--session-id",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,12 +100,33 @@ class Session:
 
 
 @dataclass(frozen=True, slots=True)
+class Process:
+    """A headless session's process: its pid and its start time as `ps -o lstart=` prints it,
+    None when the process was gone before it could be read. A pid alone could be reused"""
+
+    pid: int
+    started: str | None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.pid, bool) or not isinstance(self.pid, int) or self.pid < 1:
+            raise ValueError(f"pid must be a positive integer, got {self.pid!r}")
+        if self.started is not None and (not isinstance(self.started, str) or not self.started.strip()):
+            raise ValueError(f"started must be a non-empty string or null, got {self.started!r}")
+
+
+@dataclass(frozen=True, slots=True)
 class Launch:
-    """The last session the gate started, and the findings it started it for"""
+    """The last session the gate started, and the findings it started it for; process is set
+    for a headless launch (D-17) and None for an interactive one"""
 
     fingerprint: str
     session: str
     at: dt.datetime
+    process: Process | None = None
+
+    @property
+    def mode(self) -> Mode:
+        return Mode.INTERACTIVE if self.process is None else Mode.HEADLESS
 
 
 class Action(enum.Enum):
@@ -103,6 +145,7 @@ class Decision:
     work: tuple[Finding, ...]
     stop: tuple[str, ...] = ()  # finished sessions to stop before launching
     identity: str | None = None  # the App bot a launch writes as (spec 004); None: the host's gh login
+    follow: str | None = None  # how to follow a headless launch (`tail -f <log>`); None: claude attach
 
 
 def fingerprint(work: Iterable[Finding]) -> str:
@@ -165,6 +208,32 @@ def prompt(template: str, repo: str, work: Sequence[Finding], now: dt.datetime) 
     return f"{head}\n\nThe shipmill gate found this at {stamp} (from code):\n{found}\n\n{UNTRUSTED}"
 
 
+def headless_paragraph(login: str) -> str:
+    """The paragraph a headless prompt ends with (spec 005); login is the host's gh login,
+    the person who decides"""
+    return (
+        "Headless: nobody can answer AskUserQuestion or a permission prompt. A decision for the user,"
+        " or a tool call that was denied, becomes the needs-decision protocol (github-issue-triage's"
+        f" references/needs-decision.md): mention @{login}, label the item needs-decision, and leave it."
+    )
+
+
+def headless_prompt(template: str, repo: str, work: Sequence[Finding], now: dt.datetime, login: str) -> str:
+    """The mode 1 prompt with the headless paragraph at its end"""
+    return f"{prompt(template, repo, work, now)}\n\n{headless_paragraph(login)}"
+
+
+def refuse_headless_args(args: Sequence[str]) -> None:
+    """Spec 005: a headless gate refuses HEADLESS_REFUSED's flags, alone or as --flag=value"""
+    for arg in args:
+        flag = arg.split("=", 1)[0]
+        if flag in HEADLESS_REFUSED:
+            raise ReleaseError(
+                f'--claude-arg {flag} is refused with [agents] mode = "headless": it would bring prompts back,'
+                " drop the tool allowlist, or break how the gate tracks the session"
+            )
+
+
 def session_name(repo: str) -> str:
     return f"shipmill {repo}"
 
@@ -215,15 +284,28 @@ def parse_findings(text: str) -> list[Finding]:
 
 
 class Claude(Protocol):
+    @property
+    def args(self) -> tuple[str, ...]:
+        """The --claude-arg flags every launched session gets"""
+        ...
+
     def sessions(self, workspace: Path, repo: str) -> list[Session]: ...
     def launch(self, workspace: Path, name: str, text: str, env: Mapping[str, str] | None = None) -> str:
         """Start a background session; env, when given, is its `--settings` env (spec 004)"""
+        ...
+
+    def start(
+        self, workspace: Path, name: str, text: str, session: uuid.UUID, log: Path, env: Mapping[str, str] | None = None
+    ) -> int:
+        """Start a headless `claude -p` session detached from the tick (D-17); its pid"""
         ...
 
     def stop(self, session: str) -> None: ...
 
 
 Runner = Callable[[list[str], Path], str]  # (command, cwd) -> its stdout
+Spawner = Callable[[list[str], Path, Path], int]  # (command, cwd, log) -> the detached process's pid
+StartTime = Callable[[int], str | None]  # pid -> its process's start time; None when no such process
 
 
 def run_command(cmd: list[str], cwd: Path) -> str:
@@ -234,10 +316,48 @@ def run_command(cmd: list[str], cwd: Path) -> str:
     return proc.stdout
 
 
+def spawn_detached(cmd: list[str], cwd: Path, log: Path) -> int:
+    """Start cmd in a new process session, stdin from /dev/null and its output appended to
+    log, and return without waiting for it (D-17): the tick that starts it exits, it goes on"""
+    log.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with log.open("ab") as out:
+            proc = subprocess.Popen(
+                cmd, cwd=cwd, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, start_new_session=True
+            )
+    except OSError as exc:
+        raise ReleaseError(f"{' '.join(cmd[:2])} could not start: {exc}") from None
+    return proc.pid
+
+
+def start_time(pid: int) -> str | None:
+    """The process's start time, `ps -p <pid> -o lstart=` (macOS and Linux), in the C locale so
+    every tick reads it the same; None when no process has that pid"""
+    env = {**os.environ, "LC_ALL": "C"}
+    proc = subprocess.run(["ps", "-p", str(pid), "-o", "lstart="], capture_output=True, text=True, check=False, env=env)
+    started = proc.stdout.strip()
+    if proc.returncode != 0 or not started:
+        return None
+    return started
+
+
+def host_login(workspace: Path, run: Runner = run_command) -> str:
+    """The host's gh login, `gh api user -q .login`: whom a headless session's needs-decision
+    comment mentions (spec 005)"""
+    try:
+        login = run(["gh", "api", "user", "-q", ".login"], workspace).strip()
+    except FileNotFoundError:
+        raise ReleaseError("gh is not on PATH; a headless gate reads your login with it") from None
+    if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})", login):
+        raise ReleaseError(f"gh api user -q .login printed {login[:100]!r}, not a GitHub login")
+    return login
+
+
 class ClaudeCli:
-    def __init__(self, args: Sequence[str] = (), run: Runner = run_command) -> None:
+    def __init__(self, args: Sequence[str] = (), run: Runner = run_command, spawn: Spawner = spawn_detached) -> None:
         self.args = tuple(args)  # extra flags for the launched session, such as --permission-mode
         self._run = run
+        self._spawn = spawn
 
     def sessions(self, workspace: Path, repo: str) -> list[Session]:
         return parse_sessions(self._run(["claude", "agents", "--json", "--cwd", str(workspace)], workspace), repo)
@@ -247,6 +367,16 @@ class ClaudeCli:
         process argument `ps` shows, so env never holds a token (spec 004)"""
         settings = [] if env is None else ["--settings", json.dumps({"env": dict(env)})]
         return parse_launched(self._run(["claude", "--bg", "-n", name, *settings, *self.args, text], workspace))
+
+    def start(
+        self, workspace: Path, name: str, text: str, session: uuid.UUID, log: Path, env: Mapping[str, str] | None = None
+    ) -> int:
+        """`claude -p` (spec 005): no prompt can block it and AskUserQuestion is gone; the tool
+        lists come before --session-id, so the prompt, last, is never read as a tool name"""
+        settings = [] if env is None else ["--settings", json.dumps({"env": dict(env)})]
+        tools = ["--allowedTools", HEADLESS_TOOLS, "--disallowedTools", "AskUserQuestion"]
+        head = ["claude", "-p", "--permission-prompts", "none", *tools, "--session-id", str(session)]
+        return self._spawn([*head, *settings, "-n", name, *self.args, text], workspace, log)
 
     def stop(self, session: str) -> None:
         self._run(["claude", "stop", session], Path.cwd())
@@ -261,10 +391,27 @@ def skills_dir() -> Path:
     raise ReleaseError("this shipmill install has no skills folder; reinstall it")
 
 
-def watch(repo: str, workspace: Path) -> list[Finding]:
-    """watch_state.py's rows for the repo; it exits 1 when any needs action"""
+@dataclass(frozen=True, slots=True)
+class StateRead:
+    """How the gate reads the state: a headless gate passes the trust filter (D-16), and with
+    an App its bot's login, so its questions tell from the maintainer's replies (spec 005)"""
+
+    trusted_only: bool = False
+    bot_login: str | None = None
+
+    def flags(self) -> list[str]:
+        trusted = ["--trusted-only"] if self.trusted_only else []
+        return trusted + ([] if self.bot_login is None else ["--bot-login", self.bot_login])
+
+
+def watch_command(repo: str, workspace: Path, read: StateRead) -> list[str]:
     script = skills_dir() / "github-ship-watch" / "scripts" / "watch_state.py"
-    cmd = [sys.executable, str(script), repo, "--repo-dir", str(workspace), "--json"]
+    return [sys.executable, str(script), repo, "--repo-dir", str(workspace), "--json", *read.flags()]
+
+
+def watch(repo: str, workspace: Path, read: StateRead) -> list[Finding]:
+    """watch_state.py's rows for the repo; it exits 1 when any needs action"""
+    cmd = watch_command(repo, workspace, read)
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode not in (0, 1):
         raise ReleaseError(f"watch_state.py failed: {proc.stderr.strip()[:500]}")
@@ -278,19 +425,46 @@ def state_dir(git: Git) -> Path:
 
 
 def load_launch(path: Path) -> Launch | None:
+    """gate.json; one without mode, as written before headless mode, is an interactive launch"""
     if not path.is_file():
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return Launch(str(data["fingerprint"]), str(data["session"]), dt.datetime.fromisoformat(data["at"]))
+        if not isinstance(data, dict):
+            raise ValueError("expected a JSON object")
+        process = None
+        if Mode(data.get("mode", Mode.INTERACTIVE.value)) is Mode.HEADLESS:
+            uuid.UUID(data["session"])
+            process = Process(data["pid"], data["started"])
+        return Launch(str(data["fingerprint"]), str(data["session"]), dt.datetime.fromisoformat(data["at"]), process)
     except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
         raise ReleaseError(f"{path} is malformed ({exc}); delete it to start over") from None
 
 
 def save_launch(path: Path, launch: Launch) -> None:
+    """An interactive launch's record is the one written before headless mode"""
     path.parent.mkdir(parents=True, exist_ok=True)
-    record = {"fingerprint": launch.fingerprint, "session": launch.session, "at": launch.at.isoformat()}
+    record: dict[str, object] = {"fingerprint": launch.fingerprint, "session": launch.session}
+    record["at"] = launch.at.isoformat()
+    if launch.process is not None:
+        record |= {"mode": launch.mode.value, "pid": launch.process.pid, "started": launch.process.started}
     path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+
+
+def session_log(state: Path, session: str) -> Path:
+    """A headless session's output, appended; the gate never deletes it"""
+    return state / SESSIONS / f"{session}.log"
+
+
+def still_working(last: Launch | None, state: Path, started: StartTime) -> Decision | None:
+    """D-17: a headless session runs while a process with its pid and recorded start time
+    exists; another start time means the pid was reused. It never reads as waiting"""
+    if last is None or last.process is None or last.process.started is None:
+        return None
+    if started(last.process.pid) != last.process.started:
+        return None
+    log = session_log(state, last.session)
+    return Decision(Action.RUNNING, f"session {last.session} is still working: tail -f {log}", ())
 
 
 @dataclass(frozen=True, slots=True)
@@ -493,12 +667,25 @@ def as_app(app_id: int, now: dt.datetime, app: AppCheck | None) -> Identity:
     return app(app_id, now)
 
 
+def checked(config: Callable[[], AgentsConfig], args: Sequence[str]) -> Callable[[], AgentsConfig]:
+    """The config as the tick reads it, refusing a headless mode's forbidden --claude-arg
+    flags at every read, before the read can lead to stopping or starting a session"""
+
+    def read() -> AgentsConfig:
+        agents = config()
+        if agents.mode is Mode.HEADLESS:
+            refuse_headless_args(args)
+        return agents
+
+    return read
+
+
 def gate(
     git: Git,
     repo: str,
     config: Callable[[], AgentsConfig],
     claude: Claude,
-    findings: Callable[[], list[Finding]],
+    findings: Callable[[StateRead], list[Finding]],
     now: dt.datetime,
     hold: Callable[[], Hold],
     notifier: Notifier,
@@ -508,6 +695,9 @@ def gate(
     app: AppCheck | None = None,
     app_key_named: bool = False,
     app_env: SessionEnv | None = None,
+    login: Callable[[], str] | None = None,
+    started: StartTime = start_time,
+    new_session: Callable[[], uuid.UUID] = uuid.uuid4,
 ) -> tuple[Decision, str | None, tuple[Waiting, ...], tuple[Judged, ...]]:
     """Decide, and on LAUNCH stop the finished sessions and start a new one. Returns the
     decision, the launched session's id, what the waiting step did for each blocked
@@ -523,9 +713,20 @@ def gate(
     decision then names the bot as its identity. app_key_named (`--app-key`) without app_id
     is refused where the config is read, after the refresh, so a checkout the app_id change
     hasn't reached yet still moves. The gate never changes its own environment: its reads
-    (the findings, the hold, `claude agents`) keep the host's gh login (spec 004)"""
+    (the findings, the hold, `claude agents`) keep the host's gh login (spec 004).
+
+    With [agents] mode = "headless" (spec 005, D-17), every config read refuses the
+    --claude-arg flags in HEADLESS_REFUSED. After the busy step, a last launch that was
+    headless and whose process still runs (its pid with the recorded start time, as started
+    reads it) reads RUNNING, whatever the mode is now. A headless state read passes
+    --trusted-only, and with app_id set first checks the App, so a failure reads no state,
+    and passes --bot-login <slug>[bot]. A headless LAUNCH reads the host's login, dry run or
+    not, and on a real run starts `claude -p` detached under a new_session id, its output in
+    the state directory's sessions/<id>.log, and records its pid and start time"""
     check_checkout(git, repo)
-    record = state_dir(git) / RECORD
+    config = checked(config, claude.args)
+    state = state_dir(git)
+    record = state / RECORD
     sessions = claude.sessions(git.root, repo)
     waiting = attend(state_dir(git) / WAITING, repo, sessions, config, notifier, now, dry_run, claude.stop)
     gone = {w.session for w in waiting if w.stopped}  # on a dry run, the ones a real tick would stop
@@ -537,18 +738,34 @@ def gate(
     pending = busy(sessions)
     if pending is not None:
         return pending, None, waiting, pruned
+    last = load_launch(record)
+    working = still_working(last, state, started)
+    if working is not None:
+        return working, None, waiting, pruned
     if refresh_checkout and not dry_run:
         refresh(git)
     agents = config()
     if app_key_named and agents.app_id is None:  # read after the refresh, so a stale checkout can't stall it
         raise ReleaseError(f"--app-key names an App's key, but [agents] in {CONFIG_PATH} sets no app_id")
+    headless = agents.mode is Mode.HEADLESS
+    identity = None
+    read = StateRead()
+    if headless:  # the App first: a failure reads no state and launches nothing (D-14)
+        identity = None if agents.app_id is None else as_app(agents.app_id, now, app)
+        read = StateRead(trusted_only=True, bot_login=None if identity is None else identity.login)
     retry = dt.timedelta(hours=agents.retry_hours)
-    decision = decide(findings(), sessions, load_launch(record), now, retry, agents.prs)
+    decision = decide(findings(read), sessions, last, now, retry, agents.prs)
     if decision.action is not Action.LAUNCH:
         return decision, None, waiting, pruned
-    identity = None if agents.app_id is None else as_app(agents.app_id, now, app)
+    if not headless:
+        identity = None if agents.app_id is None else as_app(agents.app_id, now, app)
     if identity is not None:
         decision = replace(decision, identity=identity.login)
+    text = prompt(agents.prompt, repo, decision.work, now)
+    if headless:
+        if login is None:
+            raise ReleaseError("headless mode mentions your gh login, but no login read was given; no session starts")
+        text = headless_prompt(agents.prompt, repo, decision.work, now, login())
     if dry_run:
         return decision, None, waiting, pruned
     env = None
@@ -559,9 +776,15 @@ def gate(
     for session in decision.stop:
         claude.stop(session)
     name = f"{session_name(repo)} {now:%Y-%m-%d %H:%M}"
-    launched = claude.launch(git.root, name, prompt(agents.prompt, repo, decision.work, now), env)
-    save_launch(record, Launch(fingerprint(decision.work), launched, now))
-    return decision, launched, waiting, pruned
+    if not headless:
+        launched = claude.launch(git.root, name, text, env)
+        save_launch(record, Launch(fingerprint(decision.work), launched, now))
+        return decision, launched, waiting, pruned
+    session_id = new_session()
+    log = session_log(state, str(session_id))
+    pid = claude.start(git.root, name, text, session_id, log, env)
+    save_launch(record, Launch(fingerprint(decision.work), str(session_id), now, Process(pid, started(pid))))
+    return replace(decision, follow=f"tail -f {log}"), str(session_id), waiting, pruned
 
 
 def tick_record(
@@ -599,5 +822,5 @@ def tick_lines(
     if dry_run and decision.identity is not None:
         lines.append(f"  would launch as {decision.identity}")
     if launched:
-        lines.append(f"  launched {launched}: claude attach {launched}")
+        lines.append(f"  launched {launched}: {decision.follow or f'claude attach {launched}'}")
     return lines

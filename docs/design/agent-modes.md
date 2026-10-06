@@ -34,6 +34,7 @@ notify = true       # a desktop notification when a session waits on you
 remind_hours = 4    # repeat it while the session still waits (1..168)
 max_wait_minutes = 15  # stop a session that waited this long (0..10080); 0: never
 # app_id = 123456      # sessions write as this GitHub App; unset: as the host's gh login
+# mode = "headless"    # interactive (default): sessions ask you; headless: they ask on GitHub
 ```
 
 ```
@@ -78,6 +79,31 @@ the user's working copy, where the session would branch and commit. Each run:
    reruns watch_state.py and reads it as data, not instructions), and records the launch.
    With `app_id` set, the App's checks and the session's helpers come first (below)
 
+### A headless launch
+
+With `mode = "headless"` (spec 005, D-17) the steps change in four places:
+
+- Every read of `[agents]` refuses a `--claude-arg` of `--permission-mode`,
+  `--permission-prompts`, `--dangerously-skip-permissions`,
+  `--allow-dangerously-skip-permissions`, `--bg`, `--background`, or `--session-id`
+  (alone or as `--flag=value`): exit 2 before any session is stopped or started
+- After step 4, a last launch that was headless and whose process still runs (its `pid`
+  with the start time `ps -p <pid> -o lstart=` recorded at launch; another start time means
+  the pid was reused) reads **RUNNING**, `session <uuid> is still working: tail -f <log>`.
+  It never reads WAITING, so `max_wait_minutes` doesn't apply to it
+- Step 6 calls `watch_state.py` with `--trusted-only` (D-16), and with `app_id` set first
+  runs the App's checks, then passes `--bot-login <slug>[bot]`; a failed check reads no
+  state and launches nothing
+- Step 8 reads the host's login (`gh api user -q .login`; a failure exits 2 and launches
+  nothing), appends a paragraph to the prompt that sends a decision for `@<login>` to
+  github-issue-triage's `references/needs-decision.md`, and starts `claude -p
+  --permission-prompts none --allowedTools "<HEADLESS_TOOLS>" --disallowedTools
+  AskUserQuestion --session-id <uuid> [--settings <env>] -n <name> [--claude-arg flags]
+  <prompt>` in a new process session, stdin from `/dev/null`, output appended to
+  `sessions/<uuid>.log` in the state directory. It doesn't wait for it, and records the
+  `pid` and start time in `gate.json`. `claude --resume <uuid>` reopens the conversation
+  after it ends
+
 ### The session's identity
 
 Without `app_id`, a session uses `gh` and `git` as they're signed in on the host: the
@@ -117,7 +143,9 @@ session, and writes no file, and says `would notify <id>` or `would stop <id>` i
 session, such as `--permission-mode`; it is the host's choice, so it stays a flag.
 
 `shipmill launchd` writes `~/Library/LaunchAgents/dev.shipmill.gate.<owner>.<repo>.plist`
-with `StartInterval`, `RunAtLoad`, and a log under `~/Library/Logs/shipmill/`. launchd gives
+with `StartInterval`, `RunAtLoad`, `AbandonProcessGroup` (so launchd doesn't end a
+headless session when the tick that started it exits; a job installed before it needs
+`shipmill launchd` run once more), and a log under `~/Library/Logs/shipmill/`. launchd gives
 jobs a minimal PATH, so the job carries one built from where claude, gh, git, and uvx live,
 skipping temporary folders: cmux, for one, puts a `claude` shim in one that vanishes when
 the app restarts. Install refuses a checkout that isn't dedicated or has no `[agents]`
@@ -170,7 +198,8 @@ Verified on Claude Code 2.1:
 The gate keeps its state in `$(git rev-parse --git-common-dir)/shipmill/`, never committed
 and shared by every worktree:
 
-- `gate.json`: the last launch's fingerprint, session id, and time. Losing it costs at
+- `gate.json`: the last launch's fingerprint, session id, and time, and for a headless launch its
+  `mode`, `pid`, and process start time (a record without `mode` is interactive). Losing it costs at
   most one extra session; it never changes what is decided
 - `waiting.json`: one entry per blocked gate session, `{"<id>": {"since": ..., "notified":
   ...}}`, where `since` is the first tick that saw it blocked and `notified` the last
@@ -185,6 +214,8 @@ and shared by every worktree:
   mode `0700`, rewritten before each launch. They run the gate's own shipmill (`python -m
   shipmill app-token`) with the App's id, key path, repo, and checkout as arguments, and
   hold no token
+- `sessions/<uuid>.log`, in headless mode: each session's output, appended; the gate never
+  deletes one
 
 A file that isn't its shape exits 2 naming its path. Everything else comes from GitHub and
 from `claude agents`.
