@@ -2,12 +2,14 @@
 a stable release made off main back into main, and publish it"""
 
 import datetime as dt
+import re
 import time
 from dataclasses import dataclass
+from enum import StrEnum
 
 from shipmill.environments import deployed_from
 from shipmill.errors import ReleaseError
-from shipmill.github import GitHub
+from shipmill.github import Forbidden, GitHub
 from shipmill.gitrepo import Git
 from shipmill.policy import Lane, Policy
 from shipmill.stamp import notes, stamp, sync
@@ -30,11 +32,53 @@ def blocked(work: str) -> str:
     return f"origin has a branch '{BLOCKING_BRANCH}', which blocks the work branch {work}; delete or rename it"
 
 
+# GITHUB_WORKFLOW_REF: owner/repo/.github/workflows/<file>@<ref>; in a reusable workflow it
+# names the caller, the release workflow whose runs share the work branch
+_WORKFLOW_REF = re.compile(r"^[^/@]+/[^/@]+/\.github/workflows/(?P<file>[^/@]+\.ya?ml)@\S+$")
+
+
+@dataclass(frozen=True, slots=True)
+class ActionsRun:
+    """The GitHub Actions run prepare runs in: its release workflow's file and its id"""
+
+    workflow: str
+    id: int
+
+    @classmethod
+    def parse(cls, ref: str, run_id: str) -> ActionsRun | None:
+        """From GITHUB_WORKFLOW_REF and GITHUB_RUN_ID, which GitHub sets in every job; None
+        when both are empty, outside Actions"""
+        if not ref and not run_id:
+            return None
+        found = _WORKFLOW_REF.match(ref)
+        if found is None or not run_id.isdigit():
+            raise ReleaseError(
+                f"GITHUB_WORKFLOW_REF={ref!r} and GITHUB_RUN_ID={run_id!r} name no workflow run:"
+                " expected owner/repo/.github/workflows/<file>@<ref> and a number"
+            )
+        return cls(found["file"], int(run_id))
+
+
+class Stop(StrEnum):
+    """Why prepare left a work branch it found on origin alone"""
+
+    OWNED = "owned"  # another queued or in-progress run of the release workflow may own it
+    FORBIDDEN = "forbidden"  # the token can't list the workflow's runs: no actions: read
+    OUTSIDE = "outside"  # not in an Actions run, so no run to compare with
+
+
 @dataclass(frozen=True, slots=True)
 class Prepared:
     changed: tuple[str, ...]
     sha: str  # empty unless committed
-    pushed: bool  # the work branch was pushed; False when another run holds it
+    pushed: bool  # the work branch was pushed; False when it was on origin and prepare stopped
+    found: str = ""  # the work branch's commit prepare found on origin, else empty
+    stop: Stop | None = None  # why prepare stopped at the branch it found; None when it pushed
+
+    @property
+    def recovered(self) -> bool:
+        """Whether prepare deleted an orphaned work branch before pushing its own"""
+        return self.pushed and bool(self.found)
 
 
 def prepare(
@@ -48,8 +92,12 @@ def prepare(
     prs: tuple[int, ...] = (),
     commit: bool = False,
     push: bool = False,
+    github: GitHub | None = None,
+    run: ActionsRun | None = None,
 ) -> Prepared:
-    """Check out base, stamp it as version, and optionally commit and push the work branch"""
+    """Check out base, stamp it as version, and optionally commit and push the work branch.
+    A work branch already on origin is deleted first when no other queued or in-progress run
+    of the release workflow could own it (D-18); otherwise prepare stops without pushing"""
     if git.dirty():
         raise ReleaseError("the checkout has uncommitted changes; prepare stamps a clean checkout")
     git.run("checkout", "-q", "--detach", base)
@@ -64,13 +112,32 @@ def prepare(
     sha = git.sha()
     if not push:
         return Prepared(changed, sha, False)
-    if git.remote_branch(work_branch(version)) is not None:
-        return Prepared(changed, sha, False)
-    if git.remote_branch(BLOCKING_BRANCH) is not None:
-        raise ReleaseError(blocked(work_branch(version)))
-    if error := git.push(f"{sha}:refs/heads/{work_branch(version)}"):
-        raise ReleaseError(f"pushing {work_branch(version)} was rejected: {error}")
-    return Prepared(changed, sha, True)
+    work = work_branch(version)
+    found = git.remote_branch(work)
+    if found is not None:
+        if (stop := _held(github, run)) is not None:
+            return Prepared(changed, sha, False, found, stop)
+        # the lease deletes the branch only while it is still the commit no run owns
+        if error := git.push(f"--force-with-lease=refs/heads/{work}:{found}", f":refs/heads/{work}"):
+            raise ReleaseError(f"deleting the orphaned {work} at {found[:12]} was rejected: {error}")
+    elif git.remote_branch(BLOCKING_BRANCH) is not None:
+        raise ReleaseError(blocked(work))
+    if error := git.push(f"{sha}:refs/heads/{work}"):
+        raise ReleaseError(f"pushing {work} was rejected: {error}")
+    return Prepared(changed, sha, True, found or "")
+
+
+def _held(github: GitHub | None, run: ActionsRun | None) -> Stop | None:
+    """Why the work branch on origin may still be in use, or None when it is orphaned: no
+    other run of the release workflow is queued or in progress. Any such run counts, since
+    one whose CI still runs on the branch must never lose it"""
+    if github is None or run is None:
+        return Stop.OUTSIDE
+    try:
+        active = github.active_runs(run.workflow)
+    except Forbidden:
+        return Stop.FORBIDDEN
+    return Stop.OWNED if any(r.id != run.id for r in active) else None
 
 
 @dataclass(frozen=True, slots=True)

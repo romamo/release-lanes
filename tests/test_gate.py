@@ -246,6 +246,7 @@ def test_the_gate_reads_the_rows_watch_state_prints() -> None:
     assert {f.state for f in work} == {
         "BOT_FAILED",
         "BOT_STALLED",
+        "WORK_BRANCH_STALE",
         "NOT_PUBLISHED",
         "UNANNOUNCED",
         "ISSUES",

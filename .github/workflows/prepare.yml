@@ -69,17 +69,18 @@ jobs:
           echo "Waiting ${minutes} min for more pushes; a newer push cancels this run"
           sleep "$((minutes * 60))"
 
-  # From here on nothing is cancelled: a newer run queues behind this one
+  # From here on nothing is cancelled: a newer run queues behind this one.
+  # It sets no permissions, so it runs with the caller's grant: `contents: write` (pushes the
+  # release commit's work branch), `issues: read` (release-blocker issues and milestones),
+  # `pull-requests: read` (a hotfix's merge commits), and, optionally, `actions: read`, which
+  # lists the release workflow's runs so a work branch none of them owns is replaced (D-18).
+  # Asking for `actions: read` here would fail every caller that doesn't grant it
   prepare:
     needs: settle
     concurrency:
       group: shipmill
       cancel-in-progress: false
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # pushes the release commit's work branch
-      issues: read # release-blocker issues and milestones
-      pull-requests: read # a hotfix's merge commits
     outputs:
       action: ${{ steps.plan.outputs.action }}
       mode: ${{ steps.plan.outputs.mode }}

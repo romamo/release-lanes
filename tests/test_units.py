@@ -5,7 +5,7 @@ import pytest
 
 from shipmill.changelog import Changelog, Entry
 from shipmill.errors import ReleaseError
-from shipmill.github import PROPOSAL_LABEL, GhCli
+from shipmill.github import PROPOSAL_LABEL, Forbidden, GhCli
 from shipmill.policy import Lane, Policy, Style
 from shipmill.schedule import Freeze, Window
 from shipmill.version import Part, Version
@@ -309,3 +309,38 @@ class TestLabelCreation:
     def test_another_failure_still_fails(self, tmp_path: Path) -> None:
         with pytest.raises(ReleaseError, match=f"gh label create {PROPOSAL_LABEL} failed: HTTP 403"):
             self.gh(tmp_path, "HTTP 403: Resource not accessible").create_issue("t", "b", (PROPOSAL_LABEL,))
+
+
+class TestActiveRuns:
+    """prepare asks for a release workflow's unfinished runs; a 403 means no `actions: read` (#175)"""
+
+    @staticmethod
+    def gh(tmp_path: Path, body: str) -> GhCli:
+        script = tmp_path / "gh"
+        script.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+        script.chmod(0o755)
+        return GhCli(tmp_path, gh=str(script))
+
+    def test_each_unfinished_status_is_asked_for(self, tmp_path: Path) -> None:
+        body = (
+            'n=; for a in "$@"; do case "$a" in status=queued) n=7 ;; status=in_progress) n=9 ;; esac; done\n'
+            'if [ -n "$n" ]; then\n'
+            '  echo "{\\"workflow_runs\\": [{\\"id\\": $n, \\"status\\": \\"s$n\\",'
+            ' \\"created_at\\": \\"2026-10-06T08:00:00Z\\"}]}"\n'
+            "else echo '{\"workflow_runs\": []}'; fi\n"
+        )
+        runs = self.gh(tmp_path, body).active_runs("release.yml")
+        assert [(r.id, r.status) for r in runs] == [(9, "s9"), (7, "s7")]
+
+    def test_a_refusal_is_forbidden(self, tmp_path: Path) -> None:
+        refused = self.gh(tmp_path, "echo 'gh: Resource not accessible by integration (HTTP 403)' >&2; exit 1\n")
+        with pytest.raises(Forbidden, match=r"gh api -X GET failed: .*\(HTTP 403\)"):
+            refused.active_runs("release.yml")
+
+    @pytest.mark.parametrize(
+        "error", ["gh: API rate limit exceeded for installation (HTTP 403)", "gh: Not Found (HTTP 404)"]
+    )
+    def test_another_failure_is_not_forbidden(self, tmp_path: Path, error: str) -> None:
+        with pytest.raises(ReleaseError) as caught:
+            self.gh(tmp_path, f"echo '{error}' >&2; exit 1\n").active_runs("release.yml")
+        assert not isinstance(caught.value, Forbidden)

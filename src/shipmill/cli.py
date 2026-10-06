@@ -90,7 +90,7 @@ from shipmill.gate import (
 from shipmill.github import GhCli, GitHub
 from shipmill.gitrepo import Git
 from shipmill.init import init, init_operate
-from shipmill.land import cleanup, land, prepare
+from shipmill.land import ActionsRun, Prepared, Stop, cleanup, land, prepare, work_branch
 from shipmill.launchd import DEFAULT_TOOL, build, install, remove
 from shipmill.notify import Desktop
 from shipmill.operate import Http, UrllibHttp, approve, approve_rollback, operate, summary
@@ -169,6 +169,22 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--commit", action="store_true", help="commit the stamp as the release commit")
     p.add_argument("--push", action="store_true", help="also push the commit to its work branch")
     p.add_argument("--github-output", type=Path)
+    p.add_argument(
+        "--workflow-ref",
+        default=os.environ.get("GITHUB_WORKFLOW_REF", ""),
+        help="the release workflow, whose other active runs may own a work branch (default: $GITHUB_WORKFLOW_REF)",
+    )
+    p.add_argument(
+        "--run-id",
+        default=os.environ.get("GITHUB_RUN_ID", ""),
+        help="this run, never an owner of a work branch (default: $GITHUB_RUN_ID)",
+    )
+    p.add_argument(
+        "--step-summary",
+        type=Path,
+        default=os.environ.get("GITHUB_STEP_SUMMARY") or None,
+        help="also report a stop or a recovery here (default: $GITHUB_STEP_SUMMARY)",
+    )
 
     p = sub.add_parser("land", help="push, tag, sync, and publish a release commit that passed CI")
     _release_args(p)
@@ -397,11 +413,13 @@ def main(
             _ints(args.prs),
             commit=args.commit or args.push,
             push=args.push,
+            github=hub,
+            run=ActionsRun.parse(args.workflow_ref, args.run_id) if args.push else None,
         )
         for changed in prepared.changed:
             print(f"stamped {changed}")
-        if args.push and not prepared.pushed:
-            print(f"another run holds the work branch for {args.version}; this run stops", file=sys.stderr)
+        if args.push:
+            _report_work_branch(prepared, work_branch(args.version), args.workflow_ref, args.step_summary)
         sha = prepared.sha if (prepared.pushed or not args.push) else ""
         _outputs(args.github_output, {"sha": sha})
     elif args.command == "land":
@@ -447,6 +465,39 @@ def main(
         stable = [t.version for t in git.tags() if t.version.is_stable and t.version < args.version]
         sys.stdout.write(notes(policy, text, args.version, max(stable) if stable else None))
     return 0
+
+
+def _annotation(text: str) -> str:
+    """text as a workflow command's message: GitHub reads %, CR, and LF as escapes"""
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _report_work_branch(prepared: Prepared, work: str, workflow_ref: str, step_summary: Path | None) -> None:
+    """Make a stop at a work branch on origin, or its recovery, visible: an annotation, a
+    step-summary line, and stderr; the run stays green either way (D-18)"""
+    if not prepared.found:
+        return
+    workflow = workflow_ref.partition("@")[0].rsplit("/", 1)[-1] or "the release workflow"
+    at = f"{work} is on origin at {prepared.found[:12]}"
+    if prepared.stop is None:
+        level, title = "notice", "Orphaned work branch replaced"
+        text = f"{at}, and no other run of {workflow} is queued or in progress: deleted it and pushed this run's own"
+    else:
+        level, title = "warning", "Work branch held"
+        why = {
+            Stop.OWNED: f"another queued or in-progress run of {workflow} may own it",
+            Stop.FORBIDDEN: (
+                f"this run can't list the runs of {workflow} to tell whether one owns it: grant `actions: read`"
+                f" to the prepare job in {CALLER}, so a run deletes a work branch no run owns"
+            ),
+            Stop.OUTSIDE: "outside a GitHub Actions run nothing tells whether a run owns it",
+        }[prepared.stop]
+        text = f"{at}; {why}. This run releases nothing; delete the branch if no run uses it"
+    print(text, file=sys.stderr)
+    print(f"::{level} title={title}::{_annotation(text)}")
+    if step_summary is not None:
+        with step_summary.open("a", encoding="utf-8") as out:
+            out.write(f"{title}: {text}\n\n")
 
 
 def _gate(root: Path, args: argparse.Namespace, github: GitHub, sessions: Sessions) -> int:

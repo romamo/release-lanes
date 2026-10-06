@@ -11,6 +11,10 @@ Release bot (a repo with .github/shipmill.toml):
   BOT_STALLED     a shipmill bot in release mode has a release due now, no run of
                   its workflow is queued or running, and none started in --grace minutes
   BOT_OK          neither; BOT_NONE when the repo has no bot (it releases by "tag X")
+  WORK_BRANCH_STALE  for a shipmill bot: a shipmill/v* work branch on origin while none of
+                  the workflow's recent runs is queued or in progress, so no run owns it: a
+                  run cancelled before its cleanup job left it, and each later run stops
+                  at it unless its prepare job may list the runs (actions: read)
   WORKTREE_STALE  for a shipmill bot: a worktree `shipmill worktrees` keeps, under
                   .claude/worktrees/ or tmp/wt-*, created over 7 days ago, with why it is
                   kept (reported, never an action: a person finishes, pushes, or removes
@@ -60,12 +64,12 @@ Intake (github-issue-triage's triage_state.py):
 [operate] incident_label (fleet.py passes a fleet file's incident_label this way).
 
 --json prints one JSON object per row: state, subject, detail, and agent, true when the
-row needs an agent (BOT_FAILED, BOT_STALLED, NOT_PUBLISHED, UNANNOUNCED, ISSUES,
-OPERATE_FAILED, INCIDENT_OPEN): the rows shipmill gate starts a session for.
+row needs an agent (BOT_FAILED, BOT_STALLED, WORK_BRANCH_STALE, NOT_PUBLISHED, UNANNOUNCED,
+ISSUES, OPERATE_FAILED, INCIDENT_OPEN): the rows shipmill gate starts a session for.
 
 Holds and incidents lead the report. Exit 0 when nothing needs action, 1 when any
-BOT_FAILED, BOT_STALLED, NOT_PUBLISHED, UNANNOUNCED, ISSUES, OPERATE_FAILED, UNHEALTHY,
-PROMOTION_DUE, INCIDENT_OPEN, or POSTMORTEM_DUE row is present, 2 on bad input or a git,
+BOT_FAILED, BOT_STALLED, WORK_BRANCH_STALE, NOT_PUBLISHED, UNANNOUNCED, ISSUES,
+OPERATE_FAILED, UNHEALTHY, PROMOTION_DUE, INCIDENT_OPEN, or POSTMORTEM_DUE row is present, 2 on bad input or a git,
 gh, or uvx failure (a failing `shipmill plan` or `shipmill worktrees`).
 Needs git, an authenticated gh, and uvx (for a shipmill bot's plan and worktrees; `shipmill
 worktrees` needs claude on PATH too, to see the live sessions). Python 3.10+,
@@ -111,6 +115,7 @@ VERSION_TAG = re.compile(r"^v\d+\.\d+")  # skips moving major tags such as v0
 ACTION = {
     "BOT_FAILED",
     "BOT_STALLED",
+    "WORK_BRANCH_STALE",
     "NOT_PUBLISHED",
     "UNANNOUNCED",
     "ISSUES",
@@ -125,6 +130,7 @@ ACTION = {
 AGENT = {
     "BOT_FAILED",
     "BOT_STALLED",
+    "WORK_BRANCH_STALE",
     "NOT_PUBLISHED",
     "UNANNOUNCED",
     "ISSUES",
@@ -136,6 +142,8 @@ STALE = dt.timedelta(days=7)  # a kept shipmill worktree older than this is repo
 NOT_SHIPMILL = {"main checkout", "current checkout", "not a shipmill worktree"}
 LEAD = ("INCIDENT_OPEN", "HOLD")  # the report starts with these, in this order
 ACTIVE = {"queued", "in_progress", "waiting", "pending", "requested"}
+# a release's work branch: shipmill's land.WORK_PREFIX and a version tag
+WORK_BRANCH = re.compile(r"^refs/heads/(shipmill/v\d+\.\d+\S*)$")
 HOLD_LABEL = "shipmill-hold"  # shipmill's autonomy.HOLD_LABEL
 INCIDENT_LABEL = "incident"  # the default of [operate] incident_label
 HEALTH_PREFIX = "shipmill health"  # starts the description of every status shipmill operate writes
@@ -245,6 +253,28 @@ def bot_rows(runs: list[Run], due: str | None, now: dt.datetime, grace: dt.timed
         if not active and not recent:
             rows.append(Row("BOT_STALLED", name, f"due and not running: {due}"))
     return rows or [Row("BOT_OK", name, "")]
+
+
+def work_branch_rows(branches: dict[str, str], runs: list[Run], workflow: str) -> list[Row]:
+    """Each work branch on origin (name to commit) while none of the workflow's recent runs,
+    newest first, is queued or in progress: no run owns it, so it stops every later run"""
+    if any(r.status in ACTIVE for r in runs):
+        return []
+    return [
+        Row("WORK_BRANCH_STALE", name, f"at {sha[:12]}, and no run of {workflow} is queued or in progress")
+        for name, sha in sorted(branches.items())
+    ]
+
+
+def work_branches(repo_dir: Path) -> dict[str, str]:
+    """The shipmill/v* work branches on origin, asked of origin itself, with their commits"""
+    found = {}
+    for line in run(["git", "ls-remote", "--heads", "origin"], cwd=repo_dir).splitlines():
+        sha, _, ref = line.partition("\t")
+        match = WORK_BRANCH.match(ref)
+        if match:
+            found[match.group(1)] = sha
+    return found
 
 
 def fetch_runs(repo: str, workflow: str) -> list[Run]:
@@ -936,7 +966,11 @@ def main() -> int:
     else:
         workflow, shipmill = bot
         due = planned_release(args.repo, repo_dir, policy, branch, args.tool) if shipmill else None
-        rows += bot_rows(fetch_runs(args.repo, workflow), due, now, grace, workflow)
+        # the branches before the runs: a run that ends between the two reads deleted its branch
+        branches = work_branches(repo_dir) if shipmill else {}
+        runs = fetch_runs(args.repo, workflow)
+        rows += bot_rows(runs, due, now, grace, workflow)
+        rows += work_branch_rows(branches, runs, workflow)
         if shipmill:  # after the plan, whose own worktree is gone by then
             rows += stale_worktrees(repo_dir, args.tool)
 

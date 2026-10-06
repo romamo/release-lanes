@@ -61,6 +61,28 @@ def test_a_due_release_with_a_live_or_recent_run_waits(ws: ModuleType, status: s
     assert states(ws.bot_rows(runs, "stable 0.3.0", NOW, GRACE, "release.yml")) == ["BOT_OK"]
 
 
+def test_a_work_branch_no_run_owns_is_stale(ws: ModuleType) -> None:
+    # #175: the run that pushed shipmill/v0.17.0 was cancelled before its cleanup got a runner
+    runs = [run(ws, "completed", "success", 5), run(ws, "completed", "cancelled", 900)]
+    rows = ws.work_branch_rows({"shipmill/v0.17.0": "a" * 40}, runs, "release.yml")
+    assert [(r.state, r.subject, r.detail) for r in rows] == [
+        ("WORK_BRANCH_STALE", "shipmill/v0.17.0", f"at {'a' * 12}, and no run of release.yml is queued or in progress")
+    ]
+    assert rows[0].json()["agent"] is True and "WORK_BRANCH_STALE" in ws.ACTION
+
+
+@pytest.mark.parametrize("status", ["queued", "in_progress", "waiting"])
+def test_a_work_branch_an_active_run_may_own_is_not_stale(ws: ModuleType, status: str) -> None:
+    runs = [run(ws, status, "", 40), run(ws, "completed", "success", 60)]
+    assert ws.work_branch_rows({"shipmill/v0.17.0": "a" * 40}, runs, "release.yml") == []
+
+
+def test_only_release_work_branches_are_read(ws: ModuleType) -> None:
+    assert ws.WORK_BRANCH.match("refs/heads/shipmill/v1.2.0rc1")[1] == "shipmill/v1.2.0rc1"
+    for ref in ("refs/heads/shipmill", "refs/heads/shipmill/other", "refs/heads/main", "refs/tags/shipmill/v1.0.0"):
+        assert ws.WORK_BRANCH.match(ref) is None
+
+
 def test_publish_states(ws: ModuleType) -> None:
     old = ws.Tag("v1.2.0", NOW - dt.timedelta(hours=1))
     new = ws.Tag("v1.2.1", NOW - dt.timedelta(minutes=5))
@@ -510,7 +532,16 @@ def test_the_issue_states_reported_are_the_ones_triage_state_acts_on(ws: ModuleT
     assert ws.TRIAGE_ACTION == triage_state.ACTION
 
 
-AGENT_ROWS = ["BOT_FAILED", "BOT_STALLED", "NOT_PUBLISHED", "UNANNOUNCED", "ISSUES", "OPERATE_FAILED", "INCIDENT_OPEN"]
+AGENT_ROWS = [
+    "BOT_FAILED",
+    "BOT_STALLED",
+    "WORK_BRANCH_STALE",
+    "NOT_PUBLISHED",
+    "UNANNOUNCED",
+    "ISSUES",
+    "OPERATE_FAILED",
+    "INCIDENT_OPEN",
+]
 REPORT_ROWS = [
     "PROMOTION_DUE",
     "UNHEALTHY",

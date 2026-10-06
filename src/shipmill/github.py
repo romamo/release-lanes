@@ -16,6 +16,13 @@ PROPOSAL_LABEL = "shipmill-proposal"  # on every issue proposing a release or a 
 OPEN_LIMIT = 100  # open issues read per label: proposals are one per lane and per environment
 PULL_LIMIT = 1000  # open pull requests read at once; gh's own default is 30
 _LABEL_DESCRIPTIONS = {PROPOSAL_LABEL: "Opened by shipmill: a release or deploy waiting for a person"}
+# the statuses of a run not finished yet, each listed with its own query: GitHub filters runs
+# by one status at a time
+ACTIVE_STATUSES = ("queued", "in_progress", "waiting", "pending", "requested")
+
+
+class Forbidden(ReleaseError):
+    """GitHub refused the call for the token's permissions (HTTP 403, not a rate limit)"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +151,11 @@ class GitHub(Protocol):
         """The open pull requests, by number (the newest PULL_LIMIT)"""
         ...
 
+    def active_runs(self, workflow: str) -> list[WorkflowRun]:
+        """The workflow's runs on any branch that haven't finished (ACTIVE_STATUSES), newest
+        first (the newest 100 of each status); Forbidden when the token can't read Actions"""
+        ...
+
 
 def _time(text: str) -> dt.datetime:
     when = dt.datetime.fromisoformat(text)
@@ -165,7 +177,12 @@ class GhCli:
     def _gh(self, *args: str) -> str:
         proc = self._run(*args)
         if proc.returncode != 0:
-            raise ReleaseError(f"gh {' '.join(args[:3])} failed: {proc.stderr.strip()}")
+            error = proc.stderr.strip()
+            message = f"gh {' '.join(args[:3])} failed: {error}"
+            # gh prints "<GitHub's message> (HTTP 403)"; a 403 for a rate limit isn't a permission
+            if re.search(r"\bHTTP 403\b", error) and "rate limit" not in error.lower():
+                raise Forbidden(message)
+            raise ReleaseError(message)
         return proc.stdout
 
     def open_issues(self, label: str) -> list[str]:
@@ -315,6 +332,18 @@ class GhCli:
             "-f", "per_page=100",
         )  # fmt: skip
         runs = [WorkflowRun(int(r["id"]), str(r["status"]), _time(r["created_at"])) for r in found["workflow_runs"]]
+        return sorted(runs, key=lambda r: r.id, reverse=True)
+
+    def active_runs(self, workflow: str) -> list[WorkflowRun]:
+        runs = []
+        for status in ACTIVE_STATUSES:
+            found = self._api(
+                "-X", "GET", f"repos/{{owner}}/{{repo}}/actions/workflows/{workflow}/runs", "-f", f"status={status}",
+                "-f", "per_page=100",
+            )  # fmt: skip
+            runs += [
+                WorkflowRun(int(r["id"]), str(r["status"]), _time(r["created_at"])) for r in found["workflow_runs"]
+            ]
         return sorted(runs, key=lambda r: r.id, reverse=True)
 
     def open_pull_requests(self) -> list[PullRequest]:

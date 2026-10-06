@@ -55,6 +55,9 @@ def test_init_writes_a_policy_doctor_accepts(repo: Repo) -> None:
     caller = written[1].read_text(encoding="utf-8")
     assert "uses: ./.github/workflows/ci.yml" in caller
     assert "shipmill/shipmill/.github/workflows/prepare.yml@v0" in caller
+    # the prepare job lists the release workflow's runs to replace an orphaned work branch (#175)
+    prepare_job = caller[caller.index("  prepare:") : caller.index("  ci:")]
+    assert "      actions: read #" in prepare_job
     checks = {c.name: c.status for c in doctor(repo.root)}
     assert checks["policy"] == checks["workflow"] == checks["ci"] == checks["changelog"] == "PASS"
     with pytest.raises(ReleaseError, match="shipmill.toml, .github/workflows/release.yml exist; pass --force"):
