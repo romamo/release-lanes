@@ -40,6 +40,8 @@ bot.
   `--prune --dry-run` prints them as WOULD_REMOVE and removes nothing, and `--dry-run` alone
   exits 2. The first removal or branch deletion git refuses stops the prune with exit 2,
   naming the worktree and git's error and what it removed before (#123)
+- Spec 004 for gated sessions writing as a GitHub App (`[agents] app_id`), with D-14:
+  with an App set, a session starts as the App or not at all (#137)
 
 ## [0.16.0] - 2026-10-05
 
