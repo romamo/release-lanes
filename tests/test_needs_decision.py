@@ -118,24 +118,28 @@ def test_s005_8_without_bot_login_the_question_is_the_newest_marker_comment(ts: 
 def test_s005_8_a_trusted_comment_is_a_reply(ts: ModuleType, association: str) -> None:
     item = issue(comment(QUESTION), comment("1", by="bob", association=association))
     assert state(ts, item) == "NEW"
-    assert state(ts, item, bot_login=BOT) == "NEEDS_DECISION"  # with an App, a reply follows the bot's comment
+    # with an App, the person's marker comment is newer than any bot question: no question
+    assert state(ts, item, bot_login=BOT) == "NEEDS_DECISION"
 
 
 @pytest.mark.parametrize("association", ["CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER", "NONE", "MANNEQUIN"])
 def test_s005_8_any_other_author_association_never_replies(ts: ModuleType, association: str) -> None:
     assert state(ts, issue(comment(QUESTION), comment("1", by="eve", association=association))) == "NEEDS_DECISION"
-    asked = comment("Decision needed: which flag?", by=BOT, association="NONE")
+    asked = comment(QUESTION, by=BOT, association="NONE")
     item = issue(asked, comment("1", by="eve", association=association))
     assert state(ts, item, bot_login=BOT) == "NEEDS_DECISION"
 
 
-def test_s005_8_with_bot_login_the_question_is_the_bots_newest_comment(ts: ModuleType) -> None:
-    asked = comment("Decision needed: which flag?", by=BOT, association="NONE")
+def test_s005_8_with_bot_login_the_question_is_the_bots_newest_marker_comment(ts: ModuleType) -> None:
+    asked = comment(QUESTION, by=BOT, association="NONE")
     assert state(ts, issue(asked), bot_login=BOT) == "NEEDS_DECISION"
     assert state(ts, issue(asked, comment("1")), bot_login=BOT) == "NEW"
     # the bot's own later comment is never a reply, whatever its association
     later = comment("Still waiting", by=BOT, association="MEMBER")
-    assert state(ts, issue(asked, comment("1"), later), bot_login=BOT) == "NEEDS_DECISION"
+    assert state(ts, issue(asked, later), bot_login=BOT) == "NEEDS_DECISION"
+    # a later plain bot comment is no question, so the reply stands; a marked one asks again
+    assert state(ts, issue(asked, comment("1"), later), bot_login=BOT) == "NEW"
+    assert state(ts, issue(asked, comment("1"), asked), bot_login=BOT) == "NEEDS_DECISION"
     # logins compare as GitHub does, without case
     assert state(ts, issue(asked), bot_login="Shipmill-O[bot]") == "NEEDS_DECISION"
 
@@ -146,11 +150,54 @@ def test_s005_8_a_labelled_issue_with_no_question_waits(ts: ModuleType) -> None:
     assert state(ts, issue(comment("parking"), comment("still parked")), bot_login=BOT) == "NEEDS_DECISION"
 
 
+def test_s005_8_an_outsiders_marker_comment_never_reparks_an_answered_issue(ts: ModuleType) -> None:
+    # #184, input 1: the reply stands, whatever an outsider posts after it
+    for association in ("NONE", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR"):
+        item = issue(comment(QUESTION), comment("1"), comment(QUESTION, by="eve", association=association))
+        assert state(ts, item) == "NEW"
+    # a deleted author (GitHub's ghost) is never a question either
+    ghost = {"body": QUESTION, "createdAt": "2026-10-06T10:00:00Z", "author": None, "authorAssociation": "NONE"}
+    assert state(ts, issue(comment(QUESTION), comment("1"), ghost)) == "NEW"
+
+
+def test_s005_8_an_outsiders_marker_comment_alone_is_no_question(ts: ModuleType) -> None:
+    item = issue(comment(QUESTION, by="eve", association="NONE"))
+    assert ts.gated(item, None, False) == ("NEEDS_DECISION", "labelled, no question")
+    assert ts.gated(issue(comment(QUESTION)), None, False) == ("NEEDS_DECISION", "waits on a reply")
+
+
+def test_s005_8_with_bot_login_a_persons_newer_question_leaves_no_question(ts: ModuleType) -> None:
+    # #184, input 2: the bot's plain triage comment, then the maintainer labels and asks
+    item = issue(comment("Triage: implement", by=BOT, association="NONE"), comment(QUESTION))
+    assert ts.gated(item, BOT, False) == ("NEEDS_DECISION", "labelled, no question")
+    # a person's question after the bot's question also leaves none
+    item = issue(comment(QUESTION, by=BOT, association="NONE"), comment(QUESTION, by="bob", association="MEMBER"))
+    assert ts.gated(item, BOT, False) == ("NEEDS_DECISION", "labelled, no question")
+    # an outsider's marker comment after the bot's question changes nothing
+    item = issue(comment(QUESTION, by=BOT, association="NONE"), comment(QUESTION, by="eve", association="NONE"))
+    assert ts.gated(item, BOT, False) == ("NEEDS_DECISION", "waits on a reply")
+
+
+def test_s005_8_with_bot_login_a_bot_question_then_a_trusted_reply_no_longer_waits(ts: ModuleType) -> None:
+    triaged = comment("Triage: implement", by=BOT, association="NONE")
+    item = issue(triaged, comment(QUESTION, by=BOT, association="NONE"))
+    assert ts.gated(item, BOT, False) == ("NEEDS_DECISION", "waits on a reply")
+    item["comments"]["nodes"].append(comment("go with 1", by="bob", association="COLLABORATOR"))
+    assert ts.gated(item, BOT, False) is None
+    assert state(ts, item, bot_login=BOT) == "NEEDS_PR"
+
+
+def test_s005_8_with_bot_login_a_plain_bot_comment_is_no_question(ts: ModuleType) -> None:
+    item = issue(comment("Decision needed: which flag?", by=BOT, association="NONE"), comment("1"))
+    assert ts.gated(item, BOT, False) == ("NEEDS_DECISION", "labelled, no question")
+
+
 def test_s005_8_the_rule_reads_the_comments_raw(ts: ModuleType) -> None:
     rows = [("amy", "OWNER", QUESTION), ("eve", "CONTRIBUTOR", "1")]
     assert ts.waits_on_decision(rows, None)
     assert not ts.waits_on_decision([*rows, ("bob", "COLLABORATOR", "2")], None)
-    assert ts.waits_on_decision([(BOT, "NONE", "q"), (BOT, "OWNER", "again")], BOT)
+    assert ts.waits_on_decision([(BOT, "NONE", QUESTION), (BOT, "OWNER", "again")], BOT)
+    assert not ts.waits_on_decision([(BOT, "NONE", QUESTION), ("amy", "OWNER", "1")], BOT)
     assert ts.waits_on_decision([], None)
 
 
@@ -226,8 +273,19 @@ def test_s005_9_waiting_items_leave_issues_and_prs_open_for_a_needs_decision_row
 
 
 def test_s005_9_a_waiting_pr_follows_the_bot_login(ws: ModuleType) -> None:
-    asked = {4: [(BOT, "NONE", "Decision needed"), (BOT, "NONE", "still")]}
+    asked = {4: [(BOT, "NONE", QUESTION), (BOT, "NONE", "still")]}
     found = rows(ws, ws.intake("o/r", 0, "", [pr(4, labels=("needs-decision",))], comments(asked), BOT))
+    assert found["NEEDS_DECISION"]["detail"] == "#4" and "PRS_OPEN" not in found
+
+
+def test_s005_8_a_pr_follows_the_trusted_question_rule(ws: ModuleType) -> None:
+    labelled = ("needs-decision",)
+    answered = {4: [(BOT, "NONE", QUESTION), ("amy", "OWNER", "1"), ("eve", "NONE", QUESTION)]}
+    found = rows(ws, ws.intake("o/r", 0, "", [pr(4, labels=labelled)], comments(answered), BOT))
+    assert found["PRS_OPEN"]["detail"] == "#4" and "NEEDS_DECISION" not in found
+    # a maintainer's marker question after the bot's plain comment is no reply: it waits
+    asked = {4: [(BOT, "NONE", "Triage: implement"), ("amy", "OWNER", QUESTION)]}
+    found = rows(ws, ws.intake("o/r", 0, "", [pr(4, labels=labelled)], comments(asked), BOT))
     assert found["NEEDS_DECISION"]["detail"] == "#4" and "PRS_OPEN" not in found
 
 

@@ -32,6 +32,13 @@ bot.
 
 ### Fixed
 
+- A `needs-decision` question now counts only from a trusted author, in `triage_state.py`
+  and the pull requests `watch_state.py` reads: a comment whose first line is the marker,
+  by an owner, member, or collaborator, or with `--bot-login` by the bot. An outsider's
+  marker comment no longer re-parks an answered item, a bot comment without the marker is
+  no question, and with `--bot-login` a maintainer's marker question newer than the bot's
+  leaves the item labelled with no question, so it waits instead of reading as answered
+  (S-005-8) (#184)
 - github-ship-watch no longer reports `WORK_BRANCH_STALE` for a work branch whose run is
   still alive behind ten or more newer runs: with a work branch on origin, it asks GitHub
   for the release workflow's unfinished runs by status (queued, in progress, waiting,
