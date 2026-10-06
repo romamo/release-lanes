@@ -9,6 +9,9 @@ bot.
 
 ### Changed
 
+- Spec 008 after a second review: status needs a checkout even with a named repo, shows the
+  script's whole stderr and passes it through on success, and the gate shares the guard
+  that reads a crashed `watch_state.py` as a failure, not as QUIET
 - Spec 008 settled after review: `status` exits 2, not 1, when `watch_state.py` crashes
   without printing a row; `watch_command` gains a `json` parameter for the table; the
   origin and the repo check reuse `_origin_repo` and `check_checkout`
