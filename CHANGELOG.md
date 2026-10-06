@@ -40,7 +40,7 @@ bot.
   says otherwise (D-15, superseding D-13); 0 still never stops one. A config that still
   sets `max_wait_hours` is refused naming the key. Waits read in minutes under an hour
   (`stopped <id> after 15m waiting`), and `--json` reports `waited_minutes` in place of
-  `waited_hours`
+  `waited_hours` (#147)
 
 ## [0.17.0] - 2026-10-06
 

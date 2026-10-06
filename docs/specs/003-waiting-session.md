@@ -194,6 +194,7 @@ have happened.
 - shipmill/shipmill#128: S-003-1, S-003-2
 - shipmill/shipmill#129: S-003-3, S-003-4, S-003-5, S-003-6, S-003-7, S-003-8, S-003-9, S-003-14, S-003-15
 - shipmill/shipmill#130: S-003-10, S-003-11, S-003-12, S-003-13, S-003-16
+- shipmill/shipmill#147: S-003-17
 
 ## Verification
 
