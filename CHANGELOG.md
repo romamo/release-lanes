@@ -7,6 +7,21 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- `[agents] mode = "headless"` for `shipmill gate` (D-17): a launch runs `claude -p` with
+  `--permission-prompts none`, the `HEADLESS_TOOLS` allowlist, `--disallowedTools
+  AskUserQuestion`, and a new `--session-id`, and its prompt ends with a paragraph that sends
+  a decision for your `gh` login to the needs-decision protocol. The session runs detached,
+  its output in `sessions/<uuid>.log` under the state directory, and the gate tracks it in
+  `gate.json` by pid and process start time: RUNNING while it runs, never WAITING. The state
+  read passes `--trusted-only` (D-16), and with `app_id` set `--bot-login <slug>[bot]`; a
+  headless gate refuses `--claude-arg` flags that would bring prompts back or break the
+  tracking. `mode` defaults to `"interactive"`, which launches exactly as before, and
+  `shipmill launchd` now writes `AbandonProcessGroup` (run it once more for an installed
+  job) (S-005-1, S-005-2, S-005-3, S-005-5, S-005-6, S-005-11, S-005-19, S-005-20, S-005-21)
+  (#162)
+
 ### Fixed
 
 - github-ship-watch no longer reports `WORK_BRANCH_STALE` for a work branch whose run is

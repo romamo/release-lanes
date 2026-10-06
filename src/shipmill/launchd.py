@@ -91,6 +91,7 @@ def build(
             "WorkingDirectory": str(checkout),
             "StartInterval": interval_minutes * 60,
             "RunAtLoad": True,
+            "AbandonProcessGroup": True,  # a headless session outlives the tick that started it (D-17)
             "EnvironmentVariables": {"PATH": job_path(found)},
             "StandardOutPath": str(log),
             "StandardErrorPath": str(log),
