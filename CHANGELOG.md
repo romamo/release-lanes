@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-06
+
 ### Added
 
 - `shipmill status` prints github-ship-watch's report for the checkout's repo, as a table or
@@ -856,7 +858,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/shipmill/shipmill/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/shipmill/shipmill/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/shipmill/shipmill/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/shipmill/shipmill/compare/v0.22.0...v0.23.0
