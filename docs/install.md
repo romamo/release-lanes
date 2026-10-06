@@ -262,7 +262,8 @@ refresh -s read:org`) and the repos in them holding `.github/shipmill.toml`, the
 | none yet | private, owned by the checkout's owner |
 
 A private App can be installed only on the account that owns it; a public one on any
-account, but only you hold its key, so nobody else can use it. `--owner`, `--public`,
+account, but only you hold its key, so nobody else can use it. The App is named
+`shipmill-<owner>`, or `shipmill-<login>` when that is taken. `--owner`, `--public`,
 `--private`, `--name`, and `--repos` change the plan. The command opens GitHub's create
 page with the permissions below filled in and the webhook off; you click **Create GitHub
 App**, then pick the repos on the install page it opens. It saves the key to

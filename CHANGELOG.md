@@ -26,6 +26,12 @@ bot.
   gate waits on, and headless work is limited to trusted authors' items, with D-16 (#134)
 - Spec 005's build issues: #160 to #164 (#134)
 
+### Changed
+
+- `shipmill app-create` names the App `shipmill-<owner>` by default (`shipmill-agent` under
+  the `shipmill` account), falling back to `shipmill-<login>`, so each account's bot is told
+  apart on its pull requests; when both are taken it exits 2 naming free alternatives
+
 ### Fixed
 
 - D-15's `Decided` line names the issue it was decided in (#147), so `specs.py check`

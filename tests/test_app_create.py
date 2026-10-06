@@ -218,7 +218,7 @@ def test_s006_8_a_dry_run_prints_the_plan_and_creates_nothing(
     assert code == 0 and opened == [] and not keys.exists()
     assert not any(method == "POST" for method, _, _ in hub.calls)
     assert capsys.readouterr().out.splitlines()[1:4] == [
-        "plan: shipmill-agent under cli-agent-spec, public",
+        "plan: shipmill-cli-agent-spec under cli-agent-spec, public",
         "  why: gated repos in 2 accounts (cli-agent-spec 1, shipmill 1)",
         "  repos: cli-agent-spec/cli-agent-spec, shipmill/shipmill",
     ]
@@ -358,7 +358,7 @@ def test_s006_14_a_real_run_prints_the_app_id_line_and_edits_no_config(
         "owner": "cli-agent-spec",
         "owner_type": "Organization",
         "public": True,
-        "name": "shipmill-agent",
+        "name": "shipmill-cli-agent-spec",
         "reason": "gated repos in 2 accounts (cli-agent-spec 1, shipmill 1)",
         "repos": ["cli-agent-spec/cli-agent-spec", "shipmill/shipmill"],
         "app_id": 4242,
@@ -373,7 +373,7 @@ def test_s006_14_a_real_run_prints_the_app_id_line_and_edits_no_config(
 def test_s006_15_json_on_a_dry_run_is_the_plan_alone(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     code = _app_create(tmp_path, args(dry_run=True, json=True), FakeHub(), FakeSigner(), TOKEN, None, tmp_path / "k")
     out = capsys.readouterr()
-    assert code == 0 and "plan: shipmill-agent under cli-agent-spec, public" in out.err.splitlines()
+    assert code == 0 and "plan: shipmill-cli-agent-spec under cli-agent-spec, public" in out.err.splitlines()
     assert set(json.loads(out.out)) == {"owner", "owner_type", "public", "name", "reason", "repos"}
 
 
@@ -408,22 +408,39 @@ def test_s006_16_the_docs_document_app_create() -> None:
     assert "private" in install and "public" in install
 
 
-def test_s006_17_a_taken_default_name_moves_to_a_free_variant(capsys: pytest.CaptureFixture[str]) -> None:
-    hub = FakeHub(taken_slugs={"shipmill-agent"})
-    planned = plan((ME, SHIPMILL), ("shipmill/shipmill",), None, None, None, "shipmill-agent")
-    assert free_name(hub, TOKEN, planned, "romamo", chosen=False) == (
-        "shipmill-agent-shipmill",
-        "shipmill-agent is taken; using shipmill-agent-shipmill (--name picks another)",
+def test_s006_17_the_default_name_is_shipmill_owner_then_shipmill_login() -> None:
+    acme = Account("acme", "Organization")
+    planned = plan((ME, acme), ("acme/web",), None, None, None, None)
+    assert planned.name == "shipmill-acme"
+    assert plan((ME, SHIPMILL), ("shipmill/shipmill",), None, None, None, None).name == "shipmill-agent"
+    assert free_name(FakeHub(), TOKEN, planned, "romamo", chosen=False) == ("shipmill-acme", None)
+    assert free_name(FakeHub(taken_slugs={"shipmill-acme"}), TOKEN, planned, "romamo", chosen=False) == (
+        "shipmill-romamo",
+        "shipmill-acme is taken; using shipmill-romamo (--name picks another)",
     )
-    assert free_name(FakeHub(), TOKEN, planned, "romamo", chosen=False) == ("shipmill-agent", None)
     assert slug("Shipmill Agent!") == "shipmill-agent"
 
 
+def test_s006_17_with_both_taken_it_exits_2_suggesting_free_alternatives() -> None:
+    acme = Account("acme", "Organization")
+    planned = plan((ME, acme), ("acme/web",), None, None, None, None)
+    hub = FakeHub(taken_slugs={"shipmill-acme", "shipmill-romamo", "shipmill-acme-agent"})
+    with pytest.raises(
+        ReleaseError,
+        match=r"the App names shipmill-acme and shipmill-romamo are taken; "
+        r"free: shipmill-romamo-agent, acme-shipmill; pass one as --name",
+    ):
+        free_name(hub, TOKEN, planned, "romamo", chosen=False)
+
+
 def test_s006_17_a_taken_chosen_name_exits_2_suggesting_free_ones() -> None:
-    hub = FakeHub(taken_slugs={"bot", "bot-shipmill"})
+    hub = FakeHub(taken_slugs={"bot", "bot-agent"})
     planned = plan((ME, SHIPMILL), ("shipmill/shipmill",), None, None, None, "bot")
-    with pytest.raises(ReleaseError, match=r"the App name bot is taken; free: bot-romamo"):
+    with pytest.raises(
+        ReleaseError, match=r"the App name bot is taken; free: shipmill-agent, shipmill-romamo, shipmill-romamo-agent;"
+    ):
         free_name(hub, TOKEN, planned, "romamo", chosen=True)
+    assert free_name(FakeHub(), TOKEN, planned, "romamo", chosen=True) == ("bot", None)
 
 
 def test_s006_18_the_page_reviews_the_plan_and_waits_for_a_click() -> None:

@@ -64,12 +64,16 @@ exits 2 saying to pass `--owner`. An `--owner` the login doesn't administer exit
 the account and the role it needs. `--private` with gated repos outside the owner account
 prints a warning naming each repo the App can't be installed on, and goes on.
 
-`--name` defaults to `shipmill-agent`. Before planning further the command checks the name
-against GitHub (`GET /apps/<slug>`, the slug being the name lowercased with each run of
-other characters a dash). A free name is kept. A taken default moves to the first free of
-`<name>-<owner>` and `<name>-<login>`, printing `note: <name> is taken; using <other>
-(--name picks another)`; a taken `--name`, or a default with no free variant, exits 2
-naming the free ones. The plan is printed before anything is created:
+Without `--name`, the App is named `shipmill-<owner>` (lowercased), except under the
+`shipmill` account, where it is `shipmill-agent`: the name tells which account's bot made
+a pull request, and differs per account. The command checks names against GitHub (`GET
+/apps/<slug>`, the slug being the name lowercased with each run of other characters a dash)
+and takes the first free of `shipmill-<owner>` and `shipmill-<login>`, printing `note:
+<first> is taken; using <second> (--name picks another)` when it falls back. A given
+`--name` is kept when free. When the default and its fallback, or the given name, are taken,
+the command exits 2 naming free alternatives to pass as `--name`, from `shipmill-<owner>`,
+`shipmill-<login>`, `shipmill-<owner>-agent`, `shipmill-<login>-agent`, and
+`<owner>-shipmill`. The plan is printed before anything is created:
 
 ```
 plan: shipmill-agent under shipmill, public
@@ -166,7 +170,7 @@ then prove it: shipmill --repo <gate checkout> gate <owner/repo> --dry-run
 - S-006-14: the command never edits a repo's config; it prints the `app_id` line to add and the gate's dry run to prove it
 - S-006-15: `--json` prints one object with the plan's `owner`, `owner_type`, `public`, `name`, `reason`, and `repos`, and after a real run `app_id`, `slug`, `key`, and `installed`
 - S-006-16: `docs/install.md` and `skills/shipmill-setup/SKILL.md` document `shipmill app-create`, the plan's rules, and `--dry-run`, and keep the manual steps as the fallback
-- S-006-17: a free `--name` or default is kept; a taken default becomes the first free of `<name>-<owner>` and `<name>-<login>` with a note, and a taken `--name` exits 2 naming the free variants
+- S-006-17: without `--name` the name is `shipmill-<owner>` (`shipmill-agent` under `shipmill`), else `shipmill-<login>` with a note when the first is taken; a free `--name` is kept; when those are taken the command exits 2 naming the free alternatives
 - S-006-18: the local page runs no script and sends nothing until the button is clicked; it shows the name, owner, visibility, repos, and each permission with its access and use, and tells the maintainer to come back and click again after a sign-in on GitHub
 - S-006-19: each line the command prints is flushed as it is printed, so a piped or backgrounded run shows the plan and the URL at once
 
@@ -211,6 +215,6 @@ discovery and the plan also ran against GitHub for real (`shipmill app-create --
 - S-006-14: `test_s006_14_a_real_run_prints_the_app_id_line_and_edits_no_config`, passing; it checks the checkout's files are unchanged after a run
 - S-006-15: `test_s006_15_json_on_a_dry_run_is_the_plan_alone`, and the full object after a run in `test_s006_14_a_real_run_prints_the_app_id_line_and_edits_no_config`, passing
 - S-006-16: `test_s006_16_the_docs_document_app_create`, passing; read install.md and the setup skill, the manual steps kept after the command
-- S-006-17: `test_s006_17_a_taken_default_name_moves_to_a_free_variant` and `test_s006_17_a_taken_chosen_name_exits_2_suggesting_free_ones`, passing
+- S-006-17: `test_s006_17_the_default_name_is_shipmill_owner_then_shipmill_login`, `test_s006_17_with_both_taken_it_exits_2_suggesting_free_alternatives`, and `test_s006_17_a_taken_chosen_name_exits_2_suggesting_free_ones`, passing
 - S-006-18: `test_s006_18_the_page_reviews_the_plan_and_waits_for_a_click`, passing; the first real run, on the auto-submitting page this replaces, lost the manifest behind GitHub's sign-in and showed *We didn't find an App Manifest*
 - S-006-19: `test_s006_19_each_line_is_flushed_as_it_happens`, passing; the first real run, backgrounded, had printed nothing after two minutes

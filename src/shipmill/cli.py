@@ -55,7 +55,6 @@ from shipmill.app import (
     prepare_session,
 )
 from shipmill.app_create import (
-    DEFAULT_NAME,
     FLOW_SECONDS,
     accounts,
     check_key_dir,
@@ -279,7 +278,7 @@ def _parser() -> argparse.ArgumentParser:
     visibility.add_argument(
         "--private", dest="public", action="store_const", const=False, help="installable on the owner only"
     )
-    p.add_argument("--name", help=f"the App's name, unique on GitHub (default: {DEFAULT_NAME}, or a free variant)")
+    p.add_argument("--name", help="the App's name, unique on GitHub (default: shipmill-<owner>, then shipmill-<login>)")
     p.add_argument("--repos", help="the gated repos as owner/name,...; skips looking for them")
     p.add_argument("--dry-run", action="store_true", help="print the plan; create nothing")
     p.add_argument("--json", action="store_true", help="print the plan and the result as one JSON object")
@@ -515,7 +514,7 @@ def _app_create(
     say("looking for the accounts you administer and their repos with .github/shipmill.toml...")
     found = accounts(api, host)
     repos = given_repos(args.repos.split(","), found) if args.repos else gated_repos(api, host, found)
-    planned = plan(found, repos, _origin_owner(root), args.owner, args.public, args.name or DEFAULT_NAME)
+    planned = plan(found, repos, _origin_owner(root), args.owner, args.public, args.name)
     name, note = free_name(api, host, planned, found[0].login, args.name is not None)
     planned = dataclasses.replace(planned, name=name)
     if note is not None:
