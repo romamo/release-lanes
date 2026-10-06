@@ -7,6 +7,11 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- Spec 006 for `shipmill app-create`, which makes the gate's GitHub App in one click and
+  picks its owner and visibility from where the gated repos are
+
 ## [0.18.0] - 2026-10-06
 
 ### Added
