@@ -344,3 +344,18 @@ class TestActiveRuns:
         with pytest.raises(ReleaseError) as caught:
             self.gh(tmp_path, f"echo '{error}' >&2; exit 1\n").active_runs("release.yml")
         assert not isinstance(caught.value, Forbidden)
+
+    def test_a_run_approved_between_two_queries_is_still_seen(self, tmp_path: Path) -> None:
+        # run 7 waits on an environment when in_progress is asked for, and is approved before
+        # waiting is asked for: one query per status in turn would see it in neither (#175)
+        seen = tmp_path / "seen"
+        body = (
+            'for a in "$@"; do case "$a" in status=*) s="${a#status=}" ;; esac; done\n'
+            f'if [ "$s" = in_progress ] && [ -e "{seen}" ]; then\n'
+            '  echo \'{"workflow_runs": [{"id": 7, "status": "in_progress", "created_at": "2026-10-06T08:00:00Z"}]}\'\n'
+            "else echo '{\"workflow_runs\": []}'; fi\n"
+            f'[ "$s" = in_progress ] && touch "{seen}"\n'
+            "exit 0\n"
+        )
+        runs = self.gh(tmp_path, body).active_runs("release.yml")
+        assert [r.id for r in runs] == [7]

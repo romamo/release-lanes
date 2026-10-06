@@ -335,16 +335,17 @@ class GhCli:
         return sorted(runs, key=lambda r: r.id, reverse=True)
 
     def active_runs(self, workflow: str) -> list[WorkflowRun]:
-        runs = []
-        for status in ACTIVE_STATUSES:
+        runs = {}
+        # in_progress is asked again last: a run approved after the first in_progress query and
+        # before the waiting one would otherwise be in neither list
+        for status in (*ACTIVE_STATUSES, "in_progress"):
             found = self._api(
                 "-X", "GET", f"repos/{{owner}}/{{repo}}/actions/workflows/{workflow}/runs", "-f", f"status={status}",
                 "-f", "per_page=100",
             )  # fmt: skip
-            runs += [
-                WorkflowRun(int(r["id"]), str(r["status"]), _time(r["created_at"])) for r in found["workflow_runs"]
-            ]
-        return sorted(runs, key=lambda r: r.id, reverse=True)
+            for r in found["workflow_runs"]:
+                runs[int(r["id"])] = WorkflowRun(int(r["id"]), str(r["status"]), _time(r["created_at"]))
+        return sorted(runs.values(), key=lambda r: r.id, reverse=True)
 
     def open_pull_requests(self) -> list[PullRequest]:
         found = json.loads(
