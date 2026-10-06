@@ -7,12 +7,6 @@ bot.
 
 ## [Unreleased]
 
-### Fixed
-
-- github-ship-watch's SHIPMILL_OUTDATED no longer reports a plugin install keyed on a linked
-  git worktree, such as the gate's checkout: Claude Code loads the main checkout's install
-  there, so the leftover entry was never used and its update command couldn't clear it (#198)
-
 ### Added
 
 - github-ship-watch compares the host's `shipmill@shipmill` plugin (`claude plugin list`)
@@ -23,6 +17,12 @@ bot.
 - github-ship-watch reports BRANCH_DELETE_OFF when the repo's `delete_branch_on_merge` is
   off, with the command that turns it on: merged branches piled up unnoticed after a repo
   move, since only setup checked it. An action for a person, never an agent's (#194)
+
+### Fixed
+
+- github-ship-watch's SHIPMILL_OUTDATED no longer reports a plugin install keyed on a linked
+  git worktree, such as the gate's checkout: Claude Code loads the main checkout's install
+  there, so the leftover entry was never used and its update command couldn't clear it (#198)
 
 ## [0.24.0] - 2026-10-06
 

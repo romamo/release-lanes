@@ -1301,7 +1301,9 @@ def project_folder(folder: Path) -> Path:
     if not folder.is_dir():
         return folder
     cmd = ["git", "-C", str(folder), "rev-parse", "--path-format=absolute", "--git-common-dir"]
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    # LC_ALL=C: the "not a git repository" check reads git's message, which a localized git translates
+    env = {**os.environ, "LC_ALL": "C"}
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
     if proc.returncode != 0 and "not a git repository" in proc.stderr:
         return folder
     if proc.returncode != 0:
