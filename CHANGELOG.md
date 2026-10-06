@@ -28,6 +28,10 @@ bot.
 
 ### Changed
 
+- `shipmill app-create` makes the App yours by default (your personal account), private
+  unless a gated repo is in an org, then public so it installs there; an interactive run
+  asks who should own it, your account first, and `--owner` picks an org you administer
+  (#167)
 - `shipmill app-create` names the App `shipmill-<owner>` by default (`shipmill-agent` under
   the `shipmill` account), falling back to `shipmill-<login>`, so each account's bot is told
   apart on its pull requests; when both are taken it exits 2 naming free alternatives

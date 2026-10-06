@@ -30,7 +30,6 @@ import dataclasses
 import datetime as dt
 import json
 import os
-import re
 import shutil
 import sys
 import webbrowser
@@ -66,6 +65,8 @@ from shipmill.app_create import (
     given_repos,
     host_token,
     install_url,
+    owner_menu,
+    pick_owner,
     plan,
     wait_installed,
 )
@@ -270,7 +271,9 @@ def _parser() -> argparse.ArgumentParser:
     )
 
     p = sub.add_parser("app-create", help="create the gate's GitHub App in one click (spec 006)")
-    p.add_argument("--owner", help="the org or personal account that owns the App (default: planned)")
+    p.add_argument(
+        "--owner", help="the personal account or org that owns the App (default: asked, else your personal account)"
+    )
     visibility = p.add_mutually_exclusive_group()
     visibility.add_argument(
         "--public", dest="public", action="store_const", const=True, help="installable on any account"
@@ -321,7 +324,8 @@ def main(
     if args.command == "app-token":
         return _app_token(root, args, api or UrllibApi(), signer or Openssl(), stdin or sys.stdin)
     if args.command == "app-create":
-        return _app_create(root, args, api or UrllibApi(), signer or Openssl())
+        ask = input if sys.stdin.isatty() and not args.owner else None
+        return _app_create(root, args, api or UrllibApi(), signer or Openssl(), ask=ask)
     hub = github or GhCli(root)
     if args.command == "init" and args.operate:
         print(f"wrote {init_operate(root, args.force).relative_to(root)}")
@@ -483,15 +487,6 @@ def _app_token(root: Path, args: argparse.Namespace, api: Api, signer: Signer, s
     return 0
 
 
-def _origin_owner(root: Path) -> str | None:
-    """The owner of the checkout's GitHub origin, or None outside a GitHub checkout"""
-    if not (root / ".git").exists():
-        return None
-    url = Git(root).run("remote", "get-url", "origin").strip()
-    found = re.search(r"github\.com[:/]([^/]+)/", url)
-    return found.group(1) if found else None
-
-
 def _app_create(
     root: Path,
     args: argparse.Namespace,
@@ -502,6 +497,7 @@ def _app_create(
     key_dir: Path | None = None,
     install_seconds: float = FLOW_SECONDS,
     out: TextIO | None = None,
+    ask: Callable[[str], str] | None = None,
 ) -> int:
     """Spec 006: discover, plan, create, install. Exit 1 when an installation is still missing"""
     host = token if token is not None else host_token()
@@ -514,7 +510,12 @@ def _app_create(
     say("looking for the accounts you administer and their repos with .github/shipmill.toml...")
     found = accounts(api, host)
     repos = given_repos(args.repos.split(","), found) if args.repos else gated_repos(api, host, found)
-    planned = plan(found, repos, _origin_owner(root), args.owner, args.public, args.name)
+    owner = args.owner
+    if owner is None and ask is not None and not args.dry_run and not args.json:
+        for line in owner_menu(found, repos):
+            say(line)
+        owner = pick_owner(found, ask(f"Owner [1-{len(found)}, Enter for {found[0].login}]: "))
+    planned = plan(found, repos, owner, args.public, args.name)
     name, note = free_name(api, host, planned, found[0].login, args.name is not None)
     planned = dataclasses.replace(planned, name=name)
     if note is not None:

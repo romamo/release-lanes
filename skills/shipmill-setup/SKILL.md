@@ -322,13 +322,15 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
    instead (D-14), create the App with `$CR app-create` (spec 006):
    - **Plan it:** `$CR app-create --dry-run` finds the accounts the user's `gh` login
      administers and the repos in them holding `.github/shipmill.toml`, and prints the
-     plan: a **private** App under that account when the gated repos are all in one, a
-     **public** one under the account with the most when they span several (a private App
-     installs only on its owner; a public one on any account, but only the key's holder
-     can mint its tokens). Show the user the plan and ask whether to create it; `--owner`,
+     plan: the App is the user's own (personal account) by default, **private** when every
+     gated repo is in it and **public** when any is in an org (a private App installs only
+     on its owner; a public one on any account, but only the key's holder can mint its
+     tokens). Ask the user who should own it, their personal account first as the default
+     or an org they administer, then show the plan and ask whether to create it; `--owner`,
      `--public`, `--private`, and `--name` change it. It needs the `read:org` scope, and
      it names the App `shipmill-<owner>`, or `shipmill-<login>` when that is taken, saying so
-   - **Create it:** once the user agrees, run it yourself without `--dry-run`, in the
+   - **Create it:** once the user agrees, run it yourself with their `--owner` and without
+     `--dry-run`, in the
      background: it waits up to 10 minutes for the click. It opens a local page showing
      the plan and the permissions; the user clicks **Create on GitHub**, then **Create
      GitHub App** on GitHub's page, where every field is filled in. If GitHub asks them to
