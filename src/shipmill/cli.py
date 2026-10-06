@@ -12,7 +12,8 @@
   operate         check environment health, promote after the bake, roll back; approve a proposal
   doctor          check that the repository is ready for the bot
   init            write a starting policy and the calling workflow (--operate: the operate one)
-  gate            start a Claude Code session for the repo only when its state needs one
+  gate            start a Claude Code session for the repo only when its state needs one; each tick,
+                  held or not, prunes the worktrees that landed, as `worktrees --prune` does
   worktrees       list the repository's worktrees, each REMOVABLE once its work landed, or KEPT and why;
                   --prune removes the REMOVABLE ones and their local branches
 
@@ -33,7 +34,7 @@ from shipmill.autonomy import Hold
 from shipmill.config import CONFIG_PATH, config_path
 from shipmill.doctor import CALLER, OPERATE_CALLER, doctor
 from shipmill.errors import ReleaseError
-from shipmill.gate import ClaudeCli, check_checkout, gate, refresh, tick_lines, tick_record, watch
+from shipmill.gate import ClaudeCli, check_checkout, gate, pruner, refresh, tick_lines, tick_record, watch
 from shipmill.github import GhCli, GitHub
 from shipmill.gitrepo import Git
 from shipmill.init import init, init_operate
@@ -165,7 +166,11 @@ def _parser() -> argparse.ArgumentParser:
     )
 
     p = sub.add_parser(
-        "gate", help=f"start a Claude Code session only when the repo's state needs one ([agents] in {CONFIG_PATH})"
+        "gate",
+        help=(
+            f"start a Claude Code session only when the repo's state needs one ([agents] in {CONFIG_PATH}); "
+            "every tick prunes the worktrees that landed"
+        ),
     )
     p.add_argument("slug", metavar="owner/name", help="the GitHub repo; --repo is its checkout")
     p.add_argument("--claude-arg", action="append", default=[], help="extra flag for the session (repeatable)")
@@ -174,8 +179,12 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="move this detached, clean gate checkout to origin's default branch before reading it",
     )
-    p.add_argument("--dry-run", action="store_true", help="decide and print; start, stop, or move nothing")
-    p.add_argument("--json", action="store_true", help="print the decision as JSON")
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="decide and print; start, stop, move, or prune nothing (lists the worktrees it would prune)",
+    )
+    p.add_argument("--json", action="store_true", help="print the decision, with the pruned worktrees, as JSON")
 
     p = sub.add_parser(
         "worktrees", help="list every worktree of the repository as REMOVABLE once its work landed, or KEPT and why"
@@ -229,7 +238,7 @@ def main(
             print(f"{check.status} {check.name}: {check.detail}")
         return 1 if any(c.status == "FAIL" for c in checks) else 0
     if args.command == "gate":
-        return _gate(root, args)
+        return _gate(root, args, hub, sessions or ClaudeSessions(root))
     if args.command == "launchd":
         return _launchd(root, args)
     if args.command == "worktrees":
@@ -324,9 +333,10 @@ def main(
     return 0
 
 
-def _gate(root: Path, args: argparse.Namespace) -> int:
-    decision, launched, waiting = gate(
-        Git(root),
+def _gate(root: Path, args: argparse.Namespace, github: GitHub, sessions: Sessions) -> int:
+    git = Git(root)
+    decision, launched, waiting, pruned = gate(
+        git,
         args.slug,
         lambda: AgentsConfig.load(root),
         ClaudeCli(args.claude_arg),
@@ -334,13 +344,14 @@ def _gate(root: Path, args: argparse.Namespace) -> int:
         dt.datetime.now(dt.UTC),
         lambda: Hold.read(GhCli(root)),
         Desktop.detect(),
+        pruner(git, github, sessions),
         args.refresh,
         args.dry_run,
     )
     if args.json:
-        print(json.dumps(tick_record(decision, launched, waiting, args.dry_run), indent=2))
+        print(json.dumps(tick_record(decision, launched, waiting, pruned, args.dry_run), indent=2))
         return 0
-    print("\n".join(tick_lines(decision, launched, waiting, args.dry_run)))
+    print("\n".join(tick_lines(decision, launched, waiting, pruned, args.dry_run)))
     return 0
 
 
