@@ -32,6 +32,15 @@ bot.
   worktrees`, and github-issue-resolve, github-pr-triage, and github-issue-triage say that
   the worktrees a session leaves behind once it exits are the gate's prune's to remove.
   Spec 002 is built (#125)
+- `shipmill app-token <owner/repo> --app-id <id> [--app-key <path>]` prints a GitHub App
+  installation token limited to that one repository and spec 004's permissions. It caches
+  the token in `$(git rev-parse --git-common-dir)/shipmill/app-token.json` (mode `0600`,
+  replaced atomically), reuses it while it has at least 10 minutes left, and exits 2 on a
+  malformed cache, naming it. `--git-credential get` answers git's credential protocol for
+  `https://github.com` with `username=x-access-token`; another host gets no answer, and
+  `store`, `erase`, and other operations print nothing. `python -m shipmill` now runs the
+  CLI, and the session's `gh` and `git-credential-shipmill` helpers, which hold no token,
+  can be written for the gate's launch (#142)
 
 ### Changed
 

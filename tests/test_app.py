@@ -5,6 +5,7 @@ import datetime as dt
 import json
 import shutil
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -73,6 +74,9 @@ class FakeApi:
                 return Answer(404, '{"message": "Not Found"}')
             return Answer(200, json.dumps({"id": 77, "permissions": self.permissions}))
         raise AssertionError(f"unexpected GET {path}")
+
+    def post(self, path: str, token: str, body: Mapping[str, object]) -> Answer:
+        raise AssertionError(f"unexpected POST {path}")
 
 
 def key_file(tmp_path: Path, mode: int = 0o600) -> Path:
@@ -338,6 +342,9 @@ def test_a_bad_app_answer_is_refused(answer: Answer, message: str) -> None:
     class Api:
         def get(self, path: str, token: str) -> Answer:
             return answer
+
+        def post(self, path: str, token: str, body: Mapping[str, object]) -> Answer:
+            raise AssertionError(f"unexpected POST {path}")
 
     with pytest.raises(ReleaseError, match=message):
         installation(APP_ID, REPO, "t", Api())
