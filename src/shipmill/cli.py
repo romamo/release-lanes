@@ -340,8 +340,6 @@ def main(
 
 
 def _gate(root: Path, args: argparse.Namespace, github: GitHub, sessions: Sessions) -> int:
-    if args.app_key is not None and AgentsConfig.load(root).app_id is None:
-        raise ReleaseError(f"--app-key names an App's key, but [agents] in {CONFIG_PATH} sets no app_id")
     git = Git(root)
     decision, launched, waiting, pruned = gate(
         git,
@@ -356,6 +354,7 @@ def _gate(root: Path, args: argparse.Namespace, github: GitHub, sessions: Sessio
         args.refresh,
         args.dry_run,
         app_check(args.slug, args.app_key, Path.home(), Openssl(), UrllibApi()),
+        args.app_key is not None,
     )
     if args.json:
         print(json.dumps(tick_record(decision, launched, waiting, pruned, args.dry_run), indent=2))

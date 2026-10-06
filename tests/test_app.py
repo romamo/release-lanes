@@ -26,7 +26,7 @@ from shipmill.app import (
 from shipmill.autonomy import Hold
 from shipmill.cli import main
 from shipmill.errors import ReleaseError
-from shipmill.gate import RECORD, Action, gate, state_dir
+from shipmill.gate import RECORD, Action, Finding, gate, state_dir
 from shipmill.gitrepo import Git
 
 from .test_gate import ISSUES, NO_PRUNE, NOW, FakeClaude, FakeNotifier, bg, write_config
@@ -115,11 +115,85 @@ def test_s004_1_a_bad_app_id_is_refused_naming_the_key(tmp_path: Path, value: st
 # S-004-2
 
 
-def test_s004_2_app_key_without_app_id_exits_2_before_anything(tmp_path: Path) -> None:
-    """No origin and no claude: the refusal comes before the gate looks at either"""
+NO_APP_KEY = "--app-key names an App's key, but .* sets no app_id"
+
+
+@pytest.mark.parametrize("findings", [[], [ISSUES]])
+def test_s004_2_app_key_without_app_id_exits_2_and_starts_nothing(checkout: Git, findings: list[Finding]) -> None:
+    claude = FakeClaude([bg("old", "idle", "done")])
+    with pytest.raises(ReleaseError, match=NO_APP_KEY):
+        gate(
+            checkout,
+            REPO,
+            lambda: app_cfg(None),
+            claude,
+            lambda: findings,
+            NOW,
+            Hold,
+            FakeNotifier(),
+            NO_PRUNE,
+            app_key_named=True,
+        )
+    assert (claude.launched, claude.stopped) == ([], [])
+
+
+def test_s004_2_the_cli_passes_app_key_to_the_gate(tmp_path: Path) -> None:
+    """A checkout whose origin is another repo: the CLI no longer refuses before the gate's own checks"""
     write_config(tmp_path, '[agents]\nprompt = "/t"\n')
-    with pytest.raises(ReleaseError, match="--app-key names an App's key, but .* sets no app_id"):
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "remote", "add", "origin", "https://github.com/x/y.git"], check=True)
+    with pytest.raises(ReleaseError, match="not romamo/demo"):
         main(["--repo", str(tmp_path), "gate", REPO, "--app-key", str(tmp_path / "k.pem")])
+
+
+def _git(*args: str, cwd: Path) -> None:
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+
+def test_s004_2_app_key_is_checked_against_the_refreshed_config(tmp_path: Path) -> None:
+    """Regression: a gate started with --app-key before the app_id change reached its checkout
+    must refresh and then check the App, not exit on the stale config every tick"""
+    origin = tmp_path / "romamo" / "demo.git"
+    origin.parent.mkdir()
+    _git("init", "-q", "--bare", "-b", "main", str(origin), cwd=tmp_path)
+    pusher = tmp_path / "pusher"
+    _git("clone", "-q", str(origin), str(pusher), cwd=tmp_path)
+    for k, v in (("user.name", "t"), ("user.email", "t@t")):
+        _git("config", k, v, cwd=pusher)
+    write_config(pusher, '[agents]\nprompt = "/t"\n')
+    _git("add", ".", cwd=pusher)
+    _git("commit", "-q", "-m", "agents", cwd=pusher)
+    _git("push", "-q", "origin", "main", cwd=pusher)
+    root = tmp_path / "gate"
+    _git("clone", "-q", str(origin), str(root), cwd=tmp_path)
+    _git("checkout", "-q", "--detach", cwd=root)
+    write_config(pusher, f'[agents]\nprompt = "/t"\napp_id = {APP_ID}\n')
+    _git("commit", "-q", "-am", "app_id", cwd=pusher)
+    _git("push", "-q", "origin", "main", cwd=pusher)
+
+    git = Git(root)
+    assert AgentsConfig.load(root).app_id is None  # stale
+    api = FakeApi()
+    check = app_check(REPO, key_file(tmp_path), tmp_path, FakeSigner(), api)
+    claude = FakeClaude([bg("old", "idle", "done")])
+    with pytest.raises(ReleaseError, match="can't launch a session as an App yet"):
+        gate(
+            git,
+            REPO,
+            lambda: AgentsConfig.load(root),
+            claude,
+            lambda: [ISSUES],
+            NOW,
+            Hold,
+            FakeNotifier(),
+            NO_PRUNE,
+            refresh_checkout=True,
+            app=check,
+            app_key_named=True,
+        )
+    assert AgentsConfig.load(root).app_id == APP_ID  # the checkout moved
+    assert [path for path, _ in api.calls] == ["/app", f"/repos/{REPO}/installation"]
+    assert (claude.launched, claude.stopped) == ([], [])
 
 
 def test_s004_2_without_app_key_the_gate_reads_the_default_path(tmp_path: Path) -> None:
