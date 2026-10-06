@@ -241,6 +241,7 @@ def test_s006_9_the_manifest_holds_exactly_the_gates_permissions_and_no_webhook(
     assert made["hook_attributes"] == {"url": "https://example.invalid/shipmill-no-webhook", "active": False}
     assert (made["default_events"], made["public"], made["name"]) == ([], False, "shipmill-agent")
     assert made["redirect_url"] == "http://127.0.0.1:9/callback"
+    assert made["url"] == "https://github.com/shipmill/shipmill"  # not a gated repo
     assert new_app_url(planned, "s") == "https://github.com/organizations/shipmill/settings/apps/new?state=s"
     mine = plan((ME,), ("romamo/notes",), None, None, "n")
     assert new_app_url(mine, "s") == "https://github.com/settings/apps/new?state=s"
