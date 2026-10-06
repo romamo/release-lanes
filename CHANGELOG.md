@@ -20,6 +20,12 @@ bot.
   prints the `app_id` line to commit; exit 1 names a repo still missing the App. The setup
   skill and `docs/install.md` use it first, the manual steps as the fallback (#155)
 
+### Changed
+
+- `shipmill app-create` names the App `shipmill-<owner>` by default (`shipmill-agent` under
+  the `shipmill` account), falling back to `shipmill-<login>`, so each account's bot is told
+  apart on its pull requests; when both are taken it exits 2 naming free alternatives
+
 ### Fixed
 
 - `shipmill app-create` prints each line as it happens, so a piped or backgrounded run shows

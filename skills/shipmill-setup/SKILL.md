@@ -327,7 +327,7 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
      installs only on its owner; a public one on any account, but only the key's holder
      can mint its tokens). Show the user the plan and ask whether to create it; `--owner`,
      `--public`, `--private`, and `--name` change it. It needs the `read:org` scope, and
-     it moves a taken default name to a free variant, saying so
+     it names the App `shipmill-<owner>`, or `shipmill-<login>` when that is taken, saying so
    - **Create it:** once the user agrees, run it yourself without `--dry-run`, in the
      background: it waits up to 10 minutes for the click. It opens a local page showing
      the plan and the permissions; the user clicks **Create on GitHub**, then **Create

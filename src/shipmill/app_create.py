@@ -32,7 +32,6 @@ from shipmill.app import PERMISSIONS, Api, Signer, jwt
 from shipmill.errors import ReleaseError
 
 CONFIG = ".github/shipmill.toml"
-DEFAULT_NAME = "shipmill-agent"
 FLOW_SECONDS = 600  # how long the create and the install steps each wait
 POLL_SECONDS = 5
 _PAGE = 100
@@ -161,7 +160,7 @@ def plan(
     origin_owner: str | None,
     owner: str | None,
     public: bool | None,
-    name: str,
+    name: str | None,
 ) -> Plan:
     """S-006-4 to S-006-7: who owns the App and whether it is public"""
     by_login = {a.login.lower(): a for a in found}
@@ -191,7 +190,7 @@ def plan(
     if not public:
         outside = [r for r in repos if _owner(r).lower() != chosen.login.lower()]
         warnings = tuple(f"a private App can't be installed on {r}, outside {chosen.login}" for r in outside)
-    return Plan(chosen, public, name, reason, tuple(repos), warnings)
+    return Plan(chosen, public, name or default_name(chosen.login), reason, tuple(repos), warnings)
 
 
 def slug(name: str) -> str:
@@ -207,17 +206,34 @@ def taken(api: Api, token: str, name: str) -> bool:
     return answer.status == 200
 
 
+def default_name(owner: str) -> str:
+    """S-006-17: shipmill-<owner>; shipmill's own App is shipmill-agent, not shipmill-shipmill"""
+    return "shipmill-agent" if owner.lower() == "shipmill" else f"shipmill-{owner.lower()}"
+
+
 def free_name(api: Api, token: str, p: Plan, login: str, chosen: bool) -> tuple[str, str | None]:
-    """S-006-17: the plan's name when free; else, when the name was the default, the first free
-    of <name>-<owner> and <name>-<login>, with a note; a taken --name exits 2 suggesting them"""
-    if not taken(api, token, p.name):
-        return p.name, None
-    candidates = list(dict.fromkeys(f"{p.name}-{who}" for who in (p.owner.login, login)))
-    free = [c for c in candidates if not taken(api, token, c)]
-    if chosen or not free:
-        hint = f"; free: {', '.join(free)}" if free else "; pass another --name"
-        raise ReleaseError(f"the App name {p.name} is taken{hint}")
-    return free[0], f"{p.name} is taken; using {free[0]} (--name picks another)"
+    """S-006-17: a chosen --name when free; by default the first free of shipmill-<owner> and
+    shipmill-<login>, with a note when it isn't the first. Otherwise exits 2 naming free
+    alternatives to pass as --name"""
+    if chosen:
+        if not taken(api, token, p.name):
+            return p.name, None
+        tried = [p.name]
+    else:
+        candidates = list(dict.fromkeys([p.name, default_name(login)]))
+        for index, name in enumerate(candidates):
+            if not taken(api, token, name):
+                note = None if index == 0 else f"{candidates[0]} is taken; using {name} (--name picks another)"
+                return name, note
+        tried = candidates
+    owner, me = p.owner.login.lower(), login.lower()
+    extra = [f"shipmill-{who}-agent" for who in (owner, me) if who != "shipmill"]
+    extra += [f"{owner}-shipmill"] if owner != "shipmill" else []
+    alternatives = [n for n in dict.fromkeys([default_name(owner), default_name(me), *extra]) if n not in tried]
+    free = [n for n in alternatives if not taken(api, token, n)]
+    hint = f"; free: {', '.join(free)}; pass one as --name" if free else "; pass another --name"
+    names = f"names {' and '.join(tried)} are" if len(tried) > 1 else f"name {tried[0]} is"
+    raise ReleaseError(f"the App {names} taken{hint}")
 
 
 def manifest(p: Plan, redirect: str) -> dict[str, object]:
