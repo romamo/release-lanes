@@ -33,6 +33,7 @@ retry_hours = 24    # unchanged findings start a new session after this
 notify = true       # a desktop notification when a session waits on you
 remind_hours = 4    # repeat it while the session still waits (1..168)
 max_wait_minutes = 15  # stop a session that waited this long (0..10080); 0: never
+# app_id = 123456      # sessions write as this GitHub App; unset: as the host's gh login
 ```
 
 ```
@@ -74,7 +75,41 @@ the user's working copy, where the session would branch and commit. Each run:
    conversation), starts `claude --bg -n "shipmill <repo> <time>" "<prompt>"` in the
    checkout with the rows appended to the prompt, each by state and subject only (an
    issue title in a row's detail is text anyone who edits the issue controls; the session
-   reruns watch_state.py and reads it as data, not instructions), and records the launch
+   reruns watch_state.py and reads it as data, not instructions), and records the launch.
+   With `app_id` set, the App's checks and the session's helpers come first (below)
+
+### The session's identity
+
+Without `app_id`, a session uses `gh` and `git` as they're signed in on the host: the
+maintainer's account, with every repo and scope it has. Its pull requests, merges, and
+commits read as the maintainer's, who then can't approve them. With `app_id`, the session
+writes as a GitHub App's bot (D-14). The maintainer creates the App once (no webhook, the
+permissions in shipmill-setup's table, installed only on the repos it works on) and keeps
+its private key on the host, mode `0600`, at `~/.config/shipmill/app-<app_id>.pem` or the
+path `--app-key` names. The key is a host secret; `app_id` is a committed decision, like
+the prompt.
+
+On LAUNCH, before stopping or starting any session, the gate checks the key's mode, signs
+an App JWT with `openssl dgst -sha256 -sign` (so the package keeps no dependencies), reads
+the App's slug, its installation on the repo and the installation's permissions, and the
+bot account's id. It then writes two helpers, mode `0700`, to the state folder's `bin/`: a
+`gh` that sets `GH_TOKEN` from `shipmill app-token` and runs the host's `gh`, and
+`git-credential-shipmill`, which answers git's credential protocol the same way. The
+session gets them through `--settings` env: `bin/` first on `PATH`, `<slug>[bot]` and
+`<id>+<slug>[bot]@users.noreply.github.com` as git author and committer, and, through
+`GIT_CONFIG_*`, the App's credential helper in place of the host's for github.com, with
+`git@github.com:` and `ssh://git@github.com/` remotes sent over https. The env holds no
+token: the settings JSON is a process argument `ps` can show, and an installation token
+lasts an hour while a session can run longer, so each call mints or reuses one. A failure
+at any step exits 2, stops no session, starts none, and never falls back to the host's
+login. The gate's own reads (`watch_state.py`, the hold check, `claude agents`) keep the
+host's `gh` login.
+
+`--dry-run` with `app_id` set runs the checks on a tick that would launch, writes no
+helpers and no token cache, and prints `would launch as <slug>[bot]`. The decision line of
+a launch ends ` as <slug>[bot]`, and `--json` reports `identity`: the bot login, or `null`
+for the host's `gh` login. `shipmill launchd --app-key <path>` puts the key, made
+absolute, in the job's gate arguments.
 
 `--dry-run` prints the decision and touches nothing: it sends no notification, stops no
 session, and writes no file, and says `would notify <id>` or `would stop <id>` instead.
@@ -108,10 +143,14 @@ Verified on Claude Code 2.1:
   session works in its own worktree and still sees the whole history. Transcripts are per
   working directory
 - A session needs the checkout to be trusted: run `claude` there once and accept
+- `claude --bg --settings '<json>'` applies the JSON's `env` block to the background
+  session, and its Bash tool sees those variables, `PATH` included (verified on 2.1.289).
+  The JSON is a process argument that `ps` can show, so the gate puts a `PATH` there whose
+  `gh` mints a token at call time, never a token
 
 ### State
 
-The gate keeps two files in `$(git rev-parse --git-common-dir)/shipmill/`, never committed
+The gate keeps its state in `$(git rev-parse --git-common-dir)/shipmill/`, never committed
 and shared by every worktree:
 
 - `gate.json`: the last launch's fingerprint, session id, and time. Losing it costs at
@@ -121,6 +160,14 @@ and shared by every worktree:
   notification sent (`null` while none was). An entry is dropped once its session is no
   longer blocked, so a session that blocks again starts a new wait. Losing the file
   restarts every wait: at most one extra notification and a later stop
+- `app-token.json`, with `app_id` set: the App's installation token, limited to the one
+  repo, its expiry, and which App and repo it is for, mode `0600` and replaced atomically.
+  `shipmill app-token` reuses it while it has at least 10 minutes left and mints a new one
+  after that. Losing it costs one more token
+- `bin/`, with `app_id` set: the session's `gh` and `git-credential-shipmill` helpers,
+  mode `0700`, rewritten before each launch. They run the gate's own shipmill (`python -m
+  shipmill app-token`) with the App's id, key path, repo, and checkout as arguments, and
+  hold no token
 
 A file that isn't its shape exits 2 naming its path. Everything else comes from GitHub and
 from `claude agents`.

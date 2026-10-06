@@ -1,6 +1,6 @@
 # S-004: Gated sessions write as a GitHub App
 
-status: approved
+status: built
 
 ## Problem
 
@@ -182,3 +182,23 @@ no helpers and no token cache, and prints `would launch as <slug>[bot]`.
 - shipmill/shipmill#144: S-004-14
 
 ## Verification
+
+Checked on main plus #144's PR. No real GitHub App was at hand, so the criteria that call
+GitHub's App API are checked by their tests (fakes for the API; the real `openssl`, `git`,
+and helper scripts), all passing, and by hand where the CLI stops before GitHub (a scratch
+RSA key, `shipmill --repo` on this checkout):
+
+- S-004-1: tests `test_s004_1_app_id_is_unset_by_default_and_read_when_given` and `test_s004_1_a_bad_app_id_is_refused_naming_the_key`, passing; this repo's config sets no `app_id`, and the gate's `--json` reported `identity: null`
+- S-004-2: ran `shipmill gate shipmill/shipmill --dry-run --app-key <key>` with `app_id` unset, which exited 2 with `--app-key names an App's key, but [agents] in .github/shipmill.toml sets no app_id`; the default path by `test_s004_2_without_app_key_the_gate_reads_the_default_path`, passing
+- S-004-3: ran `shipmill app-token` with a missing key and with a mode `0644` key, each exited 2 naming the path (the second saying `run chmod 600 <path>`); no session stopped or started by `test_s004_3_a_bad_key_launches_and_stops_nothing`, passing
+- S-004-4: ran `shipmill app-token` with a `PATH` holding `git` but no `openssl`, which exited 2 with `openssl not found`; the claims, and a signature the public key verifies, by `test_s004_4_the_jwt_claims_and_header` and `test_s004_4_openssl_signs_a_jwt_its_public_key_verifies`, passing
+- S-004-5: checked by `test_s004_5_an_app_not_installed_on_the_repo_is_named` and `test_s004_5_each_missing_permission_is_named_with_its_access`, passing; `PERMISSIONS` in `src/shipmill/app.py` matches the table
+- S-004-6: checked by `test_s004_6_a_launch_as_the_app_gets_the_bots_env_and_helpers`, `test_s004_6_claude_gets_settings_after_the_name_and_no_token`, and `test_s004_6_git_reads_the_identity_and_config_from_the_env` (a real `git` reads the env), passing
+- S-004-7: checked by `test_s004_7_with_app_id_unset_the_launch_is_todays`, passing; `shipmill gate shipmill/shipmill --dry-run --json` without `app_id` decided LAUNCH, and the state folder held no `app-token.json` or `bin/` after it
+- S-004-8: checked by `test_s004_8_the_token_is_limited_to_the_one_repository`, `test_s004_8_the_cache_is_written_with_mode_0600_and_no_stray_files`, `test_s004_8_reused_while_10_minutes_remain_then_minted`, and `test_s004_8_a_malformed_cache_exits_2_naming_its_path`, passing
+- S-004-9: ran `shipmill app-token --git-credential store` and `erase`, each printed nothing and exited 0; `get` by `test_s004_9_get_answers_x_access_token_and_the_token`, passing
+- S-004-10: checked by `test_s004_10_the_gh_helper_runs_gh_with_its_arguments_and_the_minted_token`, `test_s004_10_when_minting_fails_the_gh_helper_exits_non_zero_without_gh`, and `test_s004_10_neither_helper_file_contains_a_token`, which run the written helpers, passing
+- S-004-11: `shipmill gate --dry-run --json` without `app_id` printed `"identity": null`; the bot on the decision line, `would launch as <slug>[bot]`, and a dry run that writes nothing by `test_s004_11_a_launch_as_the_app_names_the_bot` and `test_s004_11_a_dry_run_checks_the_app_and_writes_nothing`, passing
+- S-004-12: checked by `test_s004_12_the_gates_own_reads_keep_the_hosts_environment` and `test_s004_12_with_app_id_unset_the_reads_keep_the_hosts_environment`, passing; `gate()` in `src/shipmill/gate.py` never changes its own environment
+- S-004-13: ran `shipmill launchd shipmill/shipmill --print --app-key <relative key>`, whose plist holds `--app-key` and the key's absolute path; and `test_s004_13_launchd_puts_app_key_in_the_gates_arguments`, passing
+- S-004-14: read the four files; `test_s004_14_the_docs_document_the_app` asserts each topic, and the permission table against `PERMISSIONS`, and `test_s004_14_the_metrics_count_the_apps_bot_as_a_bot` that `metrics.py` counts a `Bot` named `<slug>[bot]` as no person, passing

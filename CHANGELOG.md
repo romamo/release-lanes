@@ -53,6 +53,14 @@ bot.
   prints `would launch as <slug>[bot]`. With `app_id` unset the launch is unchanged.
   `shipmill launchd --app-key <path>` passes the key, made absolute, to the job's gate,
   and refuses it when `app_id` is unset or the key is missing or readable by others (#143)
+- shipmill-setup's gate section and `docs/install.md` give the GitHub App's setup: creating
+  it with no webhook and spec 004's permission table, installing it only on the repos the
+  gate works on, the private key at `~/.config/shipmill/app-<app_id>.pem` with `chmod 600`
+  (or `--app-key` on `gate` and `launchd`), `app_id` in `[agents]`, the token cache and
+  helpers, the dry run that proves it, and that without `app_id` sessions launch as before.
+  `docs/design/agent-modes.md` describes the session's identity, `--settings` env, and the
+  `app-token.json` and `bin/` state, and github-ship-watch says the App's `<slug>[bot]`
+  counts as a bot in the metrics. Spec 004 is built (#144)
 
 ### Changed
 
