@@ -176,4 +176,9 @@ no helpers and no token cache, and prints `would launch as <slug>[bot]`.
 
 ## Issues
 
+- shipmill/shipmill#141: S-004-1, S-004-2, S-004-3, S-004-4, S-004-5
+- shipmill/shipmill#142: S-004-8, S-004-9, S-004-10
+- shipmill/shipmill#143: S-004-6, S-004-7, S-004-11, S-004-12, S-004-13
+- shipmill/shipmill#144: S-004-14
+
 ## Verification
