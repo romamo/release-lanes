@@ -311,6 +311,7 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
    remind_hours = 4   # repeat it while the session still waits
    max_wait_minutes = 15 # stop a session that waited this long; 0: never
    # app_id = 123456  # sessions write as this GitHub App; unset: as the host's gh login
+   # mode = "headless" # interactive (default): sessions ask you; headless: `claude -p`, they ask on GitHub
    ```
 
    A session that waits on a question holds the repo, so by default the gate stops it

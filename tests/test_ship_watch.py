@@ -3,6 +3,7 @@
 import datetime as dt
 import importlib.util
 import json
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -78,12 +79,64 @@ def test_a_work_branch_an_active_run_may_own_is_not_stale(ws: ModuleType, status
     assert ws.work_branch_rows({"shipmill/v0.17.0": "a" * 40}, runs, "release.yml") == []
 
 
-def test_the_stale_work_branch_repair_rechecks_every_unfinished_status() -> None:
+def test_the_stale_work_branch_repair_rechecks_every_unfinished_status(ws: ModuleType) -> None:
     # the agent deletes the branch: a re-check filtered to in_progress and queued misses a
-    # run waiting on an environment, whose CI still uses the branch (#175)
+    # run waiting on an environment, whose CI still uses the branch (#175); one unfiltered
+    # listing misses an owner behind newer finished runs (#185)
     skill = (SCRIPT.parents[1] / "SKILL.md").read_text(encoding="utf-8")
     row = next(line for line in skill.splitlines() if line.startswith("| WORK_BRANCH_STALE |"))
-    assert " -s " not in row and "--jq '.[].status'" in row and "completed" in row
+    assert "gh run list -w <workflow> -s <status> --json url --jq length" in row
+    assert all(f"`{status}`" in row for status in ws.UNFINISHED) and "prints `0`" in row
+
+
+def gh_proc(code: int, out: str = "", err: str = "") -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess([], code, out, err)
+
+
+def listing(*runs: tuple[str, int]) -> str:
+    return json.dumps(
+        [
+            {"status": s, "conclusion": "", "createdAt": (NOW - dt.timedelta(minutes=m)).isoformat(), "url": f"run-{m}"}
+            for s, m in runs
+        ]
+    )
+
+
+def test_an_owner_older_than_the_newest_runs_keeps_its_work_branch(ws: ModuleType) -> None:
+    # #185: eleven newer finished runs pushed the owner out of the newest ten; asked by
+    # status, the owner, waiting on an environment, is still found
+    asked: list[list[str]] = []
+
+    def gh(cmd: list[str]) -> Any:
+        asked.append(cmd)
+        status = cmd[cmd.index("-s") + 1]
+        return gh_proc(0, listing(("waiting", 600)) if status == "waiting" else "[]")
+
+    owners = ws.fetch_unfinished("o/r", "release.yml", gh)
+    assert [r.url for r in owners] == ["run-600"]
+    assert [c[c.index("-s") + 1] for c in asked] == [*ws.UNFINISHED, "in_progress"]
+    assert all(c[:7] == ["gh", "run", "list", "-R", "o/r", "-w", "release.yml"] for c in asked)
+    assert ws.work_branch_rows({"shipmill/v0.17.0": "a" * 40}, owners, "release.yml") == []
+
+
+def test_a_run_seen_under_two_statuses_is_one_owner(ws: ModuleType) -> None:
+    def gh(cmd: list[str]) -> Any:
+        return gh_proc(0, listing(("in_progress", 5)) if "in_progress" in cmd else "[]")
+
+    assert [r.url for r in ws.fetch_unfinished("o/r", "release.yml", gh)] == ["run-5"]
+
+
+def test_a_failed_owner_query_stops_the_watch(ws: ModuleType, capsys: pytest.CaptureFixture[str]) -> None:
+    # a failed query is not "no owner": that reading deletes a live run's branch
+    def gh(cmd: list[str]) -> Any:
+        return gh_proc(1, err="HTTP 502: Server Error") if "waiting" in cmd else gh_proc(0, "[]")
+
+    with pytest.raises(SystemExit) as stopped:
+        ws.fetch_unfinished("o/r", "release.yml", gh)
+    assert stopped.value.code == 2
+    assert "Server Error" in capsys.readouterr().err
+    with pytest.raises(ws.Refused):
+        ws.fetch_unfinished("o/r", "release.yml", lambda cmd: gh_proc(0, "{}"))
 
 
 def test_only_release_work_branches_are_read(ws: ModuleType) -> None:

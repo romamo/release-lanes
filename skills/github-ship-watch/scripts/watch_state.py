@@ -12,8 +12,8 @@ Release bot (a repo with .github/shipmill.toml):
   BOT_STALLED     a shipmill bot in release mode has a release due now, no run of
                   its workflow is queued or running, and none started in --grace minutes
   BOT_OK          neither; BOT_NONE when the repo has no bot (it releases by "tag X")
-  WORK_BRANCH_STALE  for a shipmill bot: a shipmill/v* work branch on origin while none of
-                  the workflow's recent runs is queued or in progress, so no run owns it: a
+  WORK_BRANCH_STALE  for a shipmill bot: a shipmill/v* work branch on origin while no run of
+                  the workflow is unfinished (asked by status, however old), so no run owns it: a
                   run cancelled before its cleanup job left it, and each later run stops
                   at it unless its prepare job may list the runs (actions: read)
   WORKTREE_STALE  for a shipmill bot: a worktree `shipmill worktrees` keeps, under
@@ -200,7 +200,9 @@ STALE = dt.timedelta(days=7)  # a kept shipmill worktree older than this is repo
 # the reasons `shipmill worktrees` keeps a worktree that isn't a shipmill worktree at all
 NOT_SHIPMILL = {"main checkout", "current checkout", "not a shipmill worktree"}
 LEAD = ("INCIDENT_OPEN", "HOLD")  # the report starts with these, in this order
-ACTIVE = {"queued", "in_progress", "waiting", "pending", "requested"}
+# the statuses of a run that hasn't finished: shipmill's github.ACTIVE_STATUSES, in its order
+UNFINISHED = ("queued", "in_progress", "waiting", "pending", "requested")
+ACTIVE = set(UNFINISHED)
 # a release's work branch: shipmill's land.WORK_PREFIX and a version tag
 WORK_BRANCH = re.compile(r"^refs/heads/(shipmill/v\d+\.\d+\S*)$")
 HOLD_LABEL = "shipmill-hold"  # shipmill's autonomy.HOLD_LABEL
@@ -279,7 +281,15 @@ class Tag:
 
 
 def run(cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None) -> str:
-    proc = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, check=False)
+    return checked(cmd, subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, check=False))
+
+
+def capture(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
+def checked(cmd: list[str], proc: subprocess.CompletedProcess[str]) -> str:
+    """The command's output; a failed command stops the watch (exit 2)"""
     if proc.returncode != 0:
         sys.stderr.write(f"error: {' '.join(cmd[:3])}...: {proc.stderr.strip()}\n")
         raise SystemExit(2)
@@ -327,8 +337,9 @@ def bot_rows(runs: list[Run], due: str | None, now: dt.datetime, grace: dt.timed
 
 
 def work_branch_rows(branches: dict[str, str], runs: list[Run], workflow: str) -> list[Row]:
-    """Each work branch on origin (name to commit) while none of the workflow's recent runs,
-    newest first, is queued or in progress: no run owns it, so it stops every later run"""
+    """Each work branch on origin (name to commit) while none of the workflow's unfinished
+    runs (fetch_unfinished) is queued or in progress: no run owns it, so it stops every
+    later run"""
     if any(r.status in ACTIVE for r in runs):
         return []
     return [
@@ -353,6 +364,26 @@ def fetch_runs(repo: str, workflow: str) -> list[Run]:
         ["gh", "run", "list", "-R", repo, "-w", workflow, "-L", "10", "--json", "status,conclusion,createdAt,url"]
     )
     return [Run(r["status"], r["conclusion"] or "", parse_time(r["createdAt"]), r["url"]) for r in json.loads(out)]
+
+
+def fetch_unfinished(
+    repo: str, workflow: str, execute: Callable[[list[str]], subprocess.CompletedProcess[str]] = capture
+) -> list[Run]:
+    """The workflow's runs that haven't finished, newest first, asked of GitHub by status as
+    prepare's active_runs does, however many newer runs have finished. A failed query stops
+    the watch: it must never read as no owner, which deletes a branch"""
+    found = {}
+    # in_progress is asked again last: a run approved after the first in_progress query and
+    # before the waiting one would otherwise be in neither list
+    for status in (*UNFINISHED, "in_progress"):
+        cmd = ["gh", "run", "list", "-R", repo, "-w", workflow, "-s", status, "-L", "100"]
+        cmd += ["--json", "status,conclusion,createdAt,url"]
+        listed = json.loads(checked(cmd, execute(cmd)))
+        if not isinstance(listed, list):
+            raise Refused(f"error: gh run list -s {status} printed {type(listed).__name__}, not a JSON array")
+        for r in listed:
+            found[r["url"]] = Run(r["status"], r["conclusion"] or "", parse_time(r["createdAt"]), r["url"])
+    return sorted(found.values(), key=lambda r: r.created, reverse=True)
 
 
 def planned_release(repo: str, repo_dir: Path, policy: Path, branch: str, tool: str) -> str | None:
@@ -1250,7 +1281,10 @@ def main() -> int:
         branches = work_branches(repo_dir) if shipmill else {}
         runs = fetch_runs(args.repo, workflow)
         rows += bot_rows(runs, due, now, grace, workflow)
-        rows += work_branch_rows(branches, runs, workflow)
+        # an older run can still own the branch behind newer finished ones, so the owners
+        # are asked by status; only with a branch, so a normal pass makes no extra call
+        owners = fetch_unfinished(args.repo, workflow) if branches else []
+        rows += work_branch_rows(branches, owners, workflow)
         if shipmill:  # after the plan, whose own worktree is gone by then
             rows += stale_worktrees(repo_dir, args.tool)
 

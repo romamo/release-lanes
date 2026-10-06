@@ -80,6 +80,7 @@ from shipmill.gate import (
     ClaudeCli,
     check_checkout,
     gate,
+    host_login,
     pruner,
     refresh,
     state_dir,
@@ -513,7 +514,7 @@ def _gate(root: Path, args: argparse.Namespace, github: GitHub, sessions: Sessio
         args.slug,
         lambda: AgentsConfig.load(root),
         ClaudeCli(args.claude_arg),
-        lambda: watch(args.slug, root),
+        lambda read: watch(args.slug, root, read),
         dt.datetime.now(dt.UTC),
         lambda: Hold.read(GhCli(root)),
         Desktop.detect(),
@@ -523,6 +524,7 @@ def _gate(root: Path, args: argparse.Namespace, github: GitHub, sessions: Sessio
         app_check(args.slug, args.app_key, Path.home(), Openssl(), UrllibApi()),
         args.app_key is not None,
         session_env,
+        lambda: host_login(root),
     )
     if args.json:
         print(json.dumps(tick_record(decision, launched, waiting, pruned, args.dry_run), indent=2))

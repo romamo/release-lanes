@@ -139,7 +139,7 @@ def test_s004_2_app_key_without_app_id_exits_2_and_starts_nothing(checkout: Git,
             REPO,
             lambda: app_cfg(None),
             claude,
-            lambda: findings,
+            lambda _: findings,
             NOW,
             Hold,
             FakeNotifier(),
@@ -193,7 +193,7 @@ def test_s004_2_app_key_is_checked_against_the_refreshed_config(tmp_path: Path) 
         REPO,
         lambda: AgentsConfig.load(root),
         claude,
-        lambda: [ISSUES],
+        lambda _: [ISSUES],
         NOW,
         Hold,
         FakeNotifier(),
@@ -253,7 +253,7 @@ def test_s004_3_a_bad_key_launches_and_stops_nothing(checkout: Git, tmp_path: Pa
     claude = FakeClaude([bg("old", "idle", "done")])
     check = app_check(REPO, key, tmp_path, FakeSigner(), FakeApi())
     with pytest.raises(ReleaseError, match=str(key)) as raised:
-        gate(checkout, REPO, app_cfg, claude, lambda: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE, app=check)
+        gate(checkout, REPO, app_cfg, claude, lambda _: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE, app=check)
     assert "not a real key" not in str(raised.value)
     assert (claude.launched, claude.stopped) == ([], [])
     assert not (state_dir(checkout) / RECORD).exists()
@@ -302,7 +302,7 @@ def test_s004_4_a_missing_openssl_is_named(checkout: Git, tmp_path: Path) -> Non
     claude = FakeClaude([bg("old", "idle", "done")])
     check = app_check(REPO, key_file(tmp_path), tmp_path, Openssl(missing), FakeApi())
     with pytest.raises(ReleaseError, match="openssl not found"):
-        gate(checkout, REPO, app_cfg, claude, lambda: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE, app=check)
+        gate(checkout, REPO, app_cfg, claude, lambda _: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE, app=check)
     assert (claude.launched, claude.stopped) == ([], [])
 
 
@@ -313,7 +313,7 @@ def test_s004_5_an_app_not_installed_on_the_repo_is_named(checkout: Git, tmp_pat
     claude = FakeClaude([bg("old", "idle", "done")])
     check = app_check(REPO, key_file(tmp_path), tmp_path, FakeSigner(), FakeApi(installed=False))
     with pytest.raises(ReleaseError, match=f"^app demo-agent is not installed on {REPO}$"):
-        gate(checkout, REPO, app_cfg, claude, lambda: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE, app=check)
+        gate(checkout, REPO, app_cfg, claude, lambda _: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE, app=check)
     assert (claude.launched, claude.stopped) == ([], [])
 
 
@@ -323,7 +323,7 @@ def test_s004_5_each_missing_permission_is_named_with_its_access(checkout: Git, 
     claude = FakeClaude([bg("old", "idle", "done")])
     check = app_check(REPO, key_file(tmp_path), tmp_path, FakeSigner(), FakeApi(permissions=granted))
     with pytest.raises(ReleaseError) as raised:
-        gate(checkout, REPO, app_cfg, claude, lambda: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE, app=check)
+        gate(checkout, REPO, app_cfg, claude, lambda _: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE, app=check)
     assert str(raised.value).startswith(
         f"app demo-agent on {REPO} lacks these permissions: Contents: write, Workflows: write, Commit statuses: read;"
     )
@@ -372,12 +372,12 @@ def test_with_app_id_set_a_tick_that_launches_nothing_checks_nothing(checkout: G
         raise AssertionError("only a launch checks the App")
 
     decision, _, _, _ = gate(
-        checkout, REPO, app_cfg, FakeClaude(), lambda: [], NOW, Hold, FakeNotifier(), NO_PRUNE, app=unchecked
+        checkout, REPO, app_cfg, FakeClaude(), lambda _: [], NOW, Hold, FakeNotifier(), NO_PRUNE, app=unchecked
     )
     assert decision.action is Action.QUIET
     busy = FakeClaude([bg("a", "busy", "working")])
     decision, _, _, _ = gate(
-        checkout, REPO, app_cfg, busy, lambda: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE, app=unchecked
+        checkout, REPO, app_cfg, busy, lambda _: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE, app=unchecked
     )
     assert decision.action is Action.RUNNING
 
@@ -392,7 +392,7 @@ def test_with_app_id_unset_the_app_is_never_checked(checkout: Git) -> None:
         REPO,
         lambda: app_cfg(None),
         claude,
-        lambda: [ISSUES],
+        lambda _: [ISSUES],
         NOW,
         Hold,
         FakeNotifier(),
