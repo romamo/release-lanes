@@ -11,6 +11,8 @@
   notes           print a release's notes
   operate         check environment health, promote after the bake, roll back; approve a proposal
   doctor          check that the repository is ready for the bot
+  status          print what the pipeline owes, github-ship-watch's report for the checkout's repo;
+                  --json for its JSON lines
   init            write a starting policy and the calling workflow (--operate: the operate one)
   gate            start a Claude Code session for the repo only when its state needs one; each tick,
                   held or not, prunes the worktrees that landed, as `worktrees --prune` does
@@ -22,8 +24,8 @@
                   repos holding .github/shipmill.toml, the key saved with mode 0600
   app-install     guide installing the App on more repos: the App's Install App page and what to pick
 
-Exit codes: 0 done (a plan may skip); 1 doctor found a failure, or app-create or app-install left a
-repo without the App; 2 bad input or a refused state.
+Exit codes: 0 done (a plan may skip); 1 doctor found a failure, status found a row that needs
+action, or app-create or app-install left a repo without the App; 2 bad input or a refused state.
 """
 
 import argparse
@@ -78,15 +80,20 @@ from shipmill.doctor import CALLER, OPERATE_CALLER, doctor
 from shipmill.errors import ReleaseError
 from shipmill.gate import (
     ClaudeCli,
+    StateRead,
+    StateRunner,
     check_checkout,
     gate,
     host_login,
     pruner,
     refresh,
+    run_state,
     state_dir,
+    state_failed,
     tick_lines,
     tick_record,
     watch,
+    watch_command,
 )
 from shipmill.github import GhCli, GitHub
 from shipmill.gitrepo import Git
@@ -225,6 +232,12 @@ def _parser() -> argparse.ArgumentParser:
 
     sub.add_parser("doctor", help="check that the repository is ready for the bot")
 
+    p = sub.add_parser("status", help="print what the pipeline owes: github-ship-watch's report (spec 008)")
+    p.add_argument(
+        "slug", nargs="?", metavar="owner/name", help="the GitHub repo (default: origin's); --repo is its checkout"
+    )
+    p.add_argument("--json", action="store_true", help="print the report's JSON lines")
+
     p = sub.add_parser("init", help=f"write {CONFIG_PATH} and {CALLER}")
     p.add_argument("--ci", default="ci.yml", help="the CI workflow a release commit must pass (default: ci.yml)")
     p.add_argument("--force", action="store_true", help="overwrite existing files")
@@ -341,10 +354,11 @@ def main(
     api: Api | None = None,
     signer: Signer | None = None,
     stdin: TextIO | None = None,
+    state: StateRunner | None = None,
 ) -> int:
     """github stands in for gh, http for the health checks, sessions for `claude agents`, api
-    for GitHub's REST API, signer for openssl, and stdin for git's credential request, as
-    tests pass fakes"""
+    for GitHub's REST API, signer for openssl, stdin for git's credential request, and state
+    for watch_state.py, as tests pass fakes"""
     args = _parser().parse_args(argv)
     root: Path = args.repo.resolve()
     if args.command == "app-token":
@@ -354,6 +368,8 @@ def main(
     if args.command == "app-create":
         ask = input if sys.stdin.isatty() and not args.owner else None
         return _app_create(root, args, api or UrllibApi(), signer or Openssl(), ask=ask)
+    if args.command == "status":
+        return _status(root, args, state or run_state)
     hub = github or GhCli(root)
     if args.command == "init" and args.operate:
         print(f"wrote {init_operate(root, args.force).relative_to(root)}")
@@ -614,6 +630,29 @@ def _app_create(
     if args.json:
         print(json.dumps(record, indent=2))
     return 1 if missing else 0
+
+
+def _status(root: Path, args: argparse.Namespace, run: StateRunner) -> int:
+    """Spec 008: github-ship-watch's report for the checkout's repo, passed through; exit 1
+    when a row needs action, 2 when the script failed rather than reported"""
+    git = Git(root)
+    if not git.ok("rev-parse", "--show-toplevel"):  # S-008-9: first, before any other git call
+        raise ReleaseError(f"{root} is not a git checkout; run status in a checkout of the repo, or pass --repo PATH")
+    top = Path(git.run("rev-parse", "--show-toplevel").strip())
+    slug: str | None = args.slug
+    if slug is None:
+        slug = _origin_repo(top)
+        if slug is None:
+            raise ReleaseError(f"{top}'s origin isn't a GitHub repo; name the repo, such as owner/name")
+    else:
+        check_checkout(Git(top), slug)
+    proc = run(watch_command(slug, top, StateRead(), json=args.json))
+    sys.stderr.write(proc.stderr)  # S-008-10: warnings on 0 and 1, the whole traceback on a failure
+    if state_failed(proc):
+        print(f"shipmill: watch_state.py failed (exit {proc.returncode})", file=sys.stderr)
+        return 2
+    sys.stdout.write(proc.stdout)
+    return proc.returncode
 
 
 def _origin_repo(root: Path) -> str | None:

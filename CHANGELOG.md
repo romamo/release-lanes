@@ -7,8 +7,16 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- `shipmill status` prints github-ship-watch's report for the checkout's repo, as a table or
+  with `--json` its JSON lines, and exits 1 when a row needs action, so a person without an
+  agent or a CI job can ask "is anything stuck?" (spec 008)
+
 ### Changed
 
+- `shipmill gate` reads a crashed `watch_state.py` (exit 1, no rows) as a failure with the end
+  of its stderr, where it read it as QUIET
 - Spec 008 after a second review: status needs a checkout even with a named repo, shows the
   script's whole stderr and passes it through on success, and the gate shares the guard
   that reads a crashed `watch_state.py` as a failure, not as QUIET

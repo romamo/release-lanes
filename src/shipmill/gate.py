@@ -411,17 +411,39 @@ class StateRead:
         return trusted + ([] if self.bot_login is None else ["--bot-login", self.bot_login])
 
 
-def watch_command(repo: str, workspace: Path, read: StateRead) -> list[str]:
+def watch_command(repo: str, workspace: Path, read: StateRead, json: bool = True) -> list[str]:
+    """The gate reads JSON lines; `shipmill status` prints the table unless asked (S-008-7)"""
     script = skills_dir() / "github-ship-watch" / "scripts" / "watch_state.py"
-    return [sys.executable, str(script), repo, "--repo-dir", str(workspace), "--json", *read.flags()]
+    return [
+        sys.executable,
+        str(script),
+        repo,
+        "--repo-dir",
+        str(workspace),
+        *(["--json"] if json else []),
+        *read.flags(),
+    ]
 
 
-def watch(repo: str, workspace: Path, read: StateRead) -> list[Finding]:
+def state_failed(proc: subprocess.CompletedProcess[str]) -> bool:
+    """watch_state.py prints its rows only once all are read, so exit 1 with none is an
+    uncaught exception, not a report (S-008-11); 0 and 1 with rows are its answers"""
+    return proc.returncode not in (0, 1) or (proc.returncode == 1 and not proc.stdout.strip())
+
+
+def run_state(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
+StateRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
+
+
+def watch(repo: str, workspace: Path, read: StateRead, run: StateRunner = run_state) -> list[Finding]:
     """watch_state.py's rows for the repo; it exits 1 when any needs action"""
-    cmd = watch_command(repo, workspace, read)
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    if proc.returncode not in (0, 1):
-        raise ReleaseError(f"watch_state.py failed: {proc.stderr.strip()[:500]}")
+    proc = run(watch_command(repo, workspace, read))
+    if state_failed(proc):
+        # the end, where a traceback names its exception
+        raise ReleaseError(f"watch_state.py failed (exit {proc.returncode}): {proc.stderr.strip()[-500:]}")
     return parse_findings(proc.stdout)
 
 
