@@ -112,7 +112,7 @@ what it removed before stays removed.
 
 `gate()` in `src/shipmill/gate.py` prunes on each tick with the same code, after
 `check_checkout` and before the hold check, so it prunes while a `shipmill-hold` issue is
-open: D-13 stops the gate from starting sessions, and a prune starts none and removes only
+open: D-15 stops the gate from starting sessions, and a prune starts none and removes only
 landed, clean work. `shipmill gate --dry-run` runs the prune as `--prune --dry-run` does.
 The gate's text output adds a `pruned <path> (<branch>)` line per removed worktree (`would
 prune` under `--dry-run`); its `--json` record gains `"pruned": [<path>, ...]`, the paths
@@ -174,7 +174,7 @@ a failing plan does.
 
 ## Decisions relied on
 
-- D-13
+- D-15
 - D-12
 
 ## Issues

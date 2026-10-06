@@ -12,7 +12,7 @@ code decides when it runs and with what.
 
 | Mode | Session | Questions for you | Status |
 |---|---|---|---|
-| 1. Interactive | A new `claude --bg` session per launch: attachable, listed in `claude agents` | AskUserQuestion; the session waits, the gate notifies you and starts nothing for that repo until you answer or `max_wait_hours` stops it | Built: `shipmill gate` |
+| 1. Interactive | A new `claude --bg` session per launch: attachable, listed in `claude agents` | AskUserQuestion; the session waits, the gate notifies you and starts nothing for that repo until you answer or `max_wait_minutes` (15 by default) stops it | Built: `shipmill gate` |
 | 2. Noninteractive | The same, started with a tool allowlist, for a machine nobody watches | The `needs-decision` protocol: a label and a comment that mentions you; the item waits on GitHub and the session ends | Next, after mode 1 shows how often sessions wait on you |
 | 3. Ephemeral | A fresh container per job (GitHub Actions) | The same protocol | Parked: [ephemeral-mode.md](ephemeral-mode.md) |
 
@@ -32,7 +32,7 @@ prs = true          # open pull requests count as work
 retry_hours = 24    # unchanged findings start a new session after this
 notify = true       # a desktop notification when a session waits on you
 remind_hours = 4    # repeat it while the session still waits (1..168)
-max_wait_hours = 0  # stop a session that waited this long (0..168); 0: never
+max_wait_minutes = 15  # stop a session that waited this long (0..10080); 0: never
 ```
 
 ```
@@ -49,13 +49,13 @@ the user's working copy, where the session would branch and commit. Each run:
    times the wait in `waiting.json`. With `notify = true` it sends a desktop notification
    (`osascript` on macOS, `notify-send` elsewhere) at once and every `remind_hours` while
    the session waits; a failed send is printed and tried again next tick. A session that
-   has waited `max_wait_hours` (when not 0) is stopped with `claude stop <id>`, its entry
+   has waited `max_wait_minutes` (15 by default; 0 never stops) is stopped with `claude stop <id>`, its entry
    dropped, and a last notification sent; a failing `claude stop` exits 2 and starts
    nothing. The gate writes nothing to GitHub for it. The rest of the tick runs without
    the stopped sessions, so it can launch, under the usual rules
-3. Lists the open issues labelled `shipmill-hold`. Any: **HELD**, stop (D-13). A session
+3. Lists the open issues labelled `shipmill-hold`. Any: **HELD**, stop (D-15). A session
    already running finishes; the reason names it with `claude stop <id>`. Step 2 runs on
-   a held tick too, so a session that reached `max_wait_hours` is stopped, held or not
+   a held tick too, so a session that reached `max_wait_minutes` is stopped, held or not
 4. A session still `blocked` waits on you: **WAITING**, stop. One that is `working` or
    busy: **RUNNING**, stop. Both stop before the state is read or the checkout moves
 5. With `--refresh`, moves the detached, clean checkout to the head of origin's default

@@ -55,7 +55,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | `true` | INCIDENT_OPEN | An agent works the incident: diagnosis, then a hotfix or a revert |
 | `false` | PROMOTION_DUE | Only a person approves; an agent would wake every retry window for nothing |
 | `false` | UNHEALTHY | Operate owns it and rolls back after `rollback_after` failures; past that, the incident it opens reads INCIDENT_OPEN |
-| `false` | HOLD | Report only; the gate checks `shipmill-hold` itself before anything else (D-13) |
+| `false` | HOLD | Report only; the gate checks `shipmill-hold` itself before anything else (D-15) |
 | `false` | WORKTREE_STALE | Only a person knows whether kept work is wanted; the gate's prune already removes what landed |
 | `false` | PRS_OPEN, POSTMORTEM_DUE, and every other state | Report only, or a repair the watch pass makes itself |
 
