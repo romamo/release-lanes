@@ -9,6 +9,8 @@ bot.
 
 ### Added
 
+- Spec 008 for `shipmill status`, which prints github-ship-watch's report for the checkout's
+  repo and exits 1 when something needs action
 - github-ship-watch compares the host's `shipmill@shipmill` plugin (`claude plugin list`)
   with the latest shipmill release: SHIPMILL_VERSION lists the installs that apply to the repo (user scope, the
   checkout, and the gate's working directory) and a marketplace on an old repo name, and
