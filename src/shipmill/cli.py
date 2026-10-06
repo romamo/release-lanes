@@ -20,9 +20,10 @@
                   10 minutes left; --git-credential answers as git's credential helper
   app-create      create the gate's GitHub App in one click: owner and visibility planned from the
                   repos holding .github/shipmill.toml, the key saved with mode 0600
+  app-install     guide installing the App on more repos: the App's Install App page and what to pick
 
-Exit codes: 0 done (a plan may skip); 1 doctor found a failure, or app-create left a repo without
-the App; 2 bad input or a refused state.
+Exit codes: 0 done (a plan may skip); 1 doctor found a failure, or app-create or app-install left a
+repo without the App; 2 bad input or a refused state.
 """
 
 import argparse
@@ -30,8 +31,10 @@ import dataclasses
 import datetime as dt
 import json
 import os
+import re
 import shutil
 import sys
+import time
 import webbrowser
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -64,12 +67,11 @@ from shipmill.app_create import (
     gated_repos,
     given_repos,
     host_token,
-    install_url,
     owner_menu,
     pick_owner,
     plan,
-    wait_installed,
 )
+from shipmill.app_install import WAIT_SECONDS, guide
 from shipmill.autonomy import Hold
 from shipmill.config import CONFIG_PATH, config_path
 from shipmill.doctor import CALLER, OPERATE_CALLER, doctor
@@ -287,6 +289,13 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="print the plan and the result as one JSON object")
     p.add_argument("--no-browser", action="store_true", help="print the URLs instead of opening them")
 
+    p = sub.add_parser("app-install", help="guide installing the gate's GitHub App on more repos (spec 007)")
+    p.add_argument("repos", nargs="*", metavar="owner/name", help="the repos the App should cover (default: origin's)")
+    p.add_argument("--app-id", type=int, help="the App's id (default: [agents] app_id)")
+    p.add_argument("--app-key", type=Path, help="the App's private key (default: ~/.config/shipmill/app-<app_id>.pem)")
+    p.add_argument("--no-browser", action="store_true", help="print the page instead of opening it")
+    p.add_argument("--json", action="store_true", help="print the result as one JSON object")
+
     p = sub.add_parser("launchd", help="run the gate for a dedicated checkout every few minutes (macOS)")
     p.add_argument("slug", metavar="owner/name", help="the GitHub repo; --repo is its gate checkout")
     p.add_argument("--every", type=int, default=15, help="minutes between runs (default: 15)")
@@ -323,6 +332,8 @@ def main(
     root: Path = args.repo.resolve()
     if args.command == "app-token":
         return _app_token(root, args, api or UrllibApi(), signer or Openssl(), stdin or sys.stdin)
+    if args.command == "app-install":
+        return _app_install(root, args, api or UrllibApi(), signer or Openssl())
     if args.command == "app-create":
         ask = input if sys.stdin.isatty() and not args.owner else None
         return _app_create(root, args, api or UrllibApi(), signer or Openssl(), ask=ask)
@@ -539,18 +550,70 @@ def _app_create(
     created = convert(create(planned, open_url), api, host, keys)
     say(f"created {created.slug} (App ID {created.app_id}), key in {created.key}")
     targets = planned.installable
-    if targets:
-        say(f"install it on: {', '.join(targets)}")
-        open_url(install_url(created.slug))
-    installed = wait_installed(created, targets, api, signer, say, seconds=install_seconds)
+    guided = guide(created.app_id, created.key, targets, api, signer, say, open_url, seconds=install_seconds)
+    installed = guided.installed
     for line in config_lines(created):
         say(line)
     missing = [r for r in targets if r not in installed]
     for repo in missing:
-        say(f"not installed on {repo}; install it at {install_url(created.slug)}")
+        say(f"not installed on {repo}; install it at {guided.page}")
     record |= {"app_id": created.app_id, "slug": created.slug, "key": str(created.key), "installed": list(installed)}
     if args.json:
         print(json.dumps(record, indent=2))
+    return 1 if missing else 0
+
+
+def _origin_repo(root: Path) -> str | None:
+    """The checkout's GitHub origin as owner/name, or None outside a GitHub checkout"""
+    if not (root / ".git").exists():
+        return None
+    url = Git(root).run("remote", "get-url", "origin").strip()
+    found = re.search(r"github\.com[:/]([^/]+/[^/]+?)(?:\.git)?/?$", url)
+    return found.group(1) if found else None
+
+
+def _app_install(
+    root: Path,
+    args: argparse.Namespace,
+    api: Api,
+    signer: Signer,
+    browser: Callable[[str], None] | None = None,
+    out: TextIO | None = None,
+    clock: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.UTC),
+    sleep: Callable[[float], None] = time.sleep,
+    seconds: float = WAIT_SECONDS,
+) -> int:
+    """Spec 007: guide installing the App on the repos; exit 1 when one is still missing"""
+    stream = out if out is not None else (sys.stderr if args.json else sys.stdout)
+
+    def say(line: str) -> None:
+        print(line, file=stream, flush=True)  # S-007-7
+
+    repos: list[str] = list(args.repos)
+    if not repos:
+        origin = _origin_repo(root)
+        if origin is None:
+            raise ReleaseError(f"{root} is not a GitHub checkout; name the repos, such as owner/name")
+        repos = [origin]
+    app_id: int | None = args.app_id
+    if app_id is None:
+        app_id = AgentsConfig.load(root).app_id if (root / CONFIG_PATH).is_file() else None
+    if app_id is None:
+        raise ReleaseError("no [agents] app_id in this checkout's config; pass --app-id")
+    key = check_key(args.app_key if args.app_key is not None else default_key(app_id, Path.home()))
+
+    def browse(url: str) -> None:
+        if browser is not None:
+            browser(url)
+        elif not args.no_browser:
+            webbrowser.open(url)
+
+    guided = guide(app_id, key, repos, api, signer, say, browse, clock, sleep, seconds)
+    missing = [r for r in repos if r not in guided.installed]
+    for repo in missing:
+        say(f"not installed on {repo}; install it at {guided.page}")
+    if args.json:
+        print(json.dumps(guided.record(app_id, repos), indent=2))
     return 1 if missing else 0
 
 

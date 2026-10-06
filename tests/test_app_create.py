@@ -1,7 +1,6 @@
 """Spec 006: shipmill app-create plans, creates, and installs the gate's GitHub App"""
 
 import argparse
-import datetime as dt
 import html
 import io
 import json
@@ -37,7 +36,6 @@ from shipmill.app_create import (
     plan,
     save_key,
     slug,
-    wait_installed,
 )
 from shipmill.cli import _app_create
 from shipmill.errors import ReleaseError
@@ -102,6 +100,10 @@ class FakeHub:
             repo = m.group(1)
             status = self.contents_status.get(repo, 200 if repo in self.gated else 404)
             return Answer(status, "{}")
+        if route == "/app":
+            return Answer(200, json.dumps({"slug": "shipmill-agent", "owner": {"login": "romamo", "type": "User"}}))
+        if route == "/app/installations":
+            return Answer(200, "[]")
         if m := re.fullmatch(r"/apps/([^/]+)", route):
             return Answer(200, "{}") if m.group(1) in self.taken_slugs else Answer(404, "{}")
         if m := re.fullmatch(r"/repos/([^/]+/[^/]+)/installation", route):
@@ -312,39 +314,6 @@ def test_s006_12_no_callback_means_no_app() -> None:
         create(planned, lambda url: None, seconds=0.2)
 
 
-@dataclass
-class Clock:
-    now: dt.datetime = dt.datetime(2026, 10, 6, 12, tzinfo=dt.UTC)
-
-    def __call__(self) -> dt.datetime:
-        return self.now
-
-    def sleep(self, seconds: float) -> None:
-        self.now += dt.timedelta(seconds=seconds)
-
-
-def test_s006_13_installations_are_reported_as_they_appear(tmp_path: Path) -> None:
-    hub = FakeHub(install_after={"shipmill/shipmill": 1, "cli-agent-spec/cli-agent-spec": 3})
-    created = Created(4242, "shipmill-agent", tmp_path / "k.pem")
-    said: list[str] = []
-    clock = Clock()
-    repos = ("cli-agent-spec/cli-agent-spec", "shipmill/shipmill")
-    found = wait_installed(created, repos, hub, FakeSigner(), said.append, clock, clock.sleep)
-    assert found == repos
-    assert said == ["installed on shipmill/shipmill", "installed on cli-agent-spec/cli-agent-spec"]
-    assert all(token is not None and token != TOKEN for _, path, token in hub.calls if path.endswith("/installation"))
-
-
-def test_s006_13_polling_stops_when_the_time_runs_out(tmp_path: Path) -> None:
-    hub = FakeHub(installed=["shipmill/shipmill"])
-    clock = Clock()
-    repos = ("cli-agent-spec/cli-agent-spec", "shipmill/shipmill")
-    created = Created(4242, "shipmill-agent", tmp_path / "k.pem")
-    found = wait_installed(created, repos, hub, FakeSigner(), print, clock, clock.sleep, seconds=60)
-    assert found == ("shipmill/shipmill",)
-    assert clock.now - Clock().now >= dt.timedelta(seconds=60)
-
-
 def test_s006_14_a_real_run_prints_the_app_id_line_and_edits_no_config(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -362,7 +331,7 @@ def test_s006_14_a_real_run_prints_the_app_id_line_and_edits_no_config(
     code = _app_create(tmp_path, args(json=True), hub, FakeSigner(), TOKEN, both, keys)
     out = capsys.readouterr()
     assert code == 0
-    assert opened[-1] == "https://github.com/apps/shipmill-agent/installations/new"
+    assert all("/settings/apps/" not in url for url in opened)  # every repo was covered: no page to open
     assert "  app_id = 4242" in out.err.splitlines()
     data = json.loads(out.out)
     assert data == {
@@ -401,10 +370,10 @@ def test_s006_13_the_command_exits_1_naming_a_repo_left_uninstalled(
     code = _app_create(tmp_path, args(), hub, FakeSigner(), TOKEN, local, tmp_path / "keys", install_seconds=0)
     lines = capsys.readouterr().out.splitlines()
     assert code == 1
-    assert "installed on shipmill/shipmill" in lines
+    assert "already installed on shipmill/shipmill" in lines
     assert (
         "not installed on cli-agent-spec/cli-agent-spec; "
-        "install it at https://github.com/apps/shipmill-agent/installations/new"
+        "install it at https://github.com/settings/apps/shipmill-agent/installations"
     ) in lines
 
 

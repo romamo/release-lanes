@@ -10,7 +10,6 @@ conversion's client secret, webhook secret, and client id are dropped unread. No
 config is edited (D-4): the command prints the `app_id` line to commit.
 """
 
-import datetime as dt
 import html
 import json
 import os
@@ -19,7 +18,6 @@ import secrets
 import stat
 import subprocess
 import threading
-import time
 import urllib.parse
 from collections import Counter
 from collections.abc import Callable, Sequence
@@ -28,7 +26,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
-from shipmill.app import PERMISSIONS, Api, Signer, jwt
+from shipmill.app import PERMISSIONS, Api
 from shipmill.errors import ReleaseError
 
 CONFIG = ".github/shipmill.toml"
@@ -425,40 +423,6 @@ def create(p: Plan, browser: Callable[[str], None], seconds: float = FLOW_SECOND
     finally:
         server.shutdown()
         server.server_close()
-
-
-def install_url(slug: str) -> str:
-    return f"https://github.com/apps/{slug}/installations/new"
-
-
-def wait_installed(
-    created: Created,
-    repos: Sequence[str],
-    api: Api,
-    signer: Signer,
-    report: Callable[[str], None],
-    clock: Callable[[], dt.datetime] = lambda: dt.datetime.now(dt.UTC),
-    sleep: Callable[[float], None] = time.sleep,
-    seconds: float = FLOW_SECONDS,
-) -> tuple[str, ...]:
-    """S-006-13: poll each repo's installation with the App's JWT until all are found or the
-    time runs out; returns the ones found"""
-    start = clock()
-    found: list[str] = []
-    while True:
-        token = jwt(created.app_id, created.key, clock(), signer)
-        for repo in repos:
-            if repo in found:
-                continue
-            answer = api.get(f"/repos/{repo}/installation", token)
-            if answer.status == 200:
-                found.append(repo)
-                report(f"installed on {repo}")
-            elif answer.status != 404:
-                raise ReleaseError(f"GET /repos/{repo}/installation answered {answer.status}")
-        if len(found) == len(repos) or (clock() - start).total_seconds() >= seconds:
-            return tuple(r for r in repos if r in found)
-        sleep(POLL_SECONDS)
 
 
 def host_token(run: Callable[[list[str]], str] | None = None) -> str:

@@ -1,6 +1,6 @@
 # S-007: Guide installing the gate's App on more repos
 
-status: draft
+status: built
 
 ## Problem
 
@@ -102,4 +102,22 @@ planned, so it opens the App's Install App page and says per account what to pic
 
 ## Issues
 
+- shipmill/shipmill#172: S-007-1, S-007-2, S-007-3, S-007-4, S-007-5, S-007-6, S-007-7, S-007-8, S-007-9, S-007-10
+
 ## Verification
+
+Checked on main plus #172's PR, with a fake of GitHub's App API in the tests; the App's own
+API (`GET /app`, `GET /app/installations`, `GET /repos/<repo>/installation`) was also read
+for real with the `shipmill-romamo` App's JWT on 2026-10-06, which showed one installation
+(shipmill, all repositories) and cli-agent-spec/cli-agent-spec not covered.
+
+- S-007-1: `test_s007_1_the_default_repo_is_origins`, passing
+- S-007-2: `test_s007_2_the_app_id_comes_from_the_config_or_the_flag`, passing
+- S-007-3: `test_s007_3_a_covered_repo_opens_nothing` and `test_s007_3_another_status_names_the_repo`, passing
+- S-007-4: `test_s007_4_missing_repos_open_the_install_app_page_once` and `test_s007_4_an_org_owned_app_opens_the_orgs_page`, passing; the fake raises on any POST, so nothing is installed or added
+- S-007-5: `test_s007_5_each_account_is_told_to_install_or_configure`, passing
+- S-007-6: `test_s007_6_installations_are_reported_and_the_wait_ends` and `test_s007_6_and_7_a_missing_repo_exits_1_with_lines_flushed`, passing
+- S-007-7: `test_s007_7_no_browser_prints_the_page_and_opens_nothing` and `test_s007_6_and_7_a_missing_repo_exits_1_with_lines_flushed`, passing
+- S-007-8: `test_s007_8_json_lists_each_repo`, passing
+- S-007-9: `test_s007_9_app_create_guides_its_install_step_the_same_way`, passing; app-create's tests run its install step through the guide
+- S-007-10: `test_s007_10_the_docs_document_app_install`, passing

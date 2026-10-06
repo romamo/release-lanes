@@ -272,6 +272,20 @@ App**, then pick the repos on the install page it opens. It saves the key to
 `~/.config/shipmill/app-<app_id>.pem` with mode `0600`, waits for the installations, and
 prints the `app_id = <id>` line for step 4. Then go on at step 4.
 
+For a repo connected later, or in another account:
+
+```bash
+shipmill app-install                 # the checkout's repo, with [agents] app_id
+shipmill app-install acme/web beta/x # or name them
+```
+
+shipmill never installs the App or adds a repo for you, since which accounts and repos get it
+is your choice. For each repo the App doesn't cover yet, it opens the App's **Install App**
+page and says per account what to click there: **Install** (then Only select repositories
+and the repos) for an account without the App, **Configure** (then add the repos under
+Repository access) for one that has it. It then waits until each repo is covered, and exits 1
+naming any still missing after 10 minutes.
+
 By hand instead:
 
 1. **Create the App** once, in GitHub's settings (Developer settings, GitHub Apps, New

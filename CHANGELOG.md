@@ -11,6 +11,11 @@ bot.
 
 ### Added
 
+- `shipmill app-install [owner/name ...]` guides installing the gate's App on more repos:
+  for each repo the App doesn't cover it opens the App's Install App page and says per
+  account whether to click Install or Configure and which repos to pick, then waits until
+  each is covered; it never installs or adds anything itself. `shipmill app-create`'s
+  install step uses the same guide (#172)
 - Spec 007 for `shipmill app-install`, which guides installing the gate's App on more repos
   and accounts, and checks that it took
 - Spec 006 for `shipmill app-create`, which makes the gate's GitHub App in one click and
