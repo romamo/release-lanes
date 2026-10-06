@@ -1,6 +1,6 @@
 # S-006: Create the gate's GitHub App in one click
 
-status: draft
+status: built
 
 ## Problem
 
@@ -173,4 +173,27 @@ then prove it: shipmill --repo <gate checkout> gate <owner/repo> --dry-run
 
 ## Issues
 
+- shipmill/shipmill#155: S-006-1, S-006-2, S-006-3, S-006-4, S-006-5, S-006-6, S-006-7, S-006-8, S-006-9, S-006-10, S-006-11, S-006-12, S-006-13, S-006-14, S-006-15, S-006-16
+
 ## Verification
+
+Checked on main plus #155's PR. GitHub's App API is checked by the tests' fake; the
+discovery and the plan also ran against GitHub for real (`shipmill app-create --dry-run
+--json` on 2026-10-06), and the server and callback run for real on 127.0.0.1 in the tests:
+
+- S-006-1: `test_s006_1_the_accounts_are_the_login_and_the_orgs_it_administers` and `test_s006_1_without_read_org_the_command_says_how_to_grant_it`, passing; the real dry run found romamo and the three orgs it administers, not theagenttimes, where it is a member
+- S-006-2: `test_s006_2_a_repo_is_gated_when_its_config_exists_and_archived_ones_are_skipped` and `test_s006_2_any_other_status_names_the_repo`, passing; the real dry run found cli-agent-spec/cli-agent-spec and shipmill/shipmill
+- S-006-3: `test_s006_3_repos_replaces_discovery_and_refuses_another_account`, passing
+- S-006-4: `test_s006_4_repos_in_one_account_plan_a_private_app_there`, passing
+- S-006-5: `test_s006_5_repos_in_several_accounts_plan_a_public_app_under_the_most`, passing; the real dry run planned `shipmill-agent under shipmill, public`, the tie going to this checkout's owner
+- S-006-6: `test_s006_6_no_gated_repo_plans_private_under_the_checkouts_owner_or_asks`, passing
+- S-006-7: `test_s006_7_flags_override_the_plan_and_a_private_app_warns_about_other_accounts`, passing
+- S-006-8: `test_s006_8_a_dry_run_prints_the_plan_and_creates_nothing`, passing; the real dry run made no POST and wrote no key
+- S-006-9: `test_s006_9_the_manifest_holds_exactly_the_gates_permissions_and_no_webhook`, passing; the manifest's permissions come from `PERMISSIONS` in `src/shipmill/app.py`
+- S-006-10: `test_s006_10_the_server_is_local_and_a_forged_callback_is_refused`, passing; it loads the real page, reads the state from the form, and gets 400 for a forged callback
+- S-006-11: `test_s006_11_the_key_is_saved_0600_in_0700_and_the_secrets_never_appear`, passing
+- S-006-12: `test_s006_12_no_callback_means_no_app`, passing
+- S-006-13: `test_s006_13_installations_are_reported_as_they_appear`, `test_s006_13_polling_stops_when_the_time_runs_out`, and `test_s006_13_the_command_exits_1_naming_a_repo_left_uninstalled`, passing
+- S-006-14: `test_s006_14_a_real_run_prints_the_app_id_line_and_edits_no_config`, passing; it checks the checkout's files are unchanged after a run
+- S-006-15: `test_s006_15_json_on_a_dry_run_is_the_plan_alone`, and the full object after a run in `test_s006_14_a_real_run_prints_the_app_id_line_and_edits_no_config`, passing
+- S-006-16: `test_s006_16_the_docs_document_app_create`, passing; read install.md and the setup skill, the manual steps kept after the command
