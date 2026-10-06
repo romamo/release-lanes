@@ -17,6 +17,12 @@ bot.
   (`claude agents --json` or `gh pr list` failing, or git refusing a removal) exits 2 and
   starts no session; the gate's own checkout is never a candidate (#124)
 - Spec 004's build issues: #141 to #144 (#136)
+- `[agents] app_id` names the GitHub App gated sessions will write as, and `shipmill gate
+  --app-key <path>` its private key (default `~/.config/shipmill/app-<app_id>.pem`). On a
+  launch with `app_id` set, the gate checks the key's mode, signs the App's JWT with
+  `openssl`, and checks the App is installed on the repo with every permission spec 004
+  lists, exiting 2 naming what failed. Launching as the App isn't in this version yet, so
+  with `app_id` set a launch still exits 2 and starts nothing (D-14) (#141)
 
 ## [0.17.0] - 2026-10-06
 
