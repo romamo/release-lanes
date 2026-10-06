@@ -12,6 +12,8 @@ A workflow for turning a GitHub issue into a verified verdict and, if warranted,
 - Issue reference: URL (`https://github.com/<owner>/<repo>/issues/<n>`) or number plus repo
 - Scope from the user's wording: triage only, triage + fix + PR, or also merge (Phase 7 hands merging to `github-pr-triage`)
 
+**Headless:** when AskUserQuestion is unavailable or the prompt carries the gate's headless paragraph, nobody can answer. A product decision, a departure from a spec or a `D-n`, or a tool call that was denied becomes github-issue-triage's [needs-decision protocol](../github-issue-triage/references/needs-decision.md): a marked comment on the issue or PR mentioning the user, the `needs-decision` label, and the item left alone. Taking up an answered item, remove the label before acting on the reply.
+
 ## Phase 1: Read the issue
 
 ```bash

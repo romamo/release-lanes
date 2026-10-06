@@ -86,6 +86,7 @@ ACTION = frozenset(
         "PROMOTION_DUE",
         "INCIDENT_OPEN",
         "POSTMORTEM_DUE",
+        "NEEDS_DECISION",
     }
 )
 REPO_ERROR = "REPO_ERROR"

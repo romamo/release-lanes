@@ -4,6 +4,7 @@ recent releases, the environments shipmill operate runs, and the issue intake.
 
 Usage: watch_state.py <owner/repo> [--repo-dir PATH] [--releases N] [--grace MIN]
                       [--tool SPEC] [--incident-label LABEL] [--json]
+                      [--bot-login LOGIN] [--trusted-only]
 
 Release bot (a repo with .github/shipmill.toml):
   BOT_FAILED      the bot's latest finished run failed (cancelled runs are ignored:
@@ -54,18 +55,31 @@ deployments and issues shipmill operate writes):
 
 Intake (github-issue-triage's triage_state.py):
   ISSUES          issues needing triage action, counted by state
-  PRS_OPEN        open non-draft pull requests (reported, never an action by itself)
+  PRS_OPEN        open non-draft pull requests (reported, never an action by itself),
+                  less the ones NEEDS_DECISION and UNTRUSTED list
+  NEEDS_DECISION  issues and pull requests labelled needs-decision whose question has no
+                  reply, as #N only (triage_state.py's rule, applied to pull requests'
+                  comments too): a person owes the answer, so an action, but never an
+                  agent's
+  UNTRUSTED       with --trusted-only, the issues triage_state.py reads as UNTRUSTED and
+                  the pull requests whose head is in a fork, as #N only (reported, never an
+                  action: an interactive session takes them up, D-16)
+
+--bot-login and --trusted-only go through to triage_state.py: the login shipmill's
+sessions write as (whose comment is the question, and whose issue is trusted), and the
+trust filter of an unattended gate.
 
 --incident-label names the label the repo's incidents carry, in place of the config's
 [operate] incident_label (fleet.py passes a fleet file's incident_label this way).
 
 --json prints one JSON object per row: state, subject, detail, and agent, true when the
 row needs an agent (BOT_FAILED, BOT_STALLED, NOT_PUBLISHED, UNANNOUNCED, ISSUES,
-OPERATE_FAILED, INCIDENT_OPEN): the rows shipmill gate starts a session for.
+OPERATE_FAILED, INCIDENT_OPEN): the rows shipmill gate starts a session for. A waiting
+item is in no agent row, so it neither starts a session nor changes the gate's fingerprint.
 
 Holds and incidents lead the report. Exit 0 when nothing needs action, 1 when any
 BOT_FAILED, BOT_STALLED, NOT_PUBLISHED, UNANNOUNCED, ISSUES, OPERATE_FAILED, UNHEALTHY,
-PROMOTION_DUE, INCIDENT_OPEN, or POSTMORTEM_DUE row is present, 2 on bad input or a git,
+PROMOTION_DUE, INCIDENT_OPEN, POSTMORTEM_DUE, or NEEDS_DECISION row is present, 2 on bad input or a git,
 gh, or uvx failure (a failing `shipmill plan` or `shipmill worktrees`).
 Needs git, an authenticated gh, and uvx (for a shipmill bot's plan and worktrees; `shipmill
 worktrees` needs claude on PATH too, to see the live sessions). Python 3.10+,
@@ -76,6 +90,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import importlib.util
 import json
 import os
 import re
@@ -86,6 +101,8 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 try:
     import tomllib
@@ -107,6 +124,20 @@ TRIAGE_ACTION = {
     "SUSPECT_CLOSE",
 }
 POLICY = Path(".github/shipmill.toml")
+
+
+def triage_module() -> ModuleType:
+    """triage_state.py itself, for its needs-decision rule: one rule for issues and pull requests"""
+    spec = importlib.util.spec_from_file_location("shipmill_triage_state", TRIAGE_STATE)
+    if spec is None or spec.loader is None:
+        sys.stderr.write(f"error: can't load {TRIAGE_STATE}\n")
+        raise SystemExit(2)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+TRIAGE = triage_module()
 VERSION_TAG = re.compile(r"^v\d+\.\d+")  # skips moving major tags such as v0
 ACTION = {
     "BOT_FAILED",
@@ -119,6 +150,7 @@ ACTION = {
     "PROMOTION_DUE",
     "INCIDENT_OPEN",
     "POSTMORTEM_DUE",
+    "NEEDS_DECISION",
 }
 # the states whose row needs an agent: --json marks each row's "agent" from this, and
 # shipmill gate starts a session on those rows (SKILL.md's repair table says what it does)
@@ -876,26 +908,71 @@ def operations_rows(
 # -- intake --------------------------------------------------------------------------------
 
 
-def intake_rows(repo: str) -> list[Row]:
-    proc = subprocess.run(
-        [sys.executable, str(TRIAGE_STATE), repo, "--json"], capture_output=True, text=True, check=False
-    )
+Comments = list[tuple[str, str, str]]  # (login, author association, body), oldest first
+
+
+def pr_comments(repo: str, number: int) -> Comments:
+    """A pull request's conversation comments, every page, through the REST API (a Bot's
+    login carries "[bot]" there, as --bot-login does)"""
+    jq = '.[] | [(.user.login // "ghost"), .author_association, (.body // "")]'
+    out = run(["gh", "api", "--paginate", f"repos/{repo}/issues/{number}/comments", "--jq", jq])
+    return [(str(c[0]), str(c[1]), str(c[2])) for c in map(json.loads, out.splitlines())]
+
+
+def intake(
+    repo: str,
+    code: int,
+    triage: str,
+    prs: list[dict[str, Any]],
+    comments_of: Callable[[int], Comments],
+    bot_login: str | None = None,
+    trusted_only: bool = False,
+) -> list[Row]:
+    """The intake rows from triage_state.py's exit code and --json lines, and the open pull
+    requests (number, isDraft, isCrossRepository, labels). Each pull request is UNTRUSTED
+    (with trusted_only, a head in a fork), else waiting on a decision (labelled, no reply;
+    its comments are read only then), else in PRS_OPEN unless a draft"""
+    counts: dict[str, list[int]] = {}
+    for line in triage.splitlines():
+        row = json.loads(line)
+        counts.setdefault(row["state"], []).append(int(row["number"]))
+    rows = []
+    if code == 1:
+        detail = "; ".join(
+            f"{s} {' '.join(f'#{n}' for n in numbers)}" for s, numbers in sorted(counts.items()) if s in TRIAGE_ACTION
+        )
+        rows.append(Row("ISSUES", repo, detail))
+    waiting, untrusted = list(counts.get("NEEDS_DECISION", [])), list(counts.get("UNTRUSTED", []))
+    ready = []
+    for pr in prs:
+        number = int(pr["number"])
+        labels = {label["name"] for label in pr["labels"]}
+        if trusted_only and pr["isCrossRepository"]:
+            untrusted.append(number)
+        elif TRIAGE.DECISION_LABEL in labels and TRIAGE.waits_on_decision(comments_of(number), bot_login):
+            waiting.append(number)
+        elif not pr["isDraft"]:
+            ready.append(f"#{number}")
+    if ready:
+        rows.append(Row("PRS_OPEN", repo, " ".join(ready)))
+    if waiting:
+        rows.append(Row("NEEDS_DECISION", repo, " ".join(f"#{n}" for n in sorted(set(waiting)))))
+    if untrusted:
+        rows.append(Row("UNTRUSTED", repo, " ".join(f"#{n}" for n in sorted(set(untrusted)))))
+    return rows
+
+
+def intake_rows(repo: str, bot_login: str | None = None, trusted_only: bool = False) -> list[Row]:
+    cmd = [sys.executable, str(TRIAGE_STATE), repo, "--json"]
+    cmd += ["--bot-login", bot_login] if bot_login is not None else []
+    cmd += ["--trusted-only"] if trusted_only else []
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode not in (0, 1):
         sys.stderr.write(f"error: triage_state.py: {proc.stderr.strip()}\n")
         raise SystemExit(2)
-    counts: dict[str, list[str]] = {}
-    for line in proc.stdout.splitlines():
-        row = json.loads(line)
-        counts.setdefault(row["state"], []).append(f"#{row['number']}")
-    rows = []
-    if proc.returncode == 1:
-        detail = "; ".join(f"{s} {' '.join(n)}" for s, n in sorted(counts.items()) if s in TRIAGE_ACTION)
-        rows.append(Row("ISSUES", repo, detail))
-    prs = json.loads(run(["gh", "pr", "list", "-R", repo, "--json", "number,isDraft", "-L", "100"]))
-    ready = [f"#{p['number']}" for p in prs if not p["isDraft"]]
-    if ready:
-        rows.append(Row("PRS_OPEN", repo, " ".join(ready)))
-    return rows
+    fields = "number,isDraft,isCrossRepository,labels"
+    prs = json.loads(run(["gh", "pr", "list", "-R", repo, "--json", fields, "-L", "100"]))
+    return intake(repo, proc.returncode, proc.stdout, prs, lambda n: pr_comments(repo, n), bot_login, trusted_only)
 
 
 def arguments() -> argparse.ArgumentParser:
@@ -907,6 +984,10 @@ def arguments() -> argparse.ArgumentParser:
     parser.add_argument("--tool", default="git+https://github.com/shipmill/shipmill@v0", help="where uvx gets shipmill")
     parser.add_argument("--incident-label", help="the label incidents carry (default: the config's)")
     parser.add_argument("--json", action="store_true", help="JSON lines instead of a table")
+    parser.add_argument("--bot-login", help="the login shipmill's sessions write as, such as <slug>[bot]")
+    parser.add_argument(
+        "--trusted-only", action="store_true", help="leave untrusted issues and fork pull requests to UNTRUSTED (D-16)"
+    )
     return parser
 
 
@@ -915,6 +996,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.incident_label is not None and not args.incident_label.strip():
         parser.error("--incident-label must not be empty")
+    if args.bot_login is not None and not args.bot_login.strip():
+        parser.error("--bot-login must not be empty")
     if "/" not in args.repo:
         parser.error("repo must be owner/name")
     if not 1 <= args.releases <= 20:
@@ -963,7 +1046,7 @@ def main() -> int:
         if read.environments:
             rows += operations_rows(args.repo, repo_dir, read.environments, bool(holds), read.incident_label, now)
 
-    rows += intake_rows(args.repo)
+    rows += intake_rows(args.repo, args.bot_login, args.trusted_only)
     for row in ordered(rows):
         print(json.dumps(row.json(), sort_keys=True) if args.json else row.text())
     return 1 if any(r.state in ACTION for r in rows) else 0

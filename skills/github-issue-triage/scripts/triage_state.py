@@ -4,6 +4,7 @@
 Usage: triage_state.py <owner/repo> [--marker "Triage:"] [--postponed-label postponed]
                        [--stable-tag-regex REGEX] [--hold-label release-blocker]
                        [--incident-label incident] [--closed N] [--json] [--wip N]
+                       [--bot-login LOGIN] [--trusted-only]
 
 For each open issue:
   NEW              no comment starts with the triage marker
@@ -37,6 +38,17 @@ For each open issue:
   REVISIT          postponed before the newest stable tag: decide again. Stable means
                    the tag matches --stable-tag-regex (default: vX.Y.Z, no pre-release)
   TRIAGED          triaged, nothing pending (clarify, waiting on the reporter, ...)
+  NEEDS_DECISION   labelled needs-decision and its question has no reply: a headless
+                   session asked the user and left it (references/needs-decision.md).
+                   The question is the newest comment whose first line is the marker
+                   <!-- shipmill:needs-decision -->, or with --bot-login the newest
+                   comment by that login; a reply is a newer comment by an OWNER, MEMBER,
+                   or COLLABORATOR (other than the --bot-login). A labelled issue with no
+                   question waits too, until the label comes off. Once answered, the issue
+                   reads the state it would without the label
+  UNTRUSTED        with --trusted-only, an issue whose author is neither an OWNER,
+                   MEMBER, or COLLABORATOR nor the --bot-login, whatever it would read
+                   otherwise: an unattended session leaves it to an interactive one (D-16)
 
 For the N most recently closed issues (default 20):
   SUSPECT_CLOSE    closed by a commit whose message names "#N" after a closing
@@ -53,8 +65,11 @@ With --wip N (a work-in-progress limit, such as [roadmap] wip once the config ha
 last line says how many issues are IN_PROGRESS, the room left under N, and the issues
 ready to start (NEEDS_PR or UNBLOCKED), oldest first; with --json, as one JSON object.
 
+--bot-login names the login shipmill's sessions write as (an App's <slug>[bot]).
+
 Exit 0 when nothing needs action, 1 when any issue is NEW, NEEDS_PR, UNBLOCKED, UNFILLED,
-SPEC_REFUSED, REVISIT, DONE_NOT_CLOSED, or SUSPECT_CLOSE, 2 on bad input (an issue with more than 100
+SPEC_REFUSED, REVISIT, DONE_NOT_CLOSED, or SUSPECT_CLOSE (never for NEEDS_DECISION or
+UNTRUSTED), 2 on bad input (an issue with more than 100
 labels) or a gh failure. It pages past 100 open issues and an issue's 50 comments or 50
 cross-references, and back through tags to the newest stable one, with one query when
 nothing is capped. A page GitHub rejects for its resource limits is asked again at half
@@ -90,13 +105,20 @@ CLOSED_REFS = """
             }
           }
 """
+# Who wrote it: GraphQL gives a Bot's login without the "[bot]" that REST and --bot-login carry
+AUTHOR = "author { __typename login } authorAssociation"
+COMMENT = "body createdAt " + AUTHOR
 TAG_NODES = "nodes { name target { ... on Tag { tagger { date } } ... on Commit { committedDate } } }"
 OPEN_ISSUE = (
     """
       nodes {
-        number title body
+        number title body """
+    + AUTHOR
+    + """
         labels(first: 100) { pageInfo { hasNextPage } nodes { name } }
-        comments(last: 50) { nodes { body createdAt } }
+        comments(last: 50) { nodes { """
+    + COMMENT
+    + """ } }
         timelineItems(itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT], first: 50) {
           pageInfo { hasNextPage endCursor }"""
     + OPEN_TIMELINE
@@ -164,15 +186,19 @@ query($owner: String!, $name: String!, $size: Int!, $cursor: String!) {
 }
 """
 )
-COMMENTS_PAGE = """
+COMMENTS_PAGE = (
+    """
 query($owner: String!, $name: String!, $size: Int!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
-      comments(last: $size, before: $cursor) { pageInfo { hasPreviousPage startCursor } nodes { body createdAt } }
+      comments(last: $size, before: $cursor) { pageInfo { hasPreviousPage startCursor } nodes { """
+    + COMMENT
+    + """ } }
     }
   }
 }
 """
+)
 TIMELINE_PAGE = (
     """
 query($owner: String!, $name: String!, $size: Int!, $number: Int!, $cursor: String!) {
@@ -248,6 +274,11 @@ def resource_limited(response: dict[str, Any]) -> bool:
 
 
 INCIDENT_LABEL = "incident"  # the default of [operate] incident_label
+DECISION_LABEL = "needs-decision"  # references/needs-decision.md
+DECISION_MARKER = "<!-- shipmill:needs-decision -->"  # the first line of a session's question
+# The author associations whose comment answers a question, and whose issue an unattended
+# session works on (D-16); CONTRIBUTOR, FIRST_TIMER, NONE, and the rest never count
+TRUSTED = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 ACTION = {"NEW", "NEEDS_PR", "UNBLOCKED", "UNFILLED", "SPEC_REFUSED", "REVISIT", "DONE_NOT_CLOSED", "SUSPECT_CLOSE"}
 HOLD = re.compile(r"\b(?:on hold|blocked|waits? on|waiting on|pending|depends on)\b", re.IGNORECASE)
 UPSTREAM = re.compile(r"(?:https://github\.com/)?(?P<owner>[\w.-]+)/(?P<name>[\w.-]+)(?:#|/issues/|/pull/)(?P<num>\d+)")
@@ -599,6 +630,64 @@ def classify_open(
     return "TRIAGED", note
 
 
+def login(author: dict[str, Any] | None) -> str:
+    """An author's login as REST and --bot-login spell it: a Bot's with "[bot]", a deleted
+    account's as ghost"""
+    if not author:
+        return "ghost"
+    name = str(author.get("login") or "ghost")
+    if author.get("__typename") == "Bot" and not name.endswith("[bot]"):
+        name += "[bot]"
+    return name
+
+
+def same_login(a: str, b: str) -> bool:
+    return a.lower() == b.lower()  # GitHub logins ignore case
+
+
+def asks(comment: tuple[str, str, str], bot_login: str | None) -> bool:
+    """A session's question: the bot's comment with --bot-login, else one whose first line
+    is the marker"""
+    author, _, body = comment
+    if bot_login is not None:
+        return same_login(author, bot_login)
+    return body.lstrip().split("\n", 1)[0].strip() == DECISION_MARKER
+
+
+def waits_on_decision(comments: list[tuple[str, str, str]], bot_login: str | None) -> bool:
+    """Whether a needs-decision item still waits; comments are (login, author association,
+    body), oldest first. It waits until a trusted author (OWNER, MEMBER, COLLABORATOR)
+    comments after the newest question; with no question at all, a person parked it, so it
+    waits too. A comment after the newest question is no question itself, so neither the
+    bot's own comment nor one carrying the marker is ever a reply"""
+    questions = [i for i, c in enumerate(comments) if asks(c, bot_login)]
+    if not questions:
+        return True
+    return not any(association in TRUSTED for _, association, _ in comments[questions[-1] + 1 :])
+
+
+def trusted(author: str, association: str, bot_login: str | None) -> bool:
+    """D-16: an OWNER, MEMBER, or COLLABORATOR, or the sessions' own bot"""
+    return association in TRUSTED or (bot_login is not None and same_login(author, bot_login))
+
+
+def gated(issue: dict[str, Any], bot_login: str | None, trusted_only: bool) -> tuple[str, str] | None:
+    """UNTRUSTED (with trusted_only), then NEEDS_DECISION, each read before any other state;
+    None when neither holds, and the issue reads as classify_open says"""
+    author, association = login(issue.get("author")), str(issue.get("authorAssociation") or "NONE")
+    if trusted_only and not trusted(author, association, bot_login):
+        return "UNTRUSTED", f"opened by @{author} ({association.lower()})"
+    if DECISION_LABEL in {n["name"] for n in issue["labels"]["nodes"]}:
+        comments = [
+            (login(c.get("author")), str(c.get("authorAssociation") or "NONE"), c["body"])
+            for c in issue["comments"]["nodes"]
+        ]
+        if waits_on_decision(comments, bot_login):
+            asked = any(asks(c, bot_login) for c in comments)
+            return "NEEDS_DECISION", "waits on a reply" if asked else "labelled, no question"
+    return None
+
+
 def classify_closed(issue: dict[str, Any], hold: str, incident: str = INCIDENT_LABEL) -> tuple[str, str] | None:
     labels = {n["name"] for n in issue["labels"]["nodes"]}
     if hold in labels:
@@ -651,11 +740,17 @@ def main() -> int:
     parser.add_argument("--closed", type=int, default=20, help="recently closed issues to check")
     parser.add_argument("--json", action="store_true", help="JSON lines instead of a table")
     parser.add_argument("--wip", type=int, help="at most N issues in progress at once: report the room left")
+    parser.add_argument("--bot-login", help="the login shipmill's sessions write as, such as <slug>[bot]")
+    parser.add_argument(
+        "--trusted-only", action="store_true", help="report issues by untrusted authors as UNTRUSTED (D-16)"
+    )
     args = parser.parse_args()
     if not 0 <= args.closed <= 100:
         parser.error("--closed must be 0..100")
     if args.wip is not None and args.wip < 1:
         parser.error("--wip must be at least 1")
+    if args.bot_login is not None and not args.bot_login.strip():
+        parser.error("--bot-login must not be empty")
     try:
         stable_pattern = re.compile(args.stable_tag_regex)
     except re.error as exc:
@@ -669,7 +764,9 @@ def main() -> int:
     states = upstream_states(refs)
     stable = latest_stable(data["tags"]["nodes"], stable_pattern)
     for issue in data["open"]["nodes"]:
-        state, note = classify_open(issue, args.marker, args.postponed_label, states, stable, (owner, name))
+        state, note = gated(issue, args.bot_login, args.trusted_only) or classify_open(
+            issue, args.marker, args.postponed_label, states, stable, (owner, name)
+        )
         rows.append({"number": issue["number"], "state": state, "title": issue["title"], "note": note})
     for issue in data["closed"]["nodes"][: args.closed]:
         verdict = classify_closed(issue, args.hold_label, args.incident_label)
@@ -689,6 +786,8 @@ def main() -> int:
         "BLOCKED",
         "TRIAGED",
         "POSTPONED",
+        "NEEDS_DECISION",
+        "UNTRUSTED",
     ]
     rows.sort(key=lambda r: (order.index(r["state"]), -r["number"]))
     for r in rows:
