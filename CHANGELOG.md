@@ -33,6 +33,15 @@ bot.
   the worktrees a session leaves behind once it exits are the gate's prune's to remove.
   Spec 002 is built (#125)
 
+### Changed
+
+- `[agents] max_wait_hours` is now `max_wait_minutes` (0..10080) and defaults to 15, so
+  `shipmill gate` stops a session that has waited on you for 15 minutes unless the config
+  says otherwise (D-15, superseding D-13); 0 still never stops one. A config that still
+  sets `max_wait_hours` is refused naming the key. Waits read in minutes under an hour
+  (`stopped <id> after 15m waiting`), and `--json` reports `waited_minutes` in place of
+  `waited_hours`
+
 ## [0.17.0] - 2026-10-06
 
 ### Added

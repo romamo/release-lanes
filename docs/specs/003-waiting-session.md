@@ -41,18 +41,23 @@ Three new keys in the `[agents]` section of `.github/shipmill.toml` (D-4), parse
 [agents]
 notify = true        # a desktop notification when a session waits on you
 remind_hours = 4     # repeat it while the session still waits
-max_wait_hours = 0   # stop a session that waited this long; 0: never
+max_wait_minutes = 15 # stop a session that waited this long; 0: never
 ```
 
 | Key | Type | Default | Allowed |
 |---|---|---|---|
 | `notify` | boolean | `true` | `true`, `false` |
 | `remind_hours` | integer | `4` | 1..168 |
-| `max_wait_hours` | integer | `0` | 0..168 |
+| `max_wait_minutes` | integer | `15` | 0..10080 |
 
 A value of the wrong type or outside its range, and any key outside `prompt`, `prs`,
 `retry_hours`, and these three, is refused: the gate exits 2 naming the key, as today.
-`remind_hours` larger than `max_wait_hours` is allowed (the stop comes first).
+`remind_hours` larger than `max_wait_minutes` is allowed (the stop comes first).
+
+The stop key counted whole hours and defaulted to 0 (never) until D-15, which made it
+`max_wait_minutes` with a default of 15: one unanswered question had held a repo for 10
+hours. Since `since` is the first tick that saw the session blocked, a 15-minute gate tick
+stops it 15 to 30 minutes after it blocked.
 
 ### The wait record
 
@@ -80,7 +85,7 @@ runs as today. On a tick where some are blocked, it reads `[agents]` from the ch
 it stands (a busy tick still never moves the checkout), loads the record, and for each
 blocked session, with `waited = now - since`:
 
-1. **Stop**, when `max_wait_hours > 0` and `waited >= max_wait_hours`: `claude stop <id>`
+1. **Stop**, when `max_wait_minutes > 0` and `waited >= max_wait_minutes`: `claude stop <id>`
    through the existing `Claude.stop`, drop its entry, print the stop line, and send the
    stopped notification when `notify` is true. A failing `claude stop` exits 2 like any
    other gate error, starts no session, and keeps the entry, so the next tick tries again
@@ -113,22 +118,23 @@ The title and body are passed as arguments, never put into the AppleScript sourc
 `osascript` ships with macOS; `terminal-notifier` would be an extra dependency, so it isn't
 used, and since `osascript` offers no action button, the body carries the command:
 
-- Waiting: title `shipmill <owner/repo>`, body `session <id> waits on you (<N>h): claude attach <id>`
-- Stopped: title `shipmill <owner/repo>`, body `stopped session <id> after <N>h waiting: claude attach <id> shows its question`
+- Waiting: title `shipmill <owner/repo>`, body `session <id> waits on you (<wait>): claude attach <id>`
+- Stopped: title `shipmill <owner/repo>`, body `stopped session <id> after <wait> waiting: claude attach <id> shows its question`
 
-`<N>` is the whole hours waited, rounded down. A send fails when the command is missing,
+`<wait>` is the whole minutes waited as `<N>m` under an hour, and the whole hours as
+`<N>h` from then on, rounded down. A send fails when the command is missing,
 exits non-zero, or runs longer than 30 seconds.
 
 ### Output
 
 Text output adds one line per blocked session under the decision line:
 
-- `  notified <id> (waiting <N>h)`
+- `  notified <id> (waiting <wait>)`
 - `  notify failed for <id>: <error>`
-- `  stopped <id> after <N>h waiting: <name>`
-- `  <id> waiting <N>h` when it did neither
+- `  stopped <id> after <wait> waiting: <name>`
+- `  <id> waiting <wait>` when it did neither
 
-`--json` adds `"waiting": [{"session", "name", "since", "waited_hours", "notified",
+`--json` adds `"waiting": [{"session", "name", "since", "waited_minutes", "notified",
 "stopped", "error"}]`, one object per blocked session (`notified` and `stopped` booleans,
 `error` the failed send's message or null); an empty list when none is blocked.
 
@@ -140,8 +146,8 @@ have happened.
 
 - `skills/shipmill-setup/SKILL.md`, The gate: the three keys in the config block, and in
   Hand over that a waiting session sends a notification every `remind_hours` and that
-  `max_wait_hours` stops it
-- `docs/design/agent-modes.md`: step 3 (WAITING notifies, and stops at `max_wait_hours`
+  `max_wait_minutes` stops it
+- `docs/design/agent-modes.md`: step 3 (WAITING notifies, and stops at `max_wait_minutes`
   even while held), State (`waiting.json`), and What Claude Code provides (a blocked
   session shows no question, no time it blocked, and no issue)
 - `docs/install.md`: the three keys in its `[agents]` block
@@ -151,8 +157,8 @@ have happened.
 
 ## Acceptance criteria
 
-- S-003-1: `AgentsConfig` reads `notify` as true, `remind_hours` as 4, and `max_wait_hours` as 0 when the `[agents]` section omits them, and the values given when present
-- S-003-2: the config is refused with exit 2 naming the key when `notify` isn't a boolean, `remind_hours` isn't an integer in 1..168, `max_wait_hours` isn't an integer in 0..168, or `[agents]` holds a key outside `prompt`, `prs`, `retry_hours`, `notify`, `remind_hours`, and `max_wait_hours`
+- S-003-1: `AgentsConfig` reads `notify` as true, `remind_hours` as 4, and `max_wait_minutes` as 15 when the `[agents]` section omits them, and the values given when present
+- S-003-2: the config is refused with exit 2 naming the key when `notify` isn't a boolean, `remind_hours` isn't an integer in 1..168, `max_wait_minutes` isn't an integer in 0..10080, or `[agents]` holds a key outside `prompt`, `prs`, `retry_hours`, `notify`, `remind_hours`, and `max_wait_minutes`
 - S-003-3: on a tick where no gate session of the repo is blocked, `gate()` reads no config, runs no notifier, stops no session, and leaves no entry in `waiting.json`; its decision is the one it makes today
 - S-003-4: the first tick that sees a session blocked, with `notify = true`, records it in `waiting.json` with `since` set to that tick, sends one notification titled `shipmill <owner/repo>` whose body names the session id and `claude attach <id>`, and still returns WAITING with exit 0
 - S-003-5: a later tick while the same session stays blocked sends no notification until `remind_hours` have passed since the last one sent, then sends one and updates `notified`
@@ -160,13 +166,14 @@ have happened.
 - S-003-7: with `notify = false`, no notifier command runs on any tick, and the wait is still recorded
 - S-003-8: on macOS the notifier runs `osascript` with the title and body as arguments after an `on run argv` script, on another platform with `notify-send` on `PATH` it runs `notify-send <title> <body>`, and with neither it runs no command and the send fails with `no notifier (osascript or notify-send)`
 - S-003-9: an entry in `waiting.json` whose session is no longer blocked is dropped on the next tick, so a session that blocks again gets a new `since` and a new first notification; a malformed `waiting.json` exits 2 naming its path
-- S-003-10: with `max_wait_hours > 0`, the first tick on which a session has been blocked for at least `max_wait_hours` since its recorded `since` runs `claude stop <id>`, drops its entry, prints `stopped <id> after <N>h waiting: <name>`, sends the stopped notification when `notify` is true, writes nothing to GitHub, and decides the rest of the tick without that session (launching under the usual rules, UNCHANGED included)
-- S-003-11: with `max_wait_hours = 0`, the gate never stops a waiting session, however long it waits
-- S-003-12: while an open `shipmill-hold` issue makes the tick HELD, the gate still notifies for a blocked session and still stops one that reached `max_wait_hours`, and the HELD reason no longer names a session it stopped
+- S-003-10: with `max_wait_minutes > 0`, the first tick on which a session has been blocked for at least `max_wait_minutes` since its recorded `since` runs `claude stop <id>`, drops its entry, prints `stopped <id> after <wait> waiting: <name>`, sends the stopped notification when `notify` is true, writes nothing to GitHub, and decides the rest of the tick without that session (launching under the usual rules, UNCHANGED included)
+- S-003-11: with `max_wait_minutes = 0`, the gate never stops a waiting session, however long it waits
+- S-003-12: while an open `shipmill-hold` issue makes the tick HELD, the gate still notifies for a blocked session and still stops one that reached `max_wait_minutes`, and the HELD reason no longer names a session it stopped
 - S-003-13: when `claude stop` fails, `shipmill gate` exits 2, launches no session, and keeps the session's entry in `waiting.json`
 - S-003-14: `shipmill gate --dry-run` runs no notifier, stops no session, writes no `waiting.json`, and prints `would notify <id>` or `would stop <id>` where a real tick would act
-- S-003-15: `shipmill gate --json` lists each blocked session under `waiting` with its session id, name, `since`, whole hours waited, whether it was notified, whether it was stopped, and the failed send's error or null, and an empty `waiting` list when none is blocked
-- S-003-16: `skills/shipmill-setup/SKILL.md`'s gate section, `docs/design/agent-modes.md`, and `docs/install.md` document `notify`, `remind_hours`, and `max_wait_hours`, and agent-modes.md documents `waiting.json` and that a blocked session shows no question, no time it blocked, and no issue
+- S-003-15: `shipmill gate --json` lists each blocked session under `waiting` with its session id, name, `since`, whole minutes waited, whether it was notified, whether it was stopped, and the failed send's error or null, and an empty `waiting` list when none is blocked
+- S-003-16: `skills/shipmill-setup/SKILL.md`'s gate section, `docs/design/agent-modes.md`, and `docs/install.md` document `notify`, `remind_hours`, and `max_wait_minutes`, and agent-modes.md documents `waiting.json` and that a blocked session shows no question, no time it blocked, and no issue
+- S-003-17: with `[agents]` omitting `max_wait_minutes`, a session blocked for 14 minutes since its `since` is left waiting and reads `<id> waiting 14m`, and the first tick at 15 minutes stops it, printing `stopped <id> after 15m waiting: <name>` and sending the stopped notification
 
 ## Out of scope
 
@@ -180,7 +187,7 @@ have happened.
 ## Decisions relied on
 
 - D-4
-- D-13
+- D-15
 
 ## Issues
 
@@ -206,3 +213,4 @@ have happened.
 - S-003-14: ran a dry tick at 6h, `would stop b1 after 6h waiting: <name>`, no stop, no send, `waiting.json` byte for byte unchanged; `test_s003_14` shows `would notify b`
 - S-003-15: read the `--json` `waiting` list from `tick_record` on blocked, stopped, and quiet ticks, every object has session, name, since, waited_hours, notified, stopped, error; an empty list with none blocked
 - S-003-16: opened the shipmill-setup gate section, `docs/design/agent-modes.md`, and `docs/install.md`, each `[agents]` block parses with the three keys; agent-modes documents `waiting.json` and that a blocked session shows no question, no time it blocked, and no issue (`test_s003_16`)
+- S-003-17: ran `gate()` with fakes and the default config at 0, 14, and 15 minutes (`test_s003_17`), WAITING with no stop and `b waiting 14m` before 15, then `claude stop b`, `stopped b after 15m waiting: <name>`, and the stopped notification. Criteria 1, 2, 10 to 12, 15, and 16 changed from hours to minutes with D-15; their tests were rerun against the new key

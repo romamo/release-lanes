@@ -202,7 +202,7 @@ the details.
    retry_hours = 24   # unchanged findings start a new session after this
    notify = true      # a desktop notification when a session waits on you
    remind_hours = 4   # repeat it while the session still waits
-   max_wait_hours = 0 # stop a session that waited this long; 0: never
+   max_wait_minutes = 15 # stop a session that waited this long; 0: never
    ```
 
 2. **Give it its own checkout.** A session branches and commits where it starts, so never
@@ -237,7 +237,7 @@ the details.
 
 | To | Do |
 |---|---|
-| Pause releases and the gate | open an issue labelled `shipmill-hold`; a hotfix started by hand still runs (D-8, D-13) |
+| Pause releases and the gate | open an issue labelled `shipmill-hold`; a hotfix started by hand still runs (D-8, D-15) |
 | Stop releases | set `mode = "off"` in `.github/shipmill.toml` |
 | Stop the gate | `$CR --repo tmp/shipmill-gate launchd <owner/repo> --remove` |
 | Remove the skills | `/plugin uninstall shipmill@shipmill` |

@@ -88,7 +88,7 @@ class Launch:
 
 
 class Action(enum.Enum):
-    HELD = "HELD"  # an open shipmill-hold issue stops every launch (D-13)
+    HELD = "HELD"  # an open shipmill-hold issue stops every launch (D-15)
     QUIET = "QUIET"  # nothing needs an agent
     RUNNING = "RUNNING"  # a session is still working
     WAITING = "WAITING"  # a session waits on the user
@@ -110,7 +110,7 @@ def fingerprint(work: Iterable[Finding]) -> str:
 
 
 def held(hold: Hold, sessions: Sequence[Session]) -> Decision | None:
-    """D-13: a hold starts nothing. A session already running finishes; the reason names it
+    """D-15: a hold starts nothing. A session already running finishes; the reason names it
     so a person can stop it. A session the waiting step stopped is no longer passed in"""
     if not hold.on:
         return None
@@ -296,7 +296,7 @@ class Waiting:
     session: str
     name: str
     since: dt.datetime
-    waited_hours: int
+    waited_minutes: int
     notified: bool
     stopped: bool
     error: str | None
@@ -304,24 +304,29 @@ class Waiting:
     def line(self, dry_run: bool) -> str:
         if self.stopped:
             verb = "would stop" if dry_run else "stopped"
-            return f"{verb} {self.session} after {self.waited_hours}h waiting: {self.name}"
+            return f"{verb} {self.session} after {span(self.waited_minutes)} waiting: {self.name}"
         if self.error is not None:
             return f"notify failed for {self.session}: {self.error}"
         if self.notified:
             verb = "would notify" if dry_run else "notified"
-            return f"{verb} {self.session} (waiting {self.waited_hours}h)"
-        return f"{self.session} waiting {self.waited_hours}h"
+            return f"{verb} {self.session} (waiting {span(self.waited_minutes)})"
+        return f"{self.session} waiting {span(self.waited_minutes)}"
 
     def record(self) -> dict[str, object]:
         return {
             "session": self.session,
             "name": self.name,
             "since": self.since.isoformat(),
-            "waited_hours": self.waited_hours,
+            "waited_minutes": self.waited_minutes,
             "notified": self.notified,
             "stopped": self.stopped,
             "error": self.error,
         }
+
+
+def span(minutes: int) -> str:
+    """A wait as people read it: whole minutes under an hour, whole hours from then on"""
+    return f"{minutes}m" if minutes < 60 else f"{minutes // 60}h"
 
 
 def _moment(value: object, what: str) -> dt.datetime:
@@ -378,7 +383,7 @@ def attend(
     stop: Callable[[str], None],
 ) -> tuple[Waiting, ...]:
     """Spec 003's waiting step: record each blocked session's wait and notify for it, at
-    once and then every remind_hours, and stop one that waited max_wait_hours (> 0). With
+    once and then every remind_hours, and stop one that waited max_wait_minutes (> 0). With
     none blocked it only drops the record and reads nothing. A failed send is reported,
     never raised, and is tried again next tick; a failed stop raises after saving the
     record with that session's entry kept, so the next tick tries again"""
@@ -389,16 +394,16 @@ def attend(
         return ()
     agents = config()  # the checkout as it stands: a busy tick never moves it
     remind = dt.timedelta(hours=agents.remind_hours)
-    limit = dt.timedelta(hours=agents.max_wait_hours)
+    limit = dt.timedelta(minutes=agents.max_wait_minutes)
     known = load_waiting(path)
     waits: dict[str, Wait] = {}  # only the blocked sessions: any other entry is dropped
     report = []
     for index, s in enumerate(blocked):
         wait = known.get(s.id) or Wait(now, None)
-        hours = max(0, int((now - wait.since).total_seconds() // 3600))
-        expired = agents.max_wait_hours > 0 and now - wait.since >= limit
+        minutes = max(0, int((now - wait.since).total_seconds() // 60))
+        expired = agents.max_wait_minutes > 0 and now - wait.since >= limit
         if expired:
-            body = f"stopped session {s.id} after {hours}h waiting: claude attach {s.id} shows its question"
+            body = f"stopped session {s.id} after {span(minutes)} waiting: claude attach {s.id} shows its question"
             if not dry_run:
                 try:
                     stop(s.id)
@@ -407,7 +412,7 @@ def attend(
                     save_waiting(path, waits | rest)
                     raise
         else:
-            body = f"session {s.id} waits on you ({hours}h): claude attach {s.id}"
+            body = f"session {s.id} waits on you ({span(minutes)}): claude attach {s.id}"
         due = agents.notify and (expired or wait.notified is None or now - wait.notified >= remind)
         error = None
         if due and not dry_run:
@@ -419,7 +424,7 @@ def attend(
                 wait = Wait(wait.since, now)
         if not expired:  # a stopped session's entry is dropped
             waits[s.id] = wait
-        report.append(Waiting(s.id, s.name, wait.since, hours, due and error is None, expired, error))
+        report.append(Waiting(s.id, s.name, wait.since, minutes, due and error is None, expired, error))
     if not dry_run:
         save_waiting(path, waits)
     return tuple(report)
@@ -495,7 +500,7 @@ def gate(
     """Decide, and on LAUNCH stop the finished sessions and start a new one. Returns the
     decision, the launched session's id, what the waiting step did for each blocked
     session, and the worktrees the prune removed (on a dry run, the ones it would remove).
-    The waiting step runs first, then the prune, both held or not (D-13: a prune starts no
+    The waiting step runs first, then the prune, both held or not (D-15: a prune starts no
     session), and the rest of the tick is decided without the sessions the waiting step
     stopped. A prune error raises, so that tick starts no session. A hold, then a busy
     session, ends the run before the checkout moves or the state is read; of the two, only

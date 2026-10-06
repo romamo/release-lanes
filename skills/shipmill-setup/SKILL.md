@@ -309,11 +309,12 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
    retry_hours = 24   # unchanged findings start a new session after this
    notify = true      # a desktop notification when a session waits on you
    remind_hours = 4   # repeat it while the session still waits
-   max_wait_hours = 0 # stop a session that waited this long; 0: never
+   max_wait_minutes = 15 # stop a session that waited this long; 0: never
    ```
 
-   Ask whether a session that waits on a question too long may be stopped so the repo
-   moves again; if so, set `max_wait_hours` (1..168)
+   A session that waits on a question holds the repo, so by default the gate stops it
+   after 15 minutes. Ask whether the user answers questions sooner or later than that; set
+   `max_wait_minutes` (0..10080) to match, or 0 to never stop one
 3. **A dedicated checkout.** The session branches and commits where it starts, so never
    use the user's working copy: `git worktree add --detach tmp/shipmill-gate
    origin/<default>` inside the trusted checkout (a worktree outside it would need its
@@ -329,10 +330,10 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
 6. **Hand over.** Tell the user how to see a session (`claude agents`, `claude attach
    <id>`), that a session waiting on a question holds the repo until they answer, that
    such a session sends a desktop notification at once and every `remind_hours` while it
-   waits (`osascript` on macOS, `notify-send` elsewhere), that `max_wait_hours` (when not
-   0) stops it with `claude stop` so the repo moves again (`claude attach <id>` still
+   waits (`osascript` on macOS, `notify-send` elsewhere), that `max_wait_minutes` (15 by
+   default; 0 never stops) stops it with `claude stop` so the repo moves again (`claude attach <id>` still
    shows its question), that an open `shipmill-hold` issue stops every launch as well as
-   every release but not that stop (D-13), and how to remove the job (`launchd
+   every release but not that stop (D-15), and how to remove the job (`launchd
    <owner/repo> --remove`)
 
 ## Migrating from hand-made or scripted releases
