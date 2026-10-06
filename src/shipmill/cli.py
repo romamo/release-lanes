@@ -30,6 +30,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from shipmill.agents import AgentsConfig
+from shipmill.app import Openssl, UrllibApi, app_check
 from shipmill.autonomy import Hold
 from shipmill.config import CONFIG_PATH, config_path
 from shipmill.doctor import CALLER, OPERATE_CALLER, doctor
@@ -185,6 +186,11 @@ def _parser() -> argparse.ArgumentParser:
         help="decide and print; start, stop, move, or prune nothing (lists the worktrees it would prune)",
     )
     p.add_argument("--json", action="store_true", help="print the decision, with the pruned worktrees, as JSON")
+    p.add_argument(
+        "--app-key",
+        type=Path,
+        help="the private key of the App in [agents] app_id (default: ~/.config/shipmill/app-<app_id>.pem)",
+    )
 
     p = sub.add_parser(
         "worktrees", help="list every worktree of the repository as REMOVABLE once its work landed, or KEPT and why"
@@ -347,6 +353,8 @@ def _gate(root: Path, args: argparse.Namespace, github: GitHub, sessions: Sessio
         pruner(git, github, sessions),
         args.refresh,
         args.dry_run,
+        app_check(args.slug, args.app_key, Path.home(), Openssl(), UrllibApi()),
+        args.app_key is not None,
     )
     if args.json:
         print(json.dumps(tick_record(decision, launched, waiting, pruned, args.dry_run), indent=2))

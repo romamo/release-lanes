@@ -22,10 +22,12 @@ import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import NoReturn, Protocol
 
 from shipmill.agents import AgentsConfig
+from shipmill.app import AppCheck
 from shipmill.autonomy import Hold
+from shipmill.config import CONFIG_PATH
 from shipmill.errors import ReleaseError
 from shipmill.github import GitHub
 from shipmill.gitrepo import Git
@@ -462,6 +464,19 @@ def pruner(git: Git, github: GitHub, sessions: Sessions) -> Pruner:
     return run
 
 
+def as_app(app_id: int, repo: str, now: dt.datetime, app: AppCheck | None) -> NoReturn:
+    """D-14: with app_id set a session starts as the App or not at all. This shipmill checks
+    the App's key, installation, and permissions, but can't yet start a session as the App,
+    so even when every check passes it refuses rather than launch as the host's gh login"""
+    if app is None:
+        raise ReleaseError(f"app_id {app_id} is set, but no App check was given; no session starts")
+    found = app(app_id, now)
+    raise ReleaseError(
+        f"app_id {app_id} is set and {found.slug} is installed on {repo} with every permission, but this "
+        "shipmill can't launch a session as an App yet; unset app_id to launch as the host's gh login"
+    )
+
+
 def gate(
     git: Git,
     repo: str,
@@ -474,6 +489,8 @@ def gate(
     worktrees: Pruner,
     refresh_checkout: bool = False,
     dry_run: bool = False,
+    app: AppCheck | None = None,
+    app_key_named: bool = False,
 ) -> tuple[Decision, str | None, tuple[Waiting, ...], tuple[Judged, ...]]:
     """Decide, and on LAUNCH stop the finished sessions and start a new one. Returns the
     decision, the launched session's id, what the waiting step did for each blocked
@@ -482,7 +499,10 @@ def gate(
     session), and the rest of the tick is decided without the sessions the waiting step
     stopped. A prune error raises, so that tick starts no session. A hold, then a busy
     session, ends the run before the checkout moves or the state is read; of the two, only
-    a blocked session reads the config"""
+    a blocked session reads the config. On LAUNCH with [agents] app_id set, app checks the
+    App's key and installation before any session is stopped or started, dry run or not
+    (D-14). app_key_named (`--app-key`) without app_id is refused where the config is read,
+    after the refresh, so a checkout the app_id change hasn't reached yet still moves"""
     check_checkout(git, repo)
     record = state_dir(git) / RECORD
     sessions = claude.sessions(git.root, repo)
@@ -499,9 +519,15 @@ def gate(
     if refresh_checkout and not dry_run:
         refresh(git)
     agents = config()
+    if app_key_named and agents.app_id is None:  # read after the refresh, so a stale checkout can't stall it
+        raise ReleaseError(f"--app-key names an App's key, but [agents] in {CONFIG_PATH} sets no app_id")
     retry = dt.timedelta(hours=agents.retry_hours)
     decision = decide(findings(), sessions, load_launch(record), now, retry, agents.prs)
-    if decision.action is not Action.LAUNCH or dry_run:
+    if decision.action is not Action.LAUNCH:
+        return decision, None, waiting, pruned
+    if agents.app_id is not None:
+        as_app(agents.app_id, repo, now, app)
+    if dry_run:
         return decision, None, waiting, pruned
     for session in decision.stop:
         claude.stop(session)

@@ -21,10 +21,11 @@ class AgentsConfig:
     notify: bool = True  # a desktop notification when a session waits on you
     remind_hours: int = _REMIND_HOURS  # repeat it while the session still waits
     max_wait_hours: int = 0  # stop a session that waited this long; 0: never
+    app_id: int | None = None  # sessions write as this GitHub App (spec 004, D-14); None: the host's gh login
 
     @classmethod
     def parse(cls, table: Table) -> AgentsConfig:
-        table.allow("prompt", "prs", "retry_hours", "notify", "remind_hours", "max_wait_hours")
+        table.allow("prompt", "prs", "retry_hours", "notify", "remind_hours", "max_wait_hours", "app_id")
         prompt = table.string("prompt").strip()
         if not prompt:
             raise ReleaseError(f"{table.where}: prompt must not be empty")
@@ -39,6 +40,7 @@ class AgentsConfig:
             notify=table.boolean("notify", default=True),
             remind_hours=remind,
             max_wait_hours=max_wait,
+            app_id=table.integer("app_id", default=None, low=1, high=None),
         )
 
     @classmethod
