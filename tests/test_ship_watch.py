@@ -937,3 +937,20 @@ def test_without_claude_the_plugin_is_not_read(ws: ModuleType) -> None:
 def test_a_malformed_plugin_list_or_release_is_refused(ws: ModuleType, installed: object, latest: str) -> None:
     with pytest.raises(ws.Refused):
         ws.plugin_rows(installed, MARKETPLACE, latest, FOLDERS)
+
+
+def test_a_linked_worktree_is_its_main_checkouts_project(ws: ModuleType) -> None:
+    # #198: the gate's checkout is a linked worktree; Claude Code loads the main checkout's
+    # install there, so a 0.14.0 entry keyed on the worktree itself was a false SHIPMILL_OUTDATED
+    gate = Path("/work/r/tmp/shipmill-gate")
+    assert ws.main_checkout(gate, "/work/r/.git\n") == Path("/work/r")
+    assert ws.main_checkout(Path("/work/r"), "/work/r/.git\n") == Path("/work/r")
+    assert ws.main_checkout(Path("/srv/bare"), "/srv/bare\n") == Path("/srv/bare")  # a bare repo is its own
+    folders = [Path("/work/r"), ws.main_checkout(gate, "/work/r/.git")]
+    installed = registry(install("local", "0.24.0", "/work/r"), install("local", "0.14.0", str(gate)))
+    assert states(ws.plugin_rows(installed, MARKETPLACE, "v0.24.0", folders)) == ["SHIPMILL_VERSION"]
+
+
+def test_a_folder_outside_git_is_its_own_project(ws: ModuleType, tmp_path: Path) -> None:
+    assert ws.project_folder(tmp_path / "missing") == tmp_path / "missing"
+    assert ws.project_folder(tmp_path) == tmp_path

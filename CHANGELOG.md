@@ -7,6 +7,12 @@ bot.
 
 ## [Unreleased]
 
+### Fixed
+
+- github-ship-watch's SHIPMILL_OUTDATED no longer reports a plugin install keyed on a linked
+  git worktree, such as the gate's checkout: Claude Code loads the main checkout's install
+  there, so the leftover entry was never used and its update command couldn't clear it (#198)
+
 ### Added
 
 - github-ship-watch compares the host's `shipmill@shipmill` plugin (`claude plugin list`)

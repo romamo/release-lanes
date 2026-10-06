@@ -102,7 +102,8 @@ Agents (all reported, never an action by itself):
 shipmill on this host (from `claude plugin list --json` and `claude plugin marketplace list --json`):
   SHIPMILL_VERSION   the latest shipmill release, the shipmill@shipmill plugin's installs
                   that apply to the repo (user scope, and local or project scope in the
-                  checkout or the gate's launchd working directory), and the marketplace's
+                  checkout or the gate's launchd working directory, each taken as the project
+                  Claude Code loads it as: a linked worktree's main checkout), and the marketplace's
                   source when it isn't shipmill/shipmill (reported, never an action)
   SHIPMILL_OUTDATED  an install of those older than the latest release, with the command
                   that updates it: an action for a person, never an agent's
@@ -1287,14 +1288,36 @@ def claude_json(claude: str, *args: str) -> object:
         raise Refused(f"error: claude {' '.join(args)} --json printed no JSON: {exc}") from None
 
 
+def main_checkout(folder: Path, common_dir: str) -> Path:
+    """The project Claude Code keys a folder's local and project installs on: a linked git
+    worktree's main checkout, given `git rev-parse --git-common-dir` (#198); the folder itself
+    otherwise"""
+    common = Path(common_dir.strip())
+    return common.parent if common.name == ".git" else folder
+
+
+def project_folder(folder: Path) -> Path:
+    """main_checkout() of a folder on disk; a missing folder, or one outside git, is its own"""
+    if not folder.is_dir():
+        return folder
+    cmd = ["git", "-C", str(folder), "rev-parse", "--path-format=absolute", "--git-common-dir"]
+    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    if proc.returncode != 0 and "not a git repository" in proc.stderr:
+        return folder
+    if proc.returncode != 0:
+        sys.stderr.write(f"error: git rev-parse in {folder}: {proc.stderr.strip()}\n")
+        raise SystemExit(2)
+    return main_checkout(folder, proc.stdout)
+
+
 def shipmill_rows(repo: str, repo_dir: Path) -> list[Row]:
     """The host's shipmill plugin against shipmill's latest release"""
     latest = run(["gh", "release", "view", "-R", SHIPMILL_REPO, "--json", "tagName", "-q", ".tagName"]).strip()
-    folders = [repo_dir]
+    folders = [project_folder(repo_dir)]
     plist = gate_plist(repo)
     workdir = plist.get("WorkingDirectory") if plist else None
     if isinstance(workdir, str):
-        folders.append(Path(workdir))
+        folders.append(project_folder(Path(workdir)))
     claude = shutil.which("claude")
     if claude is None:
         return plugin_rows(None, None, latest, folders)
