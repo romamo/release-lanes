@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-06
+
 ### Changed
 
 - github-issue-triage asks a design question on the issue too, as a **Decision needed**
@@ -704,7 +706,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/shipmill/shipmill/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/shipmill/shipmill/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/shipmill/shipmill/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/shipmill/shipmill/compare/v0.17.0...v0.18.0
