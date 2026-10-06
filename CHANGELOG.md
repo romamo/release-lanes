@@ -11,6 +11,14 @@ bot.
 
 - Spec 006 for `shipmill app-create`, which makes the gate's GitHub App in one click and
   picks its owner and visibility from where the gated repos are
+- `shipmill app-create` makes the gate's GitHub App in one click: it finds the accounts your
+  `gh` login administers and the repos in them holding `.github/shipmill.toml`, plans a
+  private App when they are all in one account and a public one when they span several
+  (`--owner`, `--public`, `--private`, `--name`, `--repos` change it; `--dry-run` prints the
+  plan), opens GitHub's create page with the permissions filled in, saves the key to
+  `~/.config/shipmill/app-<app_id>.pem` with mode `0600`, waits for the installations, and
+  prints the `app_id` line to commit; exit 1 names a repo still missing the App. The setup
+  skill and `docs/install.md` use it first, the manual steps as the fallback (#155)
 
 ## [0.18.0] - 2026-10-06
 

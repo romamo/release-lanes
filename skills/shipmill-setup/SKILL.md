@@ -319,8 +319,22 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
 3. **Its own identity (optional).** Without `app_id`, a session writes as the host's `gh`
    login: its pull requests, comments, merges, and commits read as the user's own, and
    the user can't approve its pull requests. To have them made by a GitHub App's bot
-   instead (D-14), the user creates the App once in GitHub's settings (Developer settings,
-   GitHub Apps, New GitHub App); shipmill doesn't create it:
+   instead (D-14), create the App with `$CR app-create` (spec 006):
+   - **Plan it:** `$CR app-create --dry-run` finds the accounts the user's `gh` login
+     administers and the repos in them holding `.github/shipmill.toml`, and prints the
+     plan: a **private** App under that account when the gated repos are all in one, a
+     **public** one under the account with the most when they span several (a private App
+     installs only on its owner; a public one on any account, but only the key's holder
+     can mint its tokens). Show the user the plan and ask; `--owner`, `--public`,
+     `--private`, and `--name` change it. It needs the `read:org` scope
+   - **Create it:** run it without `--dry-run`. It opens GitHub's create page with the
+     manifest filled in; the user clicks **Create GitHub App**, then picks the repos on the
+     install page it opens next. It saves the key to `~/.config/shipmill/app-<app_id>.pem`
+     (mode `0600`), prints `installed on <owner/repo>` as each appears, and ends with the
+     `app_id = <id>` line to commit; exit 1 names a repo still missing the App
+   - **Set `app_id`** in `[agents]` through a PR, in each gated repo
+
+   By hand instead, in GitHub's settings (Developer settings, GitHub Apps, New GitHub App):
    - **No webhook:** clear Webhook's Active box; the App needs no callback URL either
    - **These repository permissions, and no others:**
 

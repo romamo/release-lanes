@@ -245,8 +245,34 @@ commits are made by the App's bot, `<slug>[bot]`, not by you: you can approve it
 requests, and github-ship-watch's metrics count its merges as a bot's. The token it uses
 reaches this one repo only, never everything your login can.
 
+The quick way is one command:
+
+```bash
+shipmill app-create --dry-run   # print the plan; create nothing
+shipmill app-create             # create it: one click on GitHub, then pick the repos
+```
+
+It finds the accounts your `gh` login administers (it needs the `read:org` scope: `gh auth
+refresh -s read:org`) and the repos in them holding `.github/shipmill.toml`, then plans:
+
+| Your gated repos | The App |
+|---|---|
+| all in one account | private, owned by that account |
+| in several accounts | public, owned by the account with the most of them |
+| none yet | private, owned by the checkout's owner |
+
+A private App can be installed only on the account that owns it; a public one on any
+account, but only you hold its key, so nobody else can use it. `--owner`, `--public`,
+`--private`, `--name`, and `--repos` change the plan. The command opens GitHub's create
+page with the permissions below filled in and the webhook off; you click **Create GitHub
+App**, then pick the repos on the install page it opens. It saves the key to
+`~/.config/shipmill/app-<app_id>.pem` with mode `0600`, waits for the installations, and
+prints the `app_id = <id>` line for step 4. Then go on at step 4.
+
+By hand instead:
+
 1. **Create the App** once, in GitHub's settings (Developer settings, GitHub Apps, New
-   GitHub App); shipmill doesn't create it. Clear Webhook's Active box: it needs no
+   GitHub App). Clear Webhook's Active box: it needs no
    webhook. Give it these repository permissions and no others:
 
    | Permission | Access | Why |

@@ -18,17 +18,22 @@
                   --prune removes the REMOVABLE ones and their local branches
   app-token       print a GitHub App installation token limited to one repo, cached while it has
                   10 minutes left; --git-credential answers as git's credential helper
+  app-create      create the gate's GitHub App in one click: owner and visibility planned from the
+                  repos holding .github/shipmill.toml, the key saved with mode 0600
 
-Exit codes: 0 done (a plan may skip); 1 doctor found a failure; 2 bad input or a refused state.
+Exit codes: 0 done (a plan may skip); 1 doctor found a failure, or app-create left a repo without
+the App; 2 bad input or a refused state.
 """
 
 import argparse
 import datetime as dt
 import json
 import os
+import re
 import shutil
 import sys
-from collections.abc import Mapping
+import webbrowser
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TextIO
 
@@ -47,6 +52,21 @@ from shipmill.app import (
     credential,
     default_key,
     prepare_session,
+)
+from shipmill.app_create import (
+    DEFAULT_NAME,
+    FLOW_SECONDS,
+    accounts,
+    check_key_dir,
+    config_lines,
+    convert,
+    create,
+    gated_repos,
+    given_repos,
+    host_token,
+    install_url,
+    plan,
+    wait_installed,
 )
 from shipmill.autonomy import Hold
 from shipmill.config import CONFIG_PATH, config_path
@@ -248,6 +268,21 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
 
+    p = sub.add_parser("app-create", help="create the gate's GitHub App in one click (spec 006)")
+    p.add_argument("--owner", help="the org or personal account that owns the App (default: planned)")
+    visibility = p.add_mutually_exclusive_group()
+    visibility.add_argument(
+        "--public", dest="public", action="store_const", const=True, help="installable on any account"
+    )
+    visibility.add_argument(
+        "--private", dest="public", action="store_const", const=False, help="installable on the owner only"
+    )
+    p.add_argument("--name", default=DEFAULT_NAME, help=f"the App's name, unique on GitHub (default: {DEFAULT_NAME})")
+    p.add_argument("--repos", help="the gated repos as owner/name,...; skips looking for them")
+    p.add_argument("--dry-run", action="store_true", help="print the plan; create nothing")
+    p.add_argument("--json", action="store_true", help="print the plan and the result as one JSON object")
+    p.add_argument("--no-browser", action="store_true", help="print the URLs instead of opening them")
+
     p = sub.add_parser("launchd", help="run the gate for a dedicated checkout every few minutes (macOS)")
     p.add_argument("slug", metavar="owner/name", help="the GitHub repo; --repo is its gate checkout")
     p.add_argument("--every", type=int, default=15, help="minutes between runs (default: 15)")
@@ -284,6 +319,8 @@ def main(
     root: Path = args.repo.resolve()
     if args.command == "app-token":
         return _app_token(root, args, api or UrllibApi(), signer or Openssl(), stdin or sys.stdin)
+    if args.command == "app-create":
+        return _app_create(root, args, api or UrllibApi(), signer or Openssl())
     hub = github or GhCli(root)
     if args.command == "init" and args.operate:
         print(f"wrote {init_operate(root, args.force).relative_to(root)}")
@@ -443,6 +480,66 @@ def _app_token(root: Path, args: argparse.Namespace, api: Api, signer: Signer, s
         return 0
     sys.stdout.write(credential(args.git_credential, stdin.read(), token))
     return 0
+
+
+def _origin_owner(root: Path) -> str | None:
+    """The owner of the checkout's GitHub origin, or None outside a GitHub checkout"""
+    if not (root / ".git").exists():
+        return None
+    url = Git(root).run("remote", "get-url", "origin").strip()
+    found = re.search(r"github\.com[:/]([^/]+)/", url)
+    return found.group(1) if found else None
+
+
+def _app_create(
+    root: Path,
+    args: argparse.Namespace,
+    api: Api,
+    signer: Signer,
+    token: str | None = None,
+    browser: Callable[[str], None] | None = None,
+    key_dir: Path | None = None,
+    install_seconds: float = FLOW_SECONDS,
+) -> int:
+    """Spec 006: discover, plan, create, install. Exit 1 when an installation is still missing"""
+    host = token if token is not None else host_token()
+    keys = key_dir if key_dir is not None else Path.home() / ".config" / "shipmill"
+    say = (lambda line: print(line, file=sys.stderr)) if args.json else print
+    found = accounts(api, host)
+    repos = given_repos(args.repos.split(","), found) if args.repos else gated_repos(api, host, found)
+    planned = plan(found, repos, _origin_owner(root), args.owner, args.public, args.name)
+    record: dict[str, object] = planned.record()
+    for line in planned.lines():
+        say(line)
+    if args.dry_run:
+        if args.json:
+            print(json.dumps(record, indent=2))
+        return 0
+    check_key_dir(keys)
+
+    def open_url(url: str) -> None:
+        say(f"open {url}")
+        if browser is not None:
+            browser(url)
+        elif not args.no_browser:
+            webbrowser.open(url)
+
+    created = convert(create(planned, open_url), api, host, keys)
+    say(f"created {created.slug} (App ID {created.app_id}), key in {created.key}")
+    targets = planned.installable
+    if targets:
+        say(f"install it on: {', '.join(targets)}")
+        open_url(install_url(created.slug))
+    installed = wait_installed(created, targets, api, signer, say, seconds=install_seconds)
+    for line in config_lines(created):
+        say(line)
+    missing = [r for r in targets if r not in installed]
+    for repo in missing:
+        say(f"not installed on {repo}; install it at {install_url(created.slug)}")
+    record |= {"app_id": created.app_id, "slug": created.slug, "key": str(created.key), "installed": list(installed)}
+    if args.json:
+        print(json.dumps(record, indent=2))
+    return 1 if missing else 0
 
 
 def _launchd(root: Path, args: argparse.Namespace) -> int:
