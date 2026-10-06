@@ -19,6 +19,7 @@ A headless session can't ask the user: nobody answers AskUserQuestion or a permi
    The marker is the comment's first line, with or without an App: it is how `triage_state.py` and `watch_state.py` tell the question from the reply when the session posts as the maintainer. `<login>` is the person the gate's prompt names (the host's `gh` login). Put the recommendation first, and say in each option what it means for users and what it costs, in words a user of the tool knows. Name `D-n` entries and `S-NNN-k` criteria when the question is a departure from one
 2. Add the `needs-decision` label to the item: `gh issue edit <n> --add-label needs-decision` (or `gh pr edit`)
 3. Leave the item: don't build, push, merge, or comment on it further in this session. Go on with the other items, and report this one under the decisions you left
+
 ## A denied tool call is a decision
 
 A headless session runs with an allowlist of tools and can't prompt for more, so Claude Code denies a call outside it. Don't retry it in another form or route around it. Treat the denial as a decision for the user: post the comment above on the item you were working on, naming the tool and the command you tried, with the options (widen the gate's allowlist with `--claude-arg --allowedTools --claude-arg "<tool>"`, or do that step by hand), add the label, and leave the item. The allowlist grows from these comments, in review, instead of from guesses.
