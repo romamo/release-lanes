@@ -30,45 +30,44 @@ checked as spec 004 checks it.
 
 ### What it reads
 
-With the App's JWT: `GET /app` for the slug, `GET /app/installations` for each installation's
-id, account login, account type, and `repository_selection`, and `GET
-/repos/<owner>/<repo>/installation` for whether a repo is covered (200 yes, 404 no, anything
-else exits 2 naming the repo). Anonymously, `GET /users/<account>` for an account's id.
+With the App's JWT: `GET /app` for the slug and owner, `GET /app/installations` for each
+installation's account and `repository_selection`, and `GET /repos/<owner>/<repo>/installation`
+for whether a repo is covered (200 yes, 404 no, anything else exits 2 naming the repo).
 
 ### What it guides
 
-Each named repo is covered already, or its account needs one of two pages. Repos are grouped
-by account, so each account gets one page that lists every repo to pick there:
+shipmill never installs the App or adds a repo for the maintainer: they may have many
+accounts and repos, and which ones get the App is theirs to choose. For the repos the App
+doesn't cover, it opens one page, the App's **Install App** page, which lists every account
+with an **Install** or **Configure** button:
 
-| The account | Page | What to do there |
-|---|---|---|
-| has no installation of the App | `https://github.com/apps/<slug>/installations/new/permissions?target_id=<account id>`: GitHub's install page with the account already chosen | choose **Only select repositories**, pick the listed repos, click **Install** |
-| has one with selected repositories | the installation's settings: `https://github.com/organizations/<org>/settings/installations/<id>` for an org, `https://github.com/settings/installations/<id>` for the login | under **Repository access**, add the listed repos, click **Save** |
+- `https://github.com/settings/apps/<slug>/installations` for an App the login owns
+- `https://github.com/organizations/<org>/settings/apps/<slug>/installations` for an org's
 
-A repo whose account's installation covers all repositories is already covered and reads so.
-
-The output, per account, before opening its page:
+and says, per account of a missing repo, what to do there:
 
 ```
-cli-agent-spec: shipmill-romamo isn't installed there yet (GitHub needs your click)
-  open https://github.com/apps/shipmill-romamo/installations/new/permissions?target_id=274805548
-  choose Only select repositories, pick: cli-agent-spec/cli-agent-spec; click Install
+shipmill-romamo doesn't cover cli-agent-spec/cli-agent-spec yet; GitHub needs your click. Open https://github.com/settings/apps/shipmill-romamo/installations
+  cli-agent-spec: click Install, choose Only select repositories, pick cli-agent-spec/cli-agent-spec
 ```
 
-It opens each page in the browser (`webbrowser.open`; `--no-browser` only prints), then
+An account with no installation reads `click Install, choose Only select repositories, pick
+<repos>`; one with an installation on selected repositories reads `click Configure, add
+<repos> under Repository access, Save`. A repo already covered prints `already installed on
+<owner/repo>`, and with every repo covered nothing opens.
+
+It opens the page in the browser (`webbrowser.open`; `--no-browser` only prints), then
 checks every 5 seconds, for up to 10 minutes, each repo not yet covered, printing `installed
 on <owner/repo>` as each appears. It exits 0 when every repo is covered, and 1 naming the
-repos still missing when the time runs out. A repo covered from the start prints `already
-installed on <owner/repo>` and opens nothing. Every line is flushed as printed (S-006-19).
+repos still missing when the time runs out. Every line is flushed as printed (S-006-19).
 
-`--json` prints one object: `app_id`, `slug`, and `repos`, a list of `{repo, account, action,
-url, installed}`, where `action` is `none`, `install`, or `add` and `url` is the page or null.
+`--json` prints one object: `app_id`, `slug`, `page`, and `repos`, a list of `{repo,
+account, action, installed}`, where `action` is `none`, `install`, or `add`.
 
 ### app-create
 
 `shipmill app-create`'s install step (spec 006, Install) uses the same guide for the repos it
-planned, so its output names each account's page and what to pick, instead of one generic
-install link.
+planned, so it opens the App's Install App page and says per account what to pick.
 
 ### Docs
 
@@ -82,17 +81,17 @@ install link.
 - S-007-1: with no repo named, the command takes the checkout's `origin` repo, and exits 2 saying to name one outside a GitHub checkout
 - S-007-2: `--app-id` defaults to `[agents] app_id`; with neither the command exits 2 saying to pass `--app-id`; the key is checked as spec 004 checks it
 - S-007-3: a repo `GET /repos/<repo>/installation` answers 200 for prints `already installed on <repo>` and opens no page; any status but 200 or 404 exits 2 naming the repo
-- S-007-4: for an account with no installation, the command prints that GitHub needs a click, the install URL with `target_id` set to the account's id, and the repos to pick, and opens that URL once for all the account's repos
-- S-007-5: for an account whose installation has selected repositories, the command prints and opens the installation's settings page (the org or the user form of the URL) and the repos to add
+- S-007-4: with repos not covered, the command prints that GitHub needs a click and the App's Install App page (the user or the org form, by the App's owner), and opens that page once; it installs and adds nothing itself
+- S-007-5: per account of a missing repo it prints `click Install, choose Only select repositories, pick <repos>` when the account has no installation, and `click Configure, add <repos> under Repository access, Save` when it has one
 - S-007-6: after guiding, the command checks every 5 seconds for up to 10 minutes, prints `installed on <repo>` as each appears, exits 0 when all are covered, and exits 1 naming each repo still missing
-- S-007-7: `--no-browser` opens nothing and prints the same URLs; every line is flushed as printed
-- S-007-8: `--json` prints one object with `app_id`, `slug`, and each repo's `repo`, `account`, `action`, `url`, and `installed`
-- S-007-9: `shipmill app-create`'s install step guides each planned account the same way
+- S-007-7: `--no-browser` opens nothing and prints the same page; every line is flushed as printed
+- S-007-8: `--json` prints one object with `app_id`, `slug`, `page`, and each repo's `repo`, `account`, `action`, and `installed`
+- S-007-9: `shipmill app-create`'s install step guides the planned repos the same way
 - S-007-10: `docs/install.md` and `skills/shipmill-setup/SKILL.md` document `shipmill app-install` and that adding a repo takes a click on GitHub
 
 ## Out of scope
 
-- Installing or adding repos without a click: GitHub's API refuses the `gh` login's token for it; a personal access token or the App's user tokens could, as a later spec, at the cost of handling one more secret
+- Installing or adding repos for the maintainer: which accounts and repos get the App is theirs to choose, and GitHub's API refuses the `gh` login's token for it anyway
 - Removing a repo from an installation, or uninstalling
 - Setting `app_id` in the repo's config: a reviewed commit (D-4), as in spec 006
 
