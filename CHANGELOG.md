@@ -23,6 +23,15 @@ bot.
   `openssl`, and checks the App is installed on the repo with every permission spec 004
   lists, exiting 2 naming what failed. Launching as the App isn't in this version yet, so
   with `app_id` set a launch still exits 2 and starts nothing (D-14) (#141)
+- github-ship-watch's `watch_state.py` reports a `WORKTREE_STALE` row, report-only
+  (`agent: false`, never an action), for each worktree under `.claude/worktrees/` or
+  `tmp/wt-*` that `shipmill worktrees` keeps and that is over 7 days old, naming its path
+  and why it is kept. It runs `shipmill --repo <repo-dir> worktrees --json` for a shipmill
+  bot, so the watch needs `claude` on `PATH` there, and a failing command exits 2 as a
+  failing plan does. shipmill-setup's gate section documents the prune and `shipmill
+  worktrees`, and github-issue-resolve, github-pr-triage, and github-issue-triage say that
+  the worktrees a session leaves behind once it exits are the gate's prune's to remove.
+  Spec 002 is built (#125)
 
 ## [0.17.0] - 2026-10-06
 

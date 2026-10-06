@@ -119,6 +119,8 @@ git branch -D fix/<short-slug>
 
 Run these from the user's checkout without changing its branch. If the commits haven't landed, keep both and name the commits in the report.
 
+A worktree this session leaves behind once it exits (it ended before the merge, or nobody asked for one) is the gate's prune's to remove (D-12): `shipmill gate` runs `shipmill worktrees --prune` on each tick, which removes a `tmp/wt-*` or `.claude/worktrees/` worktree and its branch only once its commits landed, it is clean and a day old, and no open PR or live session holds it. `shipmill worktrees` says why it keeps the rest.
+
 ## Report to the user
 
 - Verdict and root cause in one or two sentences

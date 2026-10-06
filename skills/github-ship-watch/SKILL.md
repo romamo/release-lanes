@@ -43,6 +43,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | PUBLISHED | Once per release, check that a clean install runs (github-pr-triage's [landing.md](../github-pr-triage/references/landing.md#ecosystems)); retry once on index lag |
 | UNANNOUNCED | Post the notices: `../github-pr-triage/scripts/shipped.py <repo> <prev> <tag> --install '<install command>' --post`. Show the plan first if this repo has never had notices |
 | ISSUES | Under "watch and triage", run github-issue-triage on the flagged issues. Otherwise list them |
+| WORKTREE_STALE | A shipmill worktree (under `.claude/worktrees/` or `tmp/wt-*`) that `shipmill worktrees` keeps, created over 7 days ago: the subject is its path, the detail why it is kept. The gate's prune removes only what landed, so this is work a person finishes (commit, push, open the PR), or removes by hand once it is unwanted (`git worktree remove <path>`). Report only, never remove it from the watch. Not an action (exit 0 by itself) |
 | PRS_OPEN, BOT_OK, BOT_NONE, NO_REGISTRY | Report only |
 
 `--json` prints one JSON object per row: `state`, `subject`, `detail`, and `agent`, which says whether the row needs an agent. `shipmill gate` starts a session only on `agent: true` rows (plus PRS_OPEN with `[agents] prs = true`), and refuses a row without the field. The script's `AGENT` set decides it, next to this table; change both together:
@@ -55,9 +56,12 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | `false` | PROMOTION_DUE | Only a person approves; an agent would wake every retry window for nothing |
 | `false` | UNHEALTHY | Operate owns it and rolls back after `rollback_after` failures; past that, the incident it opens reads INCIDENT_OPEN |
 | `false` | HOLD | Report only; the gate checks `shipmill-hold` itself before anything else (D-13) |
+| `false` | WORKTREE_STALE | Only a person knows whether kept work is wanted; the gate's prune already removes what landed |
 | `false` | PRS_OPEN, POSTMORTEM_DUE, and every other state | Report only, or a repair the watch pass makes itself |
 
 Pass `--grace` to give a slow publish more minutes before it reads NOT_PUBLISHED, and `--tool` when the shipmill bot isn't installed from `shipmill/shipmill@v0`.
+
+WORKTREE_STALE shows only for a shipmill bot: the script runs `uvx --from <tool> shipmill --repo <repo-dir> worktrees --json` after the plan and never reports the main checkout, the `--repo-dir` checkout, or a worktree outside `.claude/worktrees/` and `tmp/wt-*`. That command reads `claude agents --json` for the live sessions, so the watch needs `claude` on `PATH` for such a repo, and a failing `shipmill worktrees` stops the watch with exit 2, as a failing plan does.
 
 HOLD and POSTMORTEM_DUE show for every repo with a shipmill config, since a hold stops releases too and an incident may be labelled by hand. POSTMORTEM_DUE reads the postmortems through the GitHub contents API on the default branch, so a draft counts only once merged. The operations states show only when the config declares environments (read with `tomllib`; on Python 3.10 only plain `[environments.<name>]` tables, and any other form stops the watch with a one-line message); they come from the GitHub deployments and issues `shipmill operate` writes. The incident label is `[operate] incident_label`, `incident` by default; `--incident-label` takes its place (the fleet report passes a fleet entry's label this way).
 

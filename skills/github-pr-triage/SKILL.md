@@ -102,6 +102,8 @@ Keep a list of the worktree paths you create in this session. That list, not the
 
 Before removing one, check that its HEAD commit and branch still match what you left. A peer may have reused the path, which `git worktree list` and the path's file times (`stat`, anything changed since you last used it) show. Then run `scripts/landed.py --onto origin/<default> <sha>...` for its commits. Remove it only on exit 0. Keep a reviewer's or implementer's worktree while its PR is open, even after the fixes are pushed: a rebase or a second review round goes back to that agent through SendMessage, which needs the worktree. Otherwise keep it, and name the commits that haven't landed in the report.
 
+The worktrees a session leaves behind once it exits are the gate's prune's to remove (D-12), not a later pass's: `shipmill gate` runs `shipmill worktrees --prune` on each tick, which removes a `tmp/wt-*` or `.claude/worktrees/` worktree only once its commits landed and nothing holds it. A pass never removes a worktree it didn't create, even one that landed.
+
 Unlock a lock only if it is held by one of your own finished agents.
 
 ## Report
