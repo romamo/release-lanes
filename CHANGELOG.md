@@ -20,6 +20,15 @@ bot.
   prints the `app_id` line to commit; exit 1 names a repo still missing the App. The setup
   skill and `docs/install.md` use it first, the manual steps as the fallback (#155)
 
+### Fixed
+
+- `shipmill app-create` prints each line as it happens, so a piped or backgrounded run shows
+  the plan and the URL at once; its local page no longer posts to GitHub by itself, which
+  lost the manifest when GitHub asked to sign in first (*We didn't find an App Manifest*),
+  but shows the plan and each permission with its use and a **Create on GitHub** button to
+  click again after signing in; and a taken default name moves to a free variant, while a
+  taken `--name` exits 2 naming the free ones (#157)
+
 ## [0.18.0] - 2026-10-06
 
 ### Added

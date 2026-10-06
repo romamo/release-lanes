@@ -3,6 +3,7 @@
 import argparse
 import datetime as dt
 import html
+import io
 import json
 import re
 import stat
@@ -25,12 +26,15 @@ from shipmill.app_create import (
     config_lines,
     convert,
     create,
+    free_name,
     gated_repos,
     given_repos,
     manifest,
     new_app_url,
+    page,
     plan,
     save_key,
+    slug,
     wait_installed,
 )
 from shipmill.cli import _app_create
@@ -70,6 +74,7 @@ class FakeHub:
     memberships_status: int = 200
     installed: list[str] = field(default_factory=list)
     install_after: dict[str, int] = field(default_factory=dict)  # repo: polls before it appears
+    taken_slugs: set[str] = field(default_factory=set)
     calls: list[tuple[str, str, str | None]] = field(default_factory=list)
 
     def get(self, path: str, token: str | None) -> Answer:
@@ -92,6 +97,8 @@ class FakeHub:
             repo = m.group(1)
             status = self.contents_status.get(repo, 200 if repo in self.gated else 404)
             return Answer(status, "{}")
+        if m := re.fullmatch(r"/apps/([^/]+)", route):
+            return Answer(200, "{}") if m.group(1) in self.taken_slugs else Answer(404, "{}")
         if m := re.fullmatch(r"/repos/([^/]+/[^/]+)/installation", route):
             repo = m.group(1)
             if repo in self.install_after:
@@ -192,7 +199,7 @@ def args(**given: object) -> argparse.Namespace:
     values: dict[str, object] = {
         "owner": None,
         "public": None,
-        "name": "shipmill-agent",
+        "name": None,
         "repos": None,
         "dry_run": False,
         "json": False,
@@ -210,7 +217,7 @@ def test_s006_8_a_dry_run_prints_the_plan_and_creates_nothing(
     code = _app_create(tmp_path, args(dry_run=True), hub, FakeSigner(), TOKEN, opened.append, keys)
     assert code == 0 and opened == [] and not keys.exists()
     assert not any(method == "POST" for method, _, _ in hub.calls)
-    assert capsys.readouterr().out.splitlines()[:3] == [
+    assert capsys.readouterr().out.splitlines()[1:4] == [
         "plan: shipmill-agent under cli-agent-spec, public",
         "  why: gated repos in 2 accounts (cli-agent-spec 1, shipmill 1)",
         "  repos: cli-agent-spec/cli-agent-spec, shipmill/shipmill",
@@ -366,7 +373,7 @@ def test_s006_14_a_real_run_prints_the_app_id_line_and_edits_no_config(
 def test_s006_15_json_on_a_dry_run_is_the_plan_alone(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     code = _app_create(tmp_path, args(dry_run=True, json=True), FakeHub(), FakeSigner(), TOKEN, None, tmp_path / "k")
     out = capsys.readouterr()
-    assert code == 0 and out.err.startswith("plan: shipmill-agent under cli-agent-spec, public")
+    assert code == 0 and "plan: shipmill-agent under cli-agent-spec, public" in out.err.splitlines()
     assert set(json.loads(out.out)) == {"owner", "owner_type", "public", "name", "reason", "repos"}
 
 
@@ -399,3 +406,53 @@ def test_s006_16_the_docs_document_app_create() -> None:
         assert "read:org" in doc and "--public" in doc and "--private" in doc
     assert "| Permission | Access | Why |" in install  # the manual steps stay as the fallback
     assert "private" in install and "public" in install
+
+
+def test_s006_17_a_taken_default_name_moves_to_a_free_variant(capsys: pytest.CaptureFixture[str]) -> None:
+    hub = FakeHub(taken_slugs={"shipmill-agent"})
+    planned = plan((ME, SHIPMILL), ("shipmill/shipmill",), None, None, None, "shipmill-agent")
+    assert free_name(hub, TOKEN, planned, "romamo", chosen=False) == (
+        "shipmill-agent-shipmill",
+        "shipmill-agent is taken; using shipmill-agent-shipmill (--name picks another)",
+    )
+    assert free_name(FakeHub(), TOKEN, planned, "romamo", chosen=False) == ("shipmill-agent", None)
+    assert slug("Shipmill Agent!") == "shipmill-agent"
+
+
+def test_s006_17_a_taken_chosen_name_exits_2_suggesting_free_ones() -> None:
+    hub = FakeHub(taken_slugs={"bot", "bot-shipmill"})
+    planned = plan((ME, SHIPMILL), ("shipmill/shipmill",), None, None, None, "bot")
+    with pytest.raises(ReleaseError, match=r"the App name bot is taken; free: bot-romamo"):
+        free_name(hub, TOKEN, planned, "romamo", chosen=True)
+
+
+def test_s006_18_the_page_reviews_the_plan_and_waits_for_a_click() -> None:
+    planned = plan((ME, CAS, SHIPMILL), ("cli-agent-spec/x", "shipmill/a"), "shipmill", None, None, "shipmill-agent")
+    shown = page(planned, "https://github.com/x", "{}")
+    assert "<script" not in shown and "Create on GitHub" in shown
+    assert "Public: it can be installed on any account" in shown
+    assert "<li>cli-agent-spec/x</li><li>shipmill/a</li>" in shown
+    for perm in PERMISSIONS:
+        assert f"<td>{perm.label}</td><td>{perm.access.value}</td>" in shown
+    assert "We didn't find an App Manifest" in shown and "click the button again" in shown
+    private = plan((ME, SHIPMILL), ("shipmill/a",), None, None, None, "n")
+    assert "Private: it can be installed only on shipmill" in page(private, "a", "b")
+
+
+class Recorder(io.StringIO):
+    """A stream that remembers what had been written at each flush"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.flushed: list[str] = []
+
+    def flush(self) -> None:
+        self.flushed.append(self.getvalue())
+
+
+def test_s006_19_each_line_is_flushed_as_it_happens(tmp_path: Path) -> None:
+    stream = Recorder()
+    _app_create(tmp_path, args(dry_run=True), FakeHub(), FakeSigner(), TOKEN, out=stream)
+    lines = stream.getvalue().splitlines()
+    assert lines[0].startswith("looking for the accounts you administer")
+    assert [f.count("\n") for f in stream.flushed] == list(range(1, len(lines) + 1))

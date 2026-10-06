@@ -26,6 +26,7 @@ the App; 2 bad input or a refused state.
 """
 
 import argparse
+import dataclasses
 import datetime as dt
 import json
 import os
@@ -61,6 +62,7 @@ from shipmill.app_create import (
     config_lines,
     convert,
     create,
+    free_name,
     gated_repos,
     given_repos,
     host_token,
@@ -277,7 +279,7 @@ def _parser() -> argparse.ArgumentParser:
     visibility.add_argument(
         "--private", dest="public", action="store_const", const=False, help="installable on the owner only"
     )
-    p.add_argument("--name", default=DEFAULT_NAME, help=f"the App's name, unique on GitHub (default: {DEFAULT_NAME})")
+    p.add_argument("--name", help=f"the App's name, unique on GitHub (default: {DEFAULT_NAME}, or a free variant)")
     p.add_argument("--repos", help="the gated repos as owner/name,...; skips looking for them")
     p.add_argument("--dry-run", action="store_true", help="print the plan; create nothing")
     p.add_argument("--json", action="store_true", help="print the plan and the result as one JSON object")
@@ -500,14 +502,24 @@ def _app_create(
     browser: Callable[[str], None] | None = None,
     key_dir: Path | None = None,
     install_seconds: float = FLOW_SECONDS,
+    out: TextIO | None = None,
 ) -> int:
     """Spec 006: discover, plan, create, install. Exit 1 when an installation is still missing"""
     host = token if token is not None else host_token()
     keys = key_dir if key_dir is not None else Path.home() / ".config" / "shipmill"
-    say = (lambda line: print(line, file=sys.stderr)) if args.json else print
+    stream = out if out is not None else (sys.stderr if args.json else sys.stdout)
+
+    def say(line: str) -> None:
+        print(line, file=stream, flush=True)  # S-006-19: each line as it happens, piped or not
+
+    say("looking for the accounts you administer and their repos with .github/shipmill.toml...")
     found = accounts(api, host)
     repos = given_repos(args.repos.split(","), found) if args.repos else gated_repos(api, host, found)
-    planned = plan(found, repos, _origin_owner(root), args.owner, args.public, args.name)
+    planned = plan(found, repos, _origin_owner(root), args.owner, args.public, args.name or DEFAULT_NAME)
+    name, note = free_name(api, host, planned, found[0].login, args.name is not None)
+    planned = dataclasses.replace(planned, name=name)
+    if note is not None:
+        say(f"note: {note}")
     record: dict[str, object] = planned.record()
     for line in planned.lines():
         say(line)
