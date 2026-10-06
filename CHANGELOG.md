@@ -22,6 +22,7 @@ bot.
 - Spec 005 for headless gate sessions: `[agents] mode = "headless"` starts sessions that
   can't prompt, a decision for the user becomes a `needs-decision` comment and label the
   gate waits on, and headless work is limited to trusted authors' items, with D-16 (#134)
+- Spec 005's build issues: #160 to #164 (#134)
 
 ### Fixed
 
