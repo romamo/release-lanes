@@ -7,6 +7,14 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- github-issue-triage asks a design question on the issue too, as a **Decision needed**
+  block at the top of its verdict comment: the question in one plain sentence, the options
+  numbered with the recommended one first and what each means for users, and how to answer
+  (reply with a number). A reply on the issue counts as the answer, so the maintainer
+  doesn't have to attach to the gate session; a held PR's decisions are asked the same way
+
 ## [0.20.0] - 2026-10-06
 
 ### Added
