@@ -82,8 +82,9 @@ def build(
     args += ["--refresh"]
     if app_key is not None:
         args += ["--app-key", str(app_key)]
-    for extra in claude_args:
-        args += ["--claude-arg", extra]
+    # --claude-arg=<flag>: argparse reads a separate value that starts with a dash as an option
+    # and refuses it, so `--claude-arg --allowedTools` would fail every tick
+    args += [f"--claude-arg={extra}" for extra in claude_args]
     document = plistlib.dumps(
         {
             "Label": name,
