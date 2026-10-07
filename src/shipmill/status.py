@@ -535,7 +535,8 @@ def repo_line(facts: Facts) -> str:
         state = f"{m.ahead} ahead"
     else:
         state = "in sync"
-    problems = []
+    # BOT_NONE: no release workflow or policy, so no release to call ok; no verdict reason
+    problems = ["no release workflow"] if any(r.state == "BOT_NONE" for r in facts.rows) else []
     for r in facts.rows:
         if r.state in RELEASE_PROBLEMS:
             run = re.search(r"https://\S+", r.detail) if r.state == "BOT_FAILED" else None

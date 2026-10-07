@@ -82,7 +82,9 @@ Always shown, in this order around the item lines:
   GitHub's default branch and `+N` for the commits since (`git describe --tags --long`),
   or `no release yet`; then `release ok`, or in its place the release problem: the
   `BOT_FAILED`, `BOT_STALLED`, `WORK_BRANCH_STALE`, `NOT_PUBLISHED`, or `UNANNOUNCED` state
-  with its tag or a link to the failed run. The default branch is `gh repo view`'s
+  with its tag or a link to the failed run. A repo with no release workflow or policy
+  (`BOT_NONE`) reads `no release workflow` in place of `release ok`, which is no reason
+  for a verdict. The default branch is `gh repo view`'s
 - **open issues**: the count of open issues and the link to GitHub's issue list
   (`https://github.com/<owner>/<name>/issues`), or `none`
 - **pull requests**: the count of open pull requests (`gh pr list`) and the link to the
@@ -262,7 +264,7 @@ the dropped criteria (S-009-1, S-009-7 to S-009-12).
 - S-009-14: `test_s009_14_rows_json_and_the_exit_code_stay_spec_008s`, passing for exit 0 and 1
 - S-009-15: `test_s009_15_with_the_app_the_reads_pass_its_bot_login`, passing
 - S-009-16: `test_s009_16_the_heading_is_the_repo_its_link_and_the_verdict_with_no_reasons_list`, `test_s009_16_the_whole_summary_reads_as_the_spec_shows_it`, `test_s009_16_each_reason_is_a_line_of_the_summary`, and `test_s009_16_the_gate_reasons_are_lines_too`, passing
-- S-009-17: `test_s009_17_the_repo_line_compares_local_with_github` and `test_s009_17_the_repo_line_names_the_version_and_the_release_problem`, passing
+- S-009-17: `test_s009_17_the_repo_line_compares_local_with_github`, `test_s009_17_the_repo_line_names_the_version_and_the_release_problem`, and `test_s009_17_a_repo_without_a_release_workflow_says_so_and_is_no_reason`, passing
 - S-009-18: `test_s009_18_each_item_has_its_own_link_never_a_search` and `test_s009_18_an_untrusted_pull_request_links_to_the_pull`, passing
 - S-009-19: `test_s009_19_open_issues_and_pull_requests_are_counted_with_the_list_link`, passing
 - S-009-20: `test_s009_20_the_gate_line_reads_ok_or_the_problem`, passing

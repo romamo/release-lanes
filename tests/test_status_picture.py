@@ -401,6 +401,12 @@ def test_s009_17_the_repo_line_names_the_version_and_the_release_problem() -> No
     )
 
 
+def test_s009_17_a_repo_without_a_release_workflow_says_so_and_is_no_reason() -> None:
+    found = facts(Row("BOT_NONE", REPO, 'no release policy: releases by "tag X"', False))
+    assert lines(found)[1] == "  repo           in sync at v0.26.0, no release workflow"
+    assert report(found).verdict is Verdict.IDLE
+
+
 def test_s009_18_each_item_has_its_own_link_never_a_search() -> None:
     rows = (Row("NEEDS_DECISION", REPO, "#6 #9", False), Row("PRS_OPEN", REPO, "#8", False))
     issues = [
