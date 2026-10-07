@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from shipmill import CLI
+from shipmill import cli_command
 from shipmill.autonomy import HOLD_LABEL, Autonomy, Hold
 from shipmill.changelog import Changelog
 from shipmill.config import config_path
@@ -175,7 +175,7 @@ def doctor(root: Path, github: GitHub | None = None, plugins: PluginRows | None 
 
     caller = root / CALLER
     if not caller.is_file():
-        add(False, "workflow", f"no {CALLER}; `{CLI} init` writes one")
+        add(False, "workflow", f"no {CALLER}; `{cli_command()} init` writes one")
     else:
         text = caller.read_text(encoding="utf-8")
         uses_bot = all(re.search(rf"uses:\s*\S*/\.github/workflows/{name}\b", text) for name in _BOT_WORKFLOWS)
@@ -368,7 +368,7 @@ def _operate(policy: Policy, hold: Hold, root: Path, caller: Path) -> Check | No
         return None
     why = f"{', '.join(used)} {'uses' if len(used) == 1 else 'use'} from or health"
     if not (root / caller).is_file():
-        detail = f"{why}, but no {caller} runs shipmill operate: `{CLI} init --operate` writes it"
+        detail = f"{why}, but no {caller} runs shipmill operate: `{cli_command()} init --operate` writes it"
         return Check("WARN", "operate", detail)
     text = (root / caller).read_text(encoding="utf-8")
     if _job_grants(text, "operate.yml", "deployments") is None:

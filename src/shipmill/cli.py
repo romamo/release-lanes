@@ -44,7 +44,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TextIO
 
-from shipmill import CLI, status
+from shipmill import cli_command, status
 from shipmill.agents import AgentsConfig
 from shipmill.app import (
     CACHE,
@@ -378,13 +378,13 @@ def main(
     hub = github or GhCli(root)
     if args.command == "init" and args.operate:
         print(f"wrote {init_operate(root, args.force).relative_to(root)}")
-        print(f"next: run `{CLI} doctor`")
+        print(f"next: run `{cli_command()} doctor`")
         return 0
     if args.command == "init":
         initialized = init(root, args.ci, args.force)
         for path in initialized.written:
             print(f"wrote {path.relative_to(root)}")
-        print(f"next: review the policy, then run `{CLI} doctor`")
+        print(f"next: review the policy, then run `{cli_command()} doctor`")
         return 0
     if args.command == "doctor":
         slug = _doctor_repo(root)

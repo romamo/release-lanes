@@ -67,8 +67,12 @@ switch them on.
 Then ask what needs you:
 
 ```bash
-uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill status
+uv tool install shipmill  # once; `uv tool upgrade shipmill` after a release
+shipmill status
 ```
+
+Without the install, `uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill status`
+runs it from git, resolving it again on each call.
 
 It answers STUCK, WAITS ON YOU, WORKING, or IDLE, with a link to each item that waits on you.
 

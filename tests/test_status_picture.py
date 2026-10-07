@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from shipmill import CLI
+from shipmill import cli_command
 from shipmill.agents import AgentsConfig, Mode
 from shipmill.app import Identity, default_key
 from shipmill.cli import _parser, _status, main
@@ -107,7 +107,7 @@ def test_s009_3_a_gate_after_sleep_or_before_its_first_run_isnt_stuck() -> None:
 def test_s009_3_no_job_on_this_host_waits_on_you_rather_than_stuck() -> None:
     found = report(facts(gate=gate(job=None)))
     assert found.verdict is Verdict.WAITS
-    assert found.reasons == [f"no launchd job runs the gate on this host: {CLI} launchd {REPO}"]
+    assert found.reasons == [f"no launchd job runs the gate on this host: {cli_command()} launchd {REPO}"]
 
 
 def test_s009_3_the_log_failure_after_a_decision_is_its_last_line() -> None:

@@ -12,8 +12,20 @@ pre-releases are tagged off main, and stable releases promote a soaked rc.
 Run the tool with:
 
 ```bash
+CR=shipmill
+```
+
+when `command -v shipmill` finds it (the user installed it with `uv tool install shipmill`,
+upgraded with `uv tool upgrade shipmill`). When it doesn't, or in a headless gate session,
+whose allowlist has `Bash(uvx *)` and no bare `shipmill`, run it from git:
+
+```bash
 CR="uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill"
 ```
+
+Recommend the install to the user: each uvx call resolves `@v0` again, which is slow and
+leaves a build in uv's cache ([install.md](https://github.com/shipmill/shipmill/blob/main/docs/install.md#clean-up-old-builds)
+says how to clean those up).
 
 Work on a branch and finish with a pull request. Never set `mode = "release"` in the
 first change: the bot starts in `dry-run`.

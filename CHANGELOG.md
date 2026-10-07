@@ -22,6 +22,14 @@ bot.
 - Decision D-22: the gate updates its checkout's plugin at most once a day, and only when
   `[agents] plugin_update = true`; otherwise status, doctor, and setup report the behind
   install with a fix that works in its folder (#233)
+- The docs and skills recommend installing the CLI from PyPI with `uv tool install
+  shipmill` (upgraded with `uv tool upgrade shipmill`) and running a plain `shipmill
+  <command>`, keeping `uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill` for
+  when it isn't installed and for headless gate sessions; each uvx call resolves git again,
+  which took minutes and filled uv's cache. The hints the CLI prints name a plain `shipmill`
+  when the `shipmill` on PATH is the running install, and the uvx form otherwise.
+  `docs/install.md` gains a "Clean up old builds" section on `uv cache prune` and the plugin's
+  old versions under `~/.claude/plugins/cache` (#236)
 
 ### Fixed
 

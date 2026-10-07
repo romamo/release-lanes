@@ -15,7 +15,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from shipmill import CLI
+from shipmill import cli_command
 from shipmill.errors import ReleaseError
 
 TOOLS = ("claude", "gh", "git", "uvx")
@@ -111,7 +111,7 @@ def _launchctl(*args: str, check: bool = True) -> subprocess.CompletedProcess[st
 
 def _require_mac() -> None:
     if sys.platform != "darwin":
-        raise ReleaseError(f"launchd runs on macOS; on Linux, run `{CLI} gate` from a systemd timer or cron")
+        raise ReleaseError(f"launchd runs on macOS; on Linux, run `{cli_command()} gate` from a systemd timer or cron")
 
 
 def install(job: Job) -> None:

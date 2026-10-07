@@ -1,16 +1,21 @@
-"""#215, #223: neither the docs and skills nor the CLI's own output tell a reader to run a bare
-`shipmill <command>`, which no install puts on PATH"""
+"""#215, #223, #236: the docs and skills recommend `uv tool install shipmill` and a bare
+`shipmill <command>`, with the uvx form beside it for when that isn't installed, and the CLI's
+own output names the form it runs as, never a hard-coded bare `shipmill`"""
 
 import argparse
 import ast
+import os
 import re
+import subprocess
+import sys
+import sysconfig
 from pathlib import Path
 
-from shipmill import CLI
+from shipmill import UVX, cli_command
 from shipmill.cli import _parser
 
 ROOT = Path(__file__).resolve().parents[1]
-LONG = CLI
+LONG = UVX
 
 
 def subcommands() -> set[str]:
@@ -107,8 +112,9 @@ def strings(source: str) -> list[str]:
     return found
 
 
-def test_the_cli_output_runs_shipmill_through_uvx() -> None:
-    """#223: a hint the package prints, raises, or writes into a file names the uvx form"""
+def test_the_cli_output_names_shipmill_through_cli_command() -> None:
+    """#223, #236: a hint the package prints, raises, or writes into a file names cli_command()
+    or the uvx form, never a bare `shipmill` that may not be on PATH"""
     subs = subcommands()
     offenders = {
         str(path.relative_to(ROOT)): hits
@@ -150,12 +156,15 @@ def test_the_string_scan_skips_docstrings_and_reads_f_strings() -> None:
     assert strings(source) == ["next: run `shipmill {}`"]
 
 
-def test_the_docs_and_skills_run_shipmill_through_uvx() -> None:
+def test_a_doc_that_runs_a_bare_shipmill_gives_the_uvx_form_too() -> None:
+    """#236: a bare `shipmill <command>` needs `uv tool install shipmill`; the page or skill that
+    shows one also names the uvx form, or defines $CR, for a reader without the install"""
     subs = subcommands()
     offenders = {
         str(path.relative_to(ROOT)): hits
         for path in scanned()
-        if (hits := bare_commands(path.read_text(encoding="utf-8"), subs))
+        if (hits := bare_commands(text := path.read_text(encoding="utf-8"), subs))
+        and LONG not in " ".join(text.split())
     }
     assert offenders == {}
 
@@ -183,12 +192,57 @@ def test_the_scan_flags_a_bare_command_and_spares_prose() -> None:
         assert not bare_commands(text, subs), text
 
 
-def test_install_md_defines_cr_and_the_alias_before_using_them() -> None:
+def test_cli_command_is_bare_only_when_path_finds_the_running_install(tmp_path: Path) -> None:
+    """#236: a uv tool install (a link on PATH into the running environment) reads bare"""
+    env = tmp_path / "tools" / "shipmill"
+    (env / "bin").mkdir(parents=True)
+    (env / "bin" / "shipmill").touch(mode=0o755)
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "shipmill").symlink_to(env / "bin" / "shipmill")
+    linked = str(tmp_path / "bin")
+    assert cli_command(linked, str(env)) == "shipmill"
+    uvx_env = tmp_path / "cache" / "archive-v0" / "abc"
+    uvx_env.mkdir(parents=True)
+    assert cli_command(linked, str(uvx_env)) == LONG  # another install is on PATH
+    assert cli_command("", str(env)) == LONG  # nothing on PATH
+    assert cli_command(str(env / "bin"), str(env)) == LONG  # only the environment's own bin
+    (tmp_path / "tools" / "shipmill2" / "bin").mkdir(parents=True)
+    (tmp_path / "tools" / "shipmill2" / "bin" / "shipmill").touch(mode=0o755)
+    assert cli_command(str(tmp_path / "tools" / "shipmill2" / "bin"), str(env)) == LONG  # a sibling, not inside
+
+
+def test_cli_command_under_uvx_names_the_uvx_form() -> None:
+    """#236: uvx puts its cache environment's own bin first on PATH for the run, so that
+    `shipmill` resolves into the running environment yet isn't on the user's PATH"""
+    scripts = sysconfig.get_path("scripts")
+    assert (Path(scripts) / "shipmill").exists() or (Path(scripts) / "shipmill.exe").exists()
+    code = "from shipmill import cli_command; print(cli_command())"
+    env = {**os.environ, "PATH": scripts}
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == LONG
+
+
+def test_install_md_recommends_the_tool_install_with_the_uvx_fallback() -> None:
     install = (ROOT / "docs" / "install.md").read_text(encoding="utf-8")
-    defined = install.index(f'CR="{LONG}"')
-    assert defined < install.index("$CR ")
-    assert f"alias shipmill='{LONG}'" in install
-    assert "uv tool install" in install
+    first = install.index("$CR ")
+    assert install.index("uv tool install shipmill") < install.index("CR=shipmill\n") < first
+    assert install.index(f'CR="{LONG}"') < first
+    assert "uv tool upgrade shipmill" in install
+    assert "Don't `uv tool install`" not in install and "alias shipmill=" not in install
+
+
+def test_install_md_says_how_to_clean_up_old_builds() -> None:
+    install = (ROOT / "docs" / "install.md").read_text(encoding="utf-8")
+    cleanup = install.split("## Clean up old builds\n", 1)[1]
+    assert "`uv cache prune`" in cleanup
+    assert "~/.claude/plugins/cache/shipmill/shipmill/<version>/" in cleanup and ".orphaned_at" in cleanup
+
+
+def test_setup_defines_both_forms_of_cr() -> None:
+    skill = (ROOT / "skills" / "shipmill-setup" / "SKILL.md").read_text(encoding="utf-8")
+    first = skill.index("$CR ")
+    assert skill.index("CR=shipmill\n") < first and skill.index(f'CR="{LONG}"') < first
+    assert "uv tool install shipmill" in skill and "headless" in skill[:first]
 
 
 def test_ship_watch_description_tells_an_agent_how_to_run_the_cli() -> None:
@@ -196,6 +250,7 @@ def test_ship_watch_description_tells_an_agent_how_to_run_the_cli() -> None:
     front = skill.split("---\n", 2)[1]
     (line,) = [x for x in front.splitlines() if x.startswith("description: ")]
     description = line.removeprefix("description: ")
-    assert "isn't on PATH" in description and f"`{LONG} <command>`" in description
+    assert "Run `shipmill <command>`" in description
+    assert "isn't on PATH" in description and "headless" in description and f"`{LONG} <command>`" in description
     assert ": " not in description, "a colon and a space would break the plain YAML scalar"
     assert len(description) <= 1024, len(description)
