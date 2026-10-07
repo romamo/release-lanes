@@ -35,6 +35,7 @@ from shipmill.errors import ReleaseError
 from shipmill.github import GitHub
 from shipmill.gitrepo import Git
 from shipmill.notify import Notifier, NotifyFailed
+from shipmill.plugin import CHECKED, PluginUpdate, daily_update
 from shipmill.worktrees import Judged, Sessions, Verdict, judge, prune
 
 RECORD = "gate.json"
@@ -152,6 +153,7 @@ class Decision:
     mode: Mode | None = None  # the config's mode on a tick that read the state; None: it didn't
     decisions: tuple[Asked, ...] = ()  # what the tick did for each item waiting on a decision (spec 005)
     asks_as: str | None = None  # a headless launch without an App: the login its questions post as
+    plugin: PluginUpdate | None = None  # the daily plugin check before a launch (D-22); None: none ran
 
 
 def fingerprint(work: Iterable[Finding]) -> str:
@@ -855,6 +857,7 @@ def gate(
     login: Callable[[], str] | None = None,
     started: StartTime = start_time,
     new_session: Callable[[], uuid.UUID] = uuid.uuid4,
+    plugins: Runner = run_command,
 ) -> tuple[Decision, str | None, tuple[Waiting, ...], tuple[Judged, ...]]:
     """Decide, and on LAUNCH stop the finished sessions and start a new one. Returns the
     decision, the launched session's id, what the waiting step did for each blocked
@@ -886,7 +889,14 @@ def gate(
     and records its pid and start time. A headless
     tick that reads the state records the items of its NEEDS_DECISION row in
     needs-decision.json and, without app_id, notifies for them (spec 005); the decision
-    carries the mode it read and what it did for each item"""
+    carries the mode it read and what it did for each item.
+
+    With [agents] plugin_update = true (D-22), a real LAUNCH first checks, at most once per
+    24 hours (plugin-check.json in the state directory), whether the checkout's own
+    project-scope shipmill@shipmill install is behind the latest release, and updates it
+    with plugins (`claude plugin update` run in the checkout) when it is. The decision
+    carries what the check did; a failed check or update starts the session anyway. With
+    false, the default, the gate changes no install"""
     check_checkout(git, repo)
     config = checked(config, claude.args)
     state = state_dir(git)
@@ -940,6 +950,8 @@ def gate(
         if app_env is None:
             raise ReleaseError(f"app_id {agents.app_id} is set, but no session env was given; no session starts")
         env = app_env(identity)
+    if agents.plugin_update:  # before the session starts, so it loads the updated skills
+        decision = replace(decision, plugin=daily_update(state / CHECKED, git.root, now, plugins))
     for session in decision.stop:
         claude.stop(session)
     name = f"{session_name(repo)} {now:%Y-%m-%d %H:%M}"
@@ -971,6 +983,7 @@ def tick_record(
         "pruned": [j.path for j in pruned],
         "mode": None if decision.mode is None else decision.mode.value,
         "decisions": [a.record() for a in decision.decisions],
+        "plugin": None if decision.plugin is None else decision.plugin.record(),
     }
 
 
@@ -988,6 +1001,8 @@ def tick_lines(
         if w.stopped and w.error is not None:  # the stop line above leaves out the failed send
             lines.append(f"  notify failed for {w.session}: {w.error}")
     lines += [f"  {line}" for a in decision.decisions if (line := a.line(dry_run)) is not None]
+    if decision.plugin is not None and (line := decision.plugin.line()) is not None:
+        lines.append(f"  {line}")
     verb = "would prune" if dry_run else "pruned"
     lines += [f"  {verb} {j.path} ({j.worktree.branch})" for j in pruned]
     lines += [f"  {f.line()}" for f in decision.work]

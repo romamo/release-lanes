@@ -7,11 +7,32 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- `[agents] plugin_update` (default `false`: the gate changes no install). With `true`, a
+  gate tick about to start a session checks at most once per 24 hours whether its
+  checkout's own project install of `shipmill@shipmill` is behind the latest release and,
+  when it is, runs `claude plugin update` in the checkout first; a failed update is printed
+  on the tick (and in `gate --json`'s `plugin`) and the session starts anyway (D-22).
+  shipmill's own gate sets it, and `shipmill init`'s template shows it with its default
+  (#233)
+
 ### Changed
 
 - Decision D-22: the gate updates its checkout's plugin at most once a day, and only when
   `[agents] plugin_update = true`; otherwise status, doctor, and setup report the behind
   install with a fix that works in its folder (#233)
+
+### Fixed
+
+- `shipmill status` (github-ship-watch's `SHIPMILL_OUTDATED`) reports a stale plugin
+  install in the gate's checkout (`tmp/shipmill-gate`) as its own row, and for the repo's
+  own install prints a fix that works: an uninstall and install at that scope, since
+  `claude plugin update` in the repo picks the nested gate install (a Claude Code bug).
+  shipmill-setup's checklist reads the installs too and reports `PLUGIN_OUTDATED` (not
+  done) for each one behind the release, instead of `PLUGIN_OK`, and `shipmill doctor`
+  reports them with the same rows and fix text: a `plugin` WARN for each install behind
+  the release, a PASS when none is, and a WARN, never a crash, when they can't be read (#233)
 
 ## [0.32.2] - 2026-10-07
 

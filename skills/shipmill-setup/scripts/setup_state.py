@@ -36,7 +36,11 @@ Plugin (.claude/settings.json, so every session in the repo loads the skills):
   PLUGIN_MISSING   shipmill@shipmill is not enabled; --fix adds the marketplace and
                    enables it, keeping every other key
   PLUGIN_DISABLED  enabledPlugins sets it to false on purpose; --fix leaves it
-  PLUGIN_OK        enabled
+  PLUGIN_OUTDATED  enabled, but an install on this host is behind shipmill's latest
+                   release: one row per install (user scope, the repo's folder, the gate's
+                   checkout), each with the command to run in its folder, as
+                   github-ship-watch's SHIPMILL_OUTDATED reads it (#233). --fix leaves it
+  PLUGIN_OK        enabled, and no install is behind (or claude isn't on PATH to read them)
 
 Labels (the triage skills and shipmill read them):
   LABELS_MISSING   some of postponed, blocked, shipmill-hold, the config's
@@ -59,16 +63,18 @@ the config loader reads it, so a section without the key has prs = false):
   LANDING_OK   prs = true, no [agents] section, or no pull request waits to land
 
 Exit 0 when every row is RELEASE_READY, AGENTS_OK, PLUGIN_OK, LABELS_OK,
-BRANCH_DELETE_ON, or LANDING_OK, 1 otherwise (AGENTS_NO_APP, AGENTS_NO_MODE, and
-LANDING_OFF included), 2 on bad input, a malformed settings.json, an [agents] prs that
-isn't a TOML boolean, both config files, or a git or gh failure (a failed read of the repo
-setting never reads as off).
-Needs git and an authenticated gh. Python 3.10+, standard library only.
+BRANCH_DELETE_ON, or LANDING_OK, 1 otherwise (AGENTS_NO_APP, AGENTS_NO_MODE,
+PLUGIN_OUTDATED, and LANDING_OFF included), 2 on bad input, a malformed settings.json, an
+[agents] prs that isn't a TOML boolean, both config files, a git or gh failure (a failed
+read of the repo setting never reads as off), or a malformed `claude plugin list --json`.
+Needs git and an authenticated gh; claude on PATH to read the plugin's installs. Python
+3.10+, standard library only.
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import re
 import subprocess
@@ -76,8 +82,11 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 from typing import Any, NoReturn
 
+# github-ship-watch's watch_state.py: one reading of the plugin's installs for both skills
+WATCH_STATE = Path(__file__).resolve().parents[2] / "github-ship-watch" / "scripts" / "watch_state.py"
 CONFIG = Path(".github/shipmill.toml")
 CALLER = Path(".github/workflows/release.yml")
 SETTINGS = Path(".claude/settings.json")
@@ -226,6 +235,36 @@ def plugin_row(settings: dict[str, Any]) -> Row:
     if enabled is False:
         return Row("PLUGIN_DISABLED", f"{SETTINGS} disables {PLUGIN} on purpose")
     return Row("PLUGIN_MISSING", f"{SETTINGS} doesn't enable {PLUGIN}")
+
+
+def plugin_rows(settings: dict[str, Any], outdated: Callable[[], list[str]]) -> list[Row]:
+    """plugin_row, and with the plugin enabled, a PLUGIN_OUTDATED row in its place for each
+    install behind the latest release (#233); outdated reads them only then"""
+    row = plugin_row(settings)
+    if row.state != "PLUGIN_OK":
+        return [row]
+    return [Row("PLUGIN_OUTDATED", detail) for detail in outdated()] or [row]
+
+
+def watch_module() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("shipmill_watch_state", WATCH_STATE)
+    if spec is None or spec.loader is None:
+        fail(f"can't load {WATCH_STATE}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # its dataclasses look their module up by name
+    spec.loader.exec_module(module)
+    return module
+
+
+def outdated_installs(repo: str, repo_dir: Path) -> list[str]:
+    """watch_state.py's SHIPMILL_OUTDATED rows, each as `<subject>: <detail>`: the installs that
+    apply to the repo's folder and the gate's checkout, with the fix to run in each"""
+    ws = watch_module()
+    try:
+        rows = ws.shipmill_rows(repo, repo_dir)
+    except ws.Refused as refused:
+        fail(str(refused).removeprefix("error: "))
+    return [f"{r.subject}: {r.detail}" for r in rows if r.state == "SHIPMILL_OUTDATED"]
 
 
 def enable_plugin(settings: dict[str, Any]) -> dict[str, Any]:
@@ -395,7 +434,7 @@ def main() -> int:
     rows = [
         release_row(repo_dir),
         agents_row(repo_dir),
-        plugin_row(settings),
+        *plugin_rows(settings, lambda: outdated_installs(args.repo, repo_dir)),
         labels_row(missing, wanted),
         branch_delete_row(args.repo, args.fix),
         landing_row(args.repo, repo_dir),

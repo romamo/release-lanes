@@ -1,8 +1,11 @@
 """Check that a repository is ready for the bot: its policy, CHANGELOG, version files, and the
 workflows the bot calls"""
 
+import importlib.util
 import re
+import sys
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,6 +14,7 @@ from shipmill.autonomy import HOLD_LABEL, Autonomy, Hold
 from shipmill.changelog import Changelog
 from shipmill.config import config_path
 from shipmill.errors import ReleaseError
+from shipmill.gate import skills_dir
 from shipmill.github import GitHub
 from shipmill.gitrepo import REMOTE, Git
 from shipmill.land import BLOCKING_BRANCH, WORK_PREFIX, blocked
@@ -30,8 +34,59 @@ class Check:
     detail: str
 
 
-def doctor(root: Path, github: GitHub | None = None) -> list[Check]:
-    """github reads the open hold; None (no gh) reports that it can't"""
+@dataclass(frozen=True, slots=True)
+class PluginRow:
+    """One of github-ship-watch's SHIPMILL_VERSION or SHIPMILL_OUTDATED rows"""
+
+    state: str
+    subject: str
+    detail: str
+
+
+PluginRows = Callable[[], list[PluginRow]]  # the rows, or ReleaseError when they can't be read
+
+
+def read_plugin_rows(repo: str, root: Path) -> list[PluginRow]:
+    """watch_state.py's shipmill_rows for the checkout (D-22): the same installs, latest
+    release (`gh release view`), and fix text as `shipmill status`, read in this process"""
+    script = skills_dir() / "github-ship-watch" / "scripts" / "watch_state.py"
+    spec = importlib.util.spec_from_file_location("shipmill_watch_state", script)
+    if spec is None or spec.loader is None:
+        raise ReleaseError(f"can't load {script}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # its dataclasses look their module up by name
+    spec.loader.exec_module(module)
+    try:
+        rows = module.shipmill_rows(repo, root)
+    except SystemExit as exc:  # watch_state's way to refuse input or report a failed command
+        raise ReleaseError(f"watch_state.py stopped: {exc if str(exc) != '2' else 'see the error above'}") from None
+    except OSError as exc:  # gh or git missing
+        raise ReleaseError(str(exc)) from None
+    return [PluginRow(r.state, r.subject, r.detail) for r in rows]
+
+
+def plugin_checks(read: PluginRows) -> list[Check]:
+    """The shipmill@shipmill installs on this host that apply to the repo, as `status` reads
+    them: each one behind the latest release is a WARN with the fix to run in its folder (the
+    repo's, the gate checkout's, or user scope); a failed read is a WARN, never a crash"""
+    try:
+        rows = read()
+    except ReleaseError as exc:
+        return [Check("WARN", "plugin", f"can't read the shipmill plugin's installs: {exc}")]
+    checks = []
+    for row in rows:
+        if row.state == "SHIPMILL_VERSION":
+            checks.append(Check("PASS", "plugin", row.detail))
+        elif row.state == "SHIPMILL_OUTDATED":
+            checks.append(Check("WARN", "plugin", f"{row.subject} {row.detail}"))
+        else:
+            raise ReleaseError(f"watch_state.py's shipmill_rows returned a {row.state} row")
+    return checks
+
+
+def doctor(root: Path, github: GitHub | None = None, plugins: PluginRows | None = None) -> list[Check]:
+    """github reads the open hold; None (no gh) reports that it can't. plugins reads the
+    shipmill plugin's installs on this host; None checks none"""
     checks: list[Check] = []
 
     def add(ok: bool, name: str, detail: str, warn: bool = False) -> None:
@@ -140,6 +195,8 @@ def doctor(root: Path, github: GitHub | None = None) -> list[Check]:
     for env in policy.environments.values():
         watched = env.source is not None or bool(env.health)  # D-9: only these need operate
         checks.append(_deploy(root / ".github" / "workflows" / env.workflow, env.name, operate_caller, watched))
+    if plugins is not None:
+        checks.extend(plugin_checks(plugins))
     return checks
 
 
