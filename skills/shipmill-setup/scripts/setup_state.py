@@ -191,9 +191,9 @@ def agents_row(repo_dir: Path) -> Row:
     section = agents_section(repo_dir)
     if section is None or not re.search(r"^prompt\s*=", section, re.MULTILINE):
         return Row("AGENTS_MISSING", f"no [agents] prompt in {CONFIG}: needed only for `shipmill gate`")
-    if not re.search(r"^app_id\s*=", section, re.MULTILINE):
+    if not re.search(r"^[ \t]*app_id\s*=", section, re.MULTILINE):  # TOML allows an indented key
         return Row("AGENTS_NO_APP", NO_APP)
-    if not re.search(r"^mode\s*=", section, re.MULTILINE):
+    if not re.search(r"^[ \t]*mode\s*=", section, re.MULTILINE):
         return Row("AGENTS_NO_MODE", NO_MODE)
     return Row("AGENTS_OK", "[agents] has a prompt, app_id, and mode")
 

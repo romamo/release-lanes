@@ -20,6 +20,8 @@ bot.
   `AGENTS_NO_MODE` row, exit 1, for a prompt with `app_id` and no `mode` key (after
   `AGENTS_NO_APP`, one row for the section). The config's default stays interactive, and
   shipmill's own config now says `mode = "interactive"` (#205)
+- Decisions D-19 and D-20: a gate set up without an App, or without an explicit
+  `[agents] mode`, is unfinished setup and reads as an action, never as done (#204, #205)
 
 ## [0.26.0] - 2026-10-06
 

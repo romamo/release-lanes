@@ -322,3 +322,15 @@ def test_a_missing_app_reads_before_a_missing_mode(ss: ModuleType, tmp_path: Pat
 def test_shipmills_own_config_passes_its_agents_check(ss: ModuleType) -> None:
     # #205: the repo runs its own gate interactive, and says so
     assert ss.agents_row(SCRIPT.parents[3]).state == "AGENTS_OK"
+
+
+def test_an_indented_app_id_counts(ss: ModuleType, tmp_path: Path) -> None:
+    # TOML allows an indented key, and the gate and watch_state.py read it: the checklist must too
+    write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "x"\n  app_id = 1\nmode = "interactive"\n')
+    assert ss.agents_row(tmp_path).state == "AGENTS_OK"
+
+
+def test_an_indented_mode_counts(ss: ModuleType, tmp_path: Path) -> None:
+    # TOML allows an indented key, as for app_id: the gate reads it, so the checklist must too
+    write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "x"\napp_id = 1\n  mode = "headless"\n')
+    assert ss.agents_row(tmp_path).state == "AGENTS_OK"
