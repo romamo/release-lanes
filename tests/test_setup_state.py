@@ -349,3 +349,74 @@ def test_an_indented_mode_counts(ss: ModuleType, tmp_path: Path) -> None:
     # TOML allows an indented key, as for app_id: the gate reads it, so the checklist must too
     write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "x"\napp_id = 1\n  mode = "headless"\n')
     assert ss.agents_row(tmp_path).state == "AGENTS_OK"
+
+
+GATE = '[agents]\nprompt = "x"\napp_id = 1\nmode = "headless"\n'
+PR_LIST = ["gh", "pr", "list", "-R", "me/demo", "--state", "open", "--json", "number,isDraft", "--limit", "500"]
+
+
+def pulls(*found: tuple[int, bool]) -> str:
+    return json.dumps([{"number": n, "isDraft": draft} for n, draft in found])
+
+
+def test_landing_off_with_open_prs_is_an_action(ss: ModuleType, tmp_path: Path) -> None:
+    # #234: prs = false and 11 PRs waiting, and setup called the factory healthy
+    write(tmp_path, ".github/shipmill.toml", GATE + "prs = false  # the gate opens PRs only\n")
+    gh = FakeGh(pulls((210, False), (233, False), (220, True), (231, False)))
+    row = ss.landing_row("me/demo", tmp_path, gh)
+    assert row.state == "LANDING_OFF"
+    assert row.detail == (
+        "#233 #231 #210 wait to land: the gate doesn't land pull requests ([agents] prs = false);"
+        " set [agents] prs = true with a prompt that merges when green, or land them by hand"
+    )
+    assert row.state not in ss.DONE  # so setup_state.py exits 1 on it
+    assert gh.calls == [PR_LIST]
+
+
+def test_landing_without_a_prs_key_defaults_off_like_the_config_loader(ss: ModuleType, tmp_path: Path) -> None:
+    write(tmp_path, ".github/shipmill.toml", GATE)
+    row = ss.landing_row("me/demo", tmp_path, FakeGh(pulls((5, False))))
+    assert row.state == "LANDING_OFF"
+    assert row.detail.startswith("#5 wait to land: the gate doesn't land pull requests ([agents] no prs key, so prs")
+
+
+@pytest.mark.parametrize("text", [GATE + "prs = true\n", GATE + "  prs=true # lands\n", 'mode = "release"\n', ""])
+def test_landing_on_or_no_gate_is_ok_without_reading_prs(ss: ModuleType, tmp_path: Path, text: str) -> None:
+    write(tmp_path, ".github/shipmill.toml", text)
+    gh = FakeGh(pulls((5, False)))
+    row = ss.landing_row("me/demo", tmp_path, gh)
+    assert row.state == "LANDING_OK"
+    assert row.state in ss.DONE
+    assert gh.calls == []
+
+
+@pytest.mark.parametrize("found", [pulls(), pulls((7, True), (6, True))])
+def test_landing_off_with_only_drafts_or_nothing_open_is_ok(ss: ModuleType, tmp_path: Path, found: str) -> None:
+    write(tmp_path, ".github/shipmill.toml", GATE + "prs = false\n")
+    gh = FakeGh(found)
+    assert ss.landing_row("me/demo", tmp_path, gh).state == "LANDING_OK"
+    assert gh.calls == [PR_LIST]
+
+
+@pytest.mark.parametrize("value", ['"true"', "yes", "1", "False", "", "true false"])
+def test_a_prs_value_that_isnt_a_toml_boolean_fails(ss: ModuleType, tmp_path: Path, value: str) -> None:
+    write(tmp_path, ".github/shipmill.toml", GATE + f"prs = {value}\n")
+    with pytest.raises(SystemExit) as exc:
+        ss.landing_row("me/demo", tmp_path, FakeGh(pulls()))
+    assert exc.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "out", ["", "{}", json.dumps([{"number": "5", "isDraft": False}]), json.dumps([{"number": 5}])]
+)
+def test_an_unreadable_pr_list_fails(ss: ModuleType, tmp_path: Path, out: str) -> None:
+    write(tmp_path, ".github/shipmill.toml", GATE + "prs = false\n")
+    with pytest.raises(SystemExit) as exc:
+        ss.landing_row("me/demo", tmp_path, FakeGh(out))
+    assert exc.value.code == 2
+
+
+def test_shipmills_own_config_lands_its_prs(ss: ModuleType) -> None:
+    gh = FakeGh(pulls((1, False)))
+    assert ss.landing_row("shipmill/shipmill", SCRIPT.parents[3], gh).state == "LANDING_OK"
+    assert gh.calls == []
