@@ -151,3 +151,19 @@ entry that supersedes it, never by editing an old one.
 - Why: A run cancelled before its cleanup job gets a runner can't clean up after itself, so recovery has to come from a later run; the permission is new for callers, so a caller that doesn't grant it keeps today's behaviour, visibly, instead of breaking
 - Applies to: src/shipmill/land.py, src/shipmill/cli.py, .github/workflows/release.yml, shipmill init, skills/github-ship-watch/scripts/watch_state.py
 - Enforced by: tests (with the implementing PR)
+
+## D-19: A gate without an App is unfinished setup
+
+- Decided: 2026-10-07, in shipmill/shipmill#204
+- Rule: shipmill-setup sets [agents] app_id before it installs the gate's launchd job, and an [agents] prompt with no app_id reads as an action for a person in setup_state.py (AGENTS_NO_APP) and watch_state.py (GATE_NO_APP), never as done; the gate and launchd commands still run without one
+- Why: Without an App a session's comments, PRs, and commits read as the maintainer's own, the maintainer can't approve its PRs, and GitHub doesn't notify them of its mentions; on romamo/treaty a gate went live that way unnoticed because the report counted it as done. Refusing in the gate itself would break gates already installed
+- Applies to: skills/shipmill-setup/SKILL.md, skills/shipmill-setup/scripts/setup_state.py, skills/github-ship-watch/scripts/watch_state.py, [agents] app_id, shipmill status
+- Enforced by: the setup_state.py and watch_state.py tests (with the implementing PR)
+
+## D-20: Setup writes [agents] mode explicitly
+
+- Decided: 2026-10-07, in shipmill/shipmill#205
+- Rule: shipmill-setup asks for [agents] mode every time it sets up the gate and writes the answer as mode = "interactive" or mode = "headless"; an [agents] prompt with no mode key reads as an action in setup_state.py (AGENTS_NO_MODE), while the config's default stays interactive
+- Why: A setup that skipped the question installed an interactive gate on a machine nobody watches (romamo/treaty); the default keeps existing gates working, and the report makes the missing answer visible
+- Applies to: skills/shipmill-setup/SKILL.md, skills/shipmill-setup/scripts/setup_state.py, [agents] mode
+- Enforced by: the setup_state.py tests (with the implementing PR)
