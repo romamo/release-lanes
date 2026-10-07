@@ -6,7 +6,7 @@ description: Set up shipmill in a repository so releases are cut by policy on la
 # Set up shipmill
 
 shipmill cuts releases from a hand-written CHANGELOG on lanes the project's policy
-defines. Read the project's README section "How a release works" once before starting:
+defines. Read [How a release works](https://github.com/shipmill/shipmill/blob/main/docs/release-lanes.md#how-a-release-works) once before starting:
 pre-releases are tagged off main, and stable releases promote a soaked rc.
 
 Run the tool with:

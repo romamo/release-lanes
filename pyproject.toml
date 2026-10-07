@@ -1,15 +1,32 @@
 [project]
 name = "shipmill"
 version = "0.31.1"
-description = "Issue to release on GitHub: agent skills that triage issues and land pull requests, and release lanes cut by policy from a hand-written CHANGELOG"
+description = "The open-source AI software factory for GitHub: agents triage issues and land pull requests, and release lanes publish, deploy, and roll back by policy"
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Romamo" }]
 requires-python = ">=3.14"
+keywords = [
+    "ai-agents",
+    "claude-code",
+    "github",
+    "github-actions",
+    "issue-triage",
+    "release-automation",
+    "changelog",
+    "continuous-delivery",
+    "semantic-versioning",
+]
 dependencies = []
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Bug Tracking",
     "Topic :: Software Development :: Build Tools",
     "Topic :: Software Development :: Version Control :: Git",
     "Typing :: Typed",
@@ -19,7 +36,10 @@ classifiers = [
 shipmill = "shipmill.cli:run"
 
 [project.urls]
+Homepage = "https://shipmill.github.io/shipmill/"
+Documentation = "https://github.com/shipmill/shipmill/tree/main/docs"
 Repository = "https://github.com/shipmill/shipmill"
+Issues = "https://github.com/shipmill/shipmill/issues"
 Changelog = "https://github.com/shipmill/shipmill/blob/main/CHANGELOG.md"
 
 [build-system]

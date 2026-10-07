@@ -7,6 +7,14 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- The README now says what shipmill is, why to use it, and how to start, with a
+  quickstart and links that work on PyPI; the release reference (lanes, policy,
+  environments, operate, autonomy, versions, CLI, limits) moved to
+  `docs/release-lanes.md`. The PyPI metadata gains keywords, classifiers, and homepage,
+  documentation, and issue links, and the GitHub Pages site becomes a landing page
+
 ## [0.31.1] - 2026-10-07
 
 ### Fixed
