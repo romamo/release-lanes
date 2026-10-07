@@ -7,6 +7,14 @@ bot.
 
 ## [Unreleased]
 
+### Fixed
+
+- shipmill-setup no longer calls a stalled factory healthy: `setup_state.py` adds a
+  landing row, `LANDING_OFF` (exit 1) when `[agents]` has `prs = false` (or no `prs` key)
+  and open non-draft pull requests wait, listing them; setup then asks whether the gate
+  should land them, and checks `shipmill status`, calling the setup healthy only when the
+  verdict is IDLE or WORKING (#234)
+
 ## [0.32.1] - 2026-10-07
 
 ### Fixed

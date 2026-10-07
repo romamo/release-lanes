@@ -257,6 +257,22 @@ or the tags are wrong; fix those, not the version.
    setting on, all on GitHub at once; commit the settings change in a follow-up PR. A
    plugin turned off on purpose
    (`PLUGIN_DISABLED`) is the user's call; ask before changing it
+
+   The last row is landing: `LANDING_OFF` when the config's `[agents]` has `prs = false`
+   (or no `prs` key, which the config reads as false) and open non-draft pull requests
+   wait, listed newest first; `LANDING_OK` otherwise. `--fix` leaves it. On
+   `LANDING_OFF`, ask the user whether the gate should land pull requests, showing the
+   ones waiting now: `prs = true` with a prompt that merges when green, or landing them by
+   hand on purpose. In a gate session ask through the needs-decision protocol
+   ([needs-decision.md](../github-issue-triage/references/needs-decision.md)), otherwise
+   with AskUserQuestion
+
+   The checklist reads the setup, not the factory. When checking an existing setup, also
+   run `$CR status <owner/repo>` in the repo's checkout and report the verdict on its first
+   line (`IDLE`, `WORKING`, `WAITS ON YOU`, or `STUCK`) and every line behind a waits-on-you
+   or stuck verdict. Call the setup healthy only when the checklist exits 0 and the
+   verdict is `IDLE` or `WORKING`. Use the plain report: `status --json` passes
+   github-ship-watch's rows through and has no verdict
 4. Ask the user to switch `mode = "release"` once the dry run looks right
 5. Ask where the agents will run: releasing needs none of them, but triage, landing, and
    the shipped notices do. Recommend on demand to start, and offer the other two:

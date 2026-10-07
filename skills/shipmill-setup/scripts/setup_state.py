@@ -50,9 +50,18 @@ on GitHub retargeting a stacked PR when the branch under it is deleted):
   BRANCH_DELETE_OFF  merged PR branches stay on GitHub; --fix turns the setting on
   BRANCH_DELETE_ON   GitHub deletes a PR's branch when it merges
 
-Exit 0 when every row is RELEASE_READY, AGENTS_OK, PLUGIN_OK, LABELS_OK, or
-BRANCH_DELETE_ON, 1 otherwise (AGENTS_NO_APP and AGENTS_NO_MODE included), 2 on bad input, a malformed
-settings.json, both config files, or a git or gh failure (a failed read of the repo
+Landing (the config's [agents] prs: whether the gate lands open pull requests; read the way
+the config loader reads it, so a section without the key has prs = false):
+  LANDING_OFF  an [agents] section with prs = false, and open non-draft pull requests wait
+               (`shipmill status` reads "landing off" and the PRs as waiting on you); the
+               detail lists them newest first. Set [agents] prs = true with a prompt that
+               merges when green, or land them by hand. --fix leaves it: it needs the user
+  LANDING_OK   prs = true, no [agents] section, or no pull request waits to land
+
+Exit 0 when every row is RELEASE_READY, AGENTS_OK, PLUGIN_OK, LABELS_OK,
+BRANCH_DELETE_ON, or LANDING_OK, 1 otherwise (AGENTS_NO_APP, AGENTS_NO_MODE, and
+LANDING_OFF included), 2 on bad input, a malformed settings.json, an [agents] prs that
+isn't a TOML boolean, both config files, or a git or gh failure (a failed read of the repo
 setting never reads as off).
 Needs git and an authenticated gh. Python 3.10+, standard library only.
 """
@@ -95,7 +104,7 @@ NO_MODE = (
     'no mode in [agents]: the gate runs interactive by default, which nobody chose; set mode = "interactive"'
     ' or mode = "headless" (shipmill-setup\'s step 4)'
 )
-DONE = {"RELEASE_READY", "AGENTS_OK", "PLUGIN_OK", "LABELS_OK", "BRANCH_DELETE_ON"}
+DONE = {"RELEASE_READY", "AGENTS_OK", "PLUGIN_OK", "LABELS_OK", "BRANCH_DELETE_ON", "LANDING_OK"}
 
 
 @dataclass(frozen=True)
@@ -287,6 +296,62 @@ def branch_delete_row(repo: str, fix: bool, gh: Callable[[list[str]], str] = run
     return Row("BRANCH_DELETE_OFF", "merged branches stay on GitHub and stacked PRs aren't retargeted")
 
 
+# -- landing -------------------------------------------------------------------------------
+
+
+def agents_prs(section: str, where: Path) -> bool | None:
+    """[agents] prs as a TOML boolean, or None without the key (the config loader's default
+    is false). Anything but true or false fails rather than being guessed"""
+    found = re.findall(r"^[ \t]*prs[ \t]*=(.*)$", section, re.MULTILINE)
+    if not found:
+        return None
+    if len(found) > 1:
+        fail(f"{where}: [agents] sets prs more than once")
+    value = found[0].split("#", 1)[0].strip()
+    if value not in ("true", "false"):
+        fail(f"{where}: [agents] prs must be true or false, got {value!r}")
+    return value == "true"
+
+
+def waiting_prs(repo: str, gh: Callable[[list[str]], str]) -> list[int]:
+    """The open non-draft pull requests, newest first"""
+    cmd = ["gh", "pr", "list", "-R", repo, "--state", "open", "--json", "number,isDraft", "--limit", "500"]
+    try:
+        pulls = json.loads(gh(cmd))
+    except json.JSONDecodeError as exc:
+        fail(f"gh pr list -R {repo}: {exc}")
+    if not isinstance(pulls, list):
+        fail(f"gh pr list -R {repo}: expected a JSON list")
+    found = []
+    for pull in pulls:
+        if not (isinstance(pull, dict) and type(pull.get("number")) is int and type(pull.get("isDraft")) is bool):
+            fail(f"gh pr list -R {repo}: unreadable pull request {pull!r}")
+        if not pull["isDraft"]:
+            found.append(pull["number"])
+    return sorted(found, reverse=True)
+
+
+def landing_row(repo: str, repo_dir: Path, gh: Callable[[list[str]], str] = run) -> Row:
+    """Whether open pull requests wait on a gate that doesn't land them, as `shipmill status`
+    reports it ("landing off"); gh is called only when [agents] has prs = false"""
+    section = agents_section(repo_dir)
+    if section is None:
+        return Row("LANDING_OK", "no [agents] section: no gate to land pull requests")
+    prs = agents_prs(section, repo_dir / CONFIG)
+    if prs:
+        return Row("LANDING_OK", "[agents] prs = true: the gate lands open pull requests")
+    how = "prs = false" if prs is False else "no prs key, so prs = false"
+    waiting = waiting_prs(repo, gh)
+    if not waiting:
+        return Row("LANDING_OK", f"[agents] {how}, and no pull request waits to land")
+    listed = " ".join(f"#{n}" for n in waiting)
+    return Row(
+        "LANDING_OFF",
+        f"{listed} wait to land: the gate doesn't land pull requests ([agents] {how});"
+        " set [agents] prs = true with a prompt that merges when green, or land them by hand",
+    )
+
+
 # -- main ----------------------------------------------------------------------------------
 
 
@@ -333,6 +398,7 @@ def main() -> int:
         plugin_row(settings),
         labels_row(missing, wanted),
         branch_delete_row(args.repo, args.fix),
+        landing_row(args.repo, repo_dir),
     ]
     for row in rows:
         print(json.dumps({"state": row.state, "detail": row.detail}) if args.json else row.text())
