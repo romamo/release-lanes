@@ -149,6 +149,9 @@ $CR plan --lane stable --dry-run
   `incident_label`
 - No `[tool.uv.sources]` entry taken from a local path, which CI and users don't have
 - No branch named `shipmill` on origin, which would block the `shipmill/<tag>` work branches
+- The `shipmill@shipmill` plugin installs on this host for the repo's folder and its gate
+  checkout, as `status` reads them: a WARN with the fix for each one behind the latest
+  release (read with `gh`); without `claude` on PATH it says they weren't read
 
 Each `plan` prints JSON; its `version` must be the next version you expect. If it isn't,
 fix the bump lists or the tags, not the version.
@@ -229,8 +232,9 @@ the details.
    about to start a session checks at most once per 24 hours whether that install is behind
    the latest release and, when it is, runs `claude plugin update shipmill@shipmill --scope
    project` in the checkout first; a failed update is printed on the tick and the session
-   starts anyway (D-22). Either way `status` and the setup checklist report an install that
-   is behind, in the repo's folder and in the gate's checkout, each with its own fix
+   starts anyway (D-22). Either way `status`, `doctor`, and the setup checklist report an
+   install that is behind, in the repo's folder and in the gate's checkout, each with its
+   own fix
 
    Without `app_id`, a session writes as your `gh` login, so its pull requests, merges,
    and commits read as yours. Set it before you schedule the gate, to have them made by a

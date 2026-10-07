@@ -30,7 +30,9 @@ bot.
   own install prints a fix that works: an uninstall and install at that scope, since
   `claude plugin update` in the repo picks the nested gate install (a Claude Code bug).
   shipmill-setup's checklist reads the installs too and reports `PLUGIN_OUTDATED` (not
-  done) for each one behind the release, instead of `PLUGIN_OK` (#233)
+  done) for each one behind the release, instead of `PLUGIN_OK`, and `shipmill doctor`
+  reports them with the same rows and fix text: a `plugin` WARN for each install behind
+  the release, a PASS when none is, and a WARN, never a crash, when they can't be read (#233)
 
 ## [0.32.2] - 2026-10-07
 
