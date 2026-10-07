@@ -1,6 +1,6 @@
 {
   "name": "shipmill",
-  "version": "0.32.0",
+  "version": "0.32.1",
   "description": "The open-source AI software factory for GitHub: triage issues, land pull requests, and release, deploy, and roll back by policy",
   "author": {
     "name": "Roman Medvedev",
