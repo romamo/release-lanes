@@ -7,6 +7,12 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- Decision D-22: the gate updates its checkout's plugin at most once a day, and only when
+  `[agents] plugin_update = true`; otherwise status, doctor, and setup report the behind
+  install with a fix that works in its folder (#233)
+
 ## [0.32.2] - 2026-10-07
 
 ### Fixed
