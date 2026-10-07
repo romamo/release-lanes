@@ -204,8 +204,6 @@ leaves out `--trusted-only`, so a person sees every item (spec 008).
 - A gate on another host than this one: the job, log, and sessions are this machine's
 - Reading the headless gate's process record (`gate.json`): the gate's last decision says
   whether its session runs
-- Naming D-19 and D-20 (a gate needs an App and an explicit mode, still in review): the
-  report already shows both facts, and a later change can cite them once they land
 
 ## Decisions relied on
 
@@ -215,6 +213,9 @@ leaves out `--trusted-only`, so a person sees every item (spec 008).
 - D-15: a hold stops the gate on purpose; the report counts it as the person's to lift
 - D-16: `--trusted-only` stays the unattended gate's; the report shows every item
 - D-17: a headless session never reads as waiting on the user, and isn't in `claude agents`
+- D-19: a gate without an App is unfinished setup: a reason the report waits on you, and
+  `GATE_NO_APP` is placed on the app line
+- D-20: `[agents] mode` is written explicitly; the mode line says when it isn't
 
 ## Issues
 
