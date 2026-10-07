@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-07
+
 ### Changed
 
 - The README now says what shipmill is, why to use it, and how to start, with a
@@ -978,7 +980,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.31.1...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.32.0...HEAD
+[0.32.0]: https://github.com/shipmill/shipmill/compare/v0.31.1...v0.32.0
 [0.31.1]: https://github.com/shipmill/shipmill/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/shipmill/shipmill/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/shipmill/shipmill/compare/v0.29.0...v0.30.0
