@@ -7,6 +7,13 @@ bot.
 
 ## [Unreleased]
 
+### Fixed
+
+- github-ship-watch no longer reads a version tag cut before the package's first PyPI upload
+  as NOT_PUBLISHED, which started a gate session with nothing to repair: such a tag reads
+  PREDATES_PUBLISH, a report-only row, while a later missing release stays NOT_PUBLISHED
+  (#228)
+
 ## [0.31.0] - 2026-10-07
 
 ### Added

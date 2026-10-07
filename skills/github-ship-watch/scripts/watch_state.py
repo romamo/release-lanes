@@ -26,6 +26,9 @@ Each of the --releases newest version tags (default 3):
   NOT_PUBLISHED   the package is on PyPI but this version isn't, --grace minutes after
                   the tag
   PUBLISHING      the same, inside --grace
+  PREDATES_PUBLISH  the same, for a tag created before the package's first upload to
+                  PyPI (the earliest file of any release): cut before the repo published,
+                  so nothing to repair (reported, never an action)
   PUBLISHED       PyPI lists it; NO_REGISTRY when the package isn't on PyPI at all
   UNANNOUNCED     closed issues it fixed that have no "Released in <tag>" comment
                   (github-pr-triage's shipped.py, in plan mode)
@@ -489,13 +492,15 @@ def package_name(repo_dir: Path) -> str | None:
     return name.group(1) if name else None
 
 
-def on_pypi(path: str) -> bool:
+def pypi_json(path: str) -> Any:
+    """PyPI's JSON for a project or a project/version, or None when PyPI hasn't it (404);
+    any other failure stops the watch (exit 2)"""
     try:
         with urllib.request.urlopen(f"https://pypi.org/pypi/{path}/json", timeout=20) as response:
-            return bool(response.status == 200)
+            return json.loads(response.read())
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
-            return False
+            return None
         sys.stderr.write(f"error: PyPI {path}: HTTP {exc.code}\n")
         raise SystemExit(2) from exc
     except urllib.error.URLError as exc:
@@ -503,11 +508,44 @@ def on_pypi(path: str) -> bool:
         raise SystemExit(2) from exc
 
 
-def publish_row(tag: Tag, package: str | None, listed: bool | None, now: dt.datetime, grace: dt.timedelta) -> Row:
+def on_pypi(path: str) -> bool:
+    return pypi_json(path) is not None
+
+
+def first_upload(project: object, package: str) -> dt.datetime | None:
+    """The earliest upload time across every file of every release in a project's PyPI
+    JSON; None when PyPI holds no file of it. A malformed answer stops the watch"""
+    releases = project.get("releases") if isinstance(project, dict) else None
+    if not isinstance(releases, dict):
+        raise Refused(f"error: PyPI {package}: the project JSON has no releases table")
+    times = []
+    for version, files in releases.items():
+        if not isinstance(files, list):
+            raise Refused(f"error: PyPI {package}: release {version} lists no files")
+        for file in files:
+            uploaded = file.get("upload_time_iso_8601") if isinstance(file, dict) else None
+            if not isinstance(uploaded, str):
+                raise Refused(f"error: PyPI {package}: a file of {version} has no upload_time_iso_8601")
+            times.append(parse_time(uploaded))
+    return min(times) if times else None
+
+
+def publish_row(
+    tag: Tag,
+    package: str | None,
+    listed: bool | None,
+    now: dt.datetime,
+    grace: dt.timedelta,
+    first: dt.datetime | None = None,
+) -> Row:
+    """A version tag against PyPI; first is the package's earliest upload there, and a tag
+    created before it was cut before the repo published, so its absence needs no repair"""
     if package is None or listed is None:
         return Row("NO_REGISTRY", tag.name, "")
     if listed:
         return Row("PUBLISHED", tag.name, f"{package} {tag.name[1:]} on PyPI")
+    if first is not None and tag.created < first:
+        return Row("PREDATES_PUBLISH", tag.name, f"{package} {tag.name[1:]} tagged before the first PyPI upload")
     if now - tag.created < grace:
         return Row("PUBLISHING", tag.name, f"tagged {int((now - tag.created).total_seconds() // 60)} min ago")
     return Row("NOT_PUBLISHED", tag.name, f"{package} {tag.name[1:]} missing from PyPI")
@@ -1437,10 +1475,12 @@ def main() -> int:
 
     tags = version_tags(repo_dir)
     package = package_name(repo_dir)
-    registered = package is not None and on_pypi(package)
+    project = pypi_json(package) if package is not None else None
+    registered = project is not None
+    first = first_upload(project, package) if package is not None and project is not None else None
     for i, tag in enumerate(tags[: args.releases]):
         listed = on_pypi(f"{package}/{tag.name[1:]}") if registered else None
-        row = publish_row(tag, package if registered else None, listed, now, grace)
+        row = publish_row(tag, package if registered else None, listed, now, grace, first)
         rows.append(row)
         if row.state in {"PUBLISHED", "NO_REGISTRY"} and i + 1 < len(tags):
             issues = unannounced(args.repo, repo_dir, tags[i + 1].name, tag.name)

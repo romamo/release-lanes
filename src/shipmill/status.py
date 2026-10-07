@@ -44,7 +44,7 @@ STUCK_ROWS = (
 # a hold is a person stopping the factory on purpose (D-15): theirs to lift, not a fault
 YOURS_ROWS = ("HOLD", "PROMOTION_DUE", "POSTMORTEM_DUE", "UNTRUSTED", "BRANCH_DELETE_OFF", "SHIPMILL_OUTDATED")
 RELEASE_ROWS = ("BOT_OK", "BOT_NONE", "BOT_FAILED", "BOT_STALLED", "WORK_BRANCH_STALE")
-TAG_ROWS = ("PUBLISHED", "PUBLISHING", "NOT_PUBLISHED", "NO_REGISTRY", "UNANNOUNCED")
+TAG_ROWS = ("PUBLISHED", "PUBLISHING", "NOT_PUBLISHED", "PREDATES_PUBLISH", "NO_REGISTRY", "UNANNOUNCED")
 # rows whose facts the summary shows in their own words; any other goes under "other" (S-009-13)
 PLACED = {
     *STUCK_ROWS,
