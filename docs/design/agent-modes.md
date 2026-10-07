@@ -36,6 +36,7 @@ remind_hours = 4    # repeat it while the session still waits (1..168)
 max_wait_minutes = 15  # stop a session that waited this long (0..10080); 0: never
 # app_id = 123456      # sessions write as this GitHub App; unset: as the host's gh login
 # mode = "headless"    # interactive (default): sessions ask you; headless: they ask on GitHub
+# plugin_update = true # false (default): no install changes; true: the gate updates its checkout's plugin daily (D-22)
 ```
 
 ```

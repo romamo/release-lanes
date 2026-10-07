@@ -32,10 +32,21 @@ class AgentsConfig:
     max_wait_minutes: int = _MAX_WAIT_MINUTES  # stop a session that waited this long; 0: never
     app_id: int | None = None  # sessions write as this GitHub App (spec 004, D-14); None: the host's gh login
     mode: Mode = Mode.INTERACTIVE  # headless: `claude -p` (spec 005); either mode asks via needs-decision (D-21)
+    plugin_update: bool = False  # update the gate checkout's plugin install, once a day (D-22); False: never
 
     @classmethod
     def parse(cls, table: Table) -> AgentsConfig:
-        table.allow("prompt", "prs", "retry_hours", "notify", "remind_hours", "max_wait_minutes", "app_id", "mode")
+        table.allow(
+            "prompt",
+            "prs",
+            "retry_hours",
+            "notify",
+            "remind_hours",
+            "max_wait_minutes",
+            "app_id",
+            "mode",
+            "plugin_update",
+        )
         prompt = table.string("prompt").strip()
         if not prompt:
             raise ReleaseError(f"{table.where}: prompt must not be empty")
@@ -52,6 +63,7 @@ class AgentsConfig:
             max_wait_minutes=max_wait,
             app_id=table.integer("app_id", default=None, low=1, high=None),
             mode=table.enum("mode", Mode, default=Mode.INTERACTIVE),
+            plugin_update=table.boolean("plugin_update", default=False),
         )
 
     @classmethod

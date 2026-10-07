@@ -221,7 +221,16 @@ the details.
    max_wait_minutes = 15 # stop a session that waited this long; 0: never
    # app_id = 123456  # sessions write as this GitHub App; unset: as your gh login
    # mode = "headless" # interactive (default): sessions ask you; headless: `claude -p`, they ask on GitHub
+   # plugin_update = true # false (default): the gate changes no plugin install; true: it updates its checkout's, once a day
    ```
+
+   The gate's checkout has a shipmill plugin install of its own, apart from the repo's
+   (Claude Code keys a project install on the folder). With `plugin_update = true`, a tick
+   about to start a session checks at most once per 24 hours whether that install is behind
+   the latest release and, when it is, runs `claude plugin update shipmill@shipmill --scope
+   project` in the checkout first; a failed update is printed on the tick and the session
+   starts anyway (D-22). Either way `status` and the setup checklist report an install that
+   is behind, in the repo's folder and in the gate's checkout, each with its own fix
 
    Without `app_id`, a session writes as your `gh` login, so its pull requests, merges,
    and commits read as yours. Set it before you schedule the gate, to have them made by a
@@ -421,7 +430,9 @@ reopens it after it ends.
    Either way a tick that reads the state records the waiting items in
    `shipmill/needs-decision.json`, and `gate --json` reports `mode` and a `decisions` list
    (`item`, `since`, `waited_hours`, `notified`, `error`). `mode` is null on a HELD,
-   WAITING, or RUNNING tick, which reads no config
+   WAITING, or RUNNING tick, which reads no config. `plugin` is the daily plugin check of
+   a launch with `plugin_update = true` (`installed`, `latest`, `updated`, `error`), null
+   when none ran
 
 ## Pause or remove it
 

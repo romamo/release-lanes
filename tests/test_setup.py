@@ -142,6 +142,22 @@ def test_init_writes_an_environments_example_that_parses(repo: Repo) -> None:
     ]
 
 
+def test_init_writes_an_agents_example_that_states_the_plugin_update_default(repo: Repo) -> None:
+    """#233, D-22: the template shows plugin_update, commented, with its default"""
+    written = init(repo.root, "ci.yml", force=True).written
+    text = written[0].read_text(encoding="utf-8")
+    assert Policy.load(written[0]).agents is None  # commented out
+    start = text.index("# [agents]")
+    end = text.find("\n\n", start)
+    block = text[start:] if end == -1 else text[start:end]
+    assert "# plugin_update = false             # the default:" in block
+    example = "\n".join(line.removeprefix("#").removeprefix(" ") for line in block.splitlines())
+    repo.write(".github/shipmill.toml", text[:start] + example + "\n")
+    agents = Policy.load(written[0]).agents
+    assert agents is not None and agents.plugin_update is False
+    assert agents.prompt.startswith("/shipmill:github-issue-triage {repo} ")
+
+
 def test_doctor_checks_each_environments_workflow(repo: Repo) -> None:
     repo.write(
         repo.policy_file,
