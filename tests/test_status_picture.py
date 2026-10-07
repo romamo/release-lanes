@@ -198,6 +198,15 @@ def test_s009_13_a_row_the_report_doesnt_place_is_printed_under_other() -> None:
     assert "  other          WORKTREE_STALE /w kept 9 days" in text
 
 
+def test_a_tag_cut_before_the_first_pypi_upload_is_no_problem_and_not_under_other() -> None:
+    # #228: a release older than the repo's publish workflow has nothing to repair
+    found = facts(Row("PREDATES_PUBLISH", "v0.25.0", "x 0.25.0 tagged before the first PyPI upload", False))
+    text = lines(found)
+    assert text[1] == "  repo           in sync at v0.26.0, release ok"
+    assert not any(line.startswith("  other") for line in text)
+    assert report(found).verdict is Verdict.IDLE
+
+
 def test_s009_13_a_row_the_sessions_line_shows_is_not_under_other_too() -> None:
     text = lines(facts(Row("HOST_UNKNOWN", "claude", "not on PATH", False)))
     assert "  sessions       not read: not on PATH" in text

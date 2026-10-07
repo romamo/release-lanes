@@ -154,6 +154,49 @@ def test_publish_states(ws: ModuleType) -> None:
     assert ws.publish_row(old, None, None, NOW, GRACE).state == "NO_REGISTRY"
 
 
+def pypi_project(*uploads: tuple[str, list[str]]) -> dict[str, object]:
+    """A project's PyPI JSON, cut down to each release's files' upload times"""
+    return {"info": {"name": "pkg"}, "releases": {v: [{"upload_time_iso_8601": t} for t in ts] for v, ts in uploads}}
+
+
+def test_a_tag_cut_before_the_first_pypi_upload_reads_predates_publish(ws: ModuleType) -> None:
+    # #228: tags cut before the repo had a publish workflow read NOT_PUBLISHED, which starts an agent
+    project = pypi_project(
+        ("1.3.0", ["2026-10-07T12:00:00.123456Z", "2026-10-07T11:00:05.500000Z"]), ("1.2.9", []), ("1.4.0", [])
+    )
+    first = ws.first_upload(project, "pkg")
+    assert first == dt.datetime(2026, 10, 7, 11, 0, 5, 500000, tzinfo=dt.UTC)
+    now = first + dt.timedelta(hours=3)
+    before = ws.Tag("v1.2.0", first - dt.timedelta(hours=2))
+    uploaded = ws.Tag("v1.3.0", first - dt.timedelta(minutes=3))  # tagged, then uploaded
+    after = ws.Tag("v1.4.0", first + dt.timedelta(hours=1))
+    fresh = ws.Tag("v1.4.1", now - dt.timedelta(minutes=5))
+    predates = ws.publish_row(before, "pkg", False, now, GRACE, first)
+    assert predates == ws.Row("PREDATES_PUBLISH", "v1.2.0", "pkg 1.2.0 tagged before the first PyPI upload")
+    assert predates.json()["agent"] is False and predates.state not in ws.ACTION
+    assert ws.publish_row(uploaded, "pkg", True, now, GRACE, first).state == "PUBLISHED"
+    assert ws.publish_row(after, "pkg", False, now, GRACE, first).state == "NOT_PUBLISHED"
+    assert ws.publish_row(fresh, "pkg", False, now, GRACE, first).state == "PUBLISHING"
+    assert ws.publish_row(before, None, None, now, GRACE, None).state == "NO_REGISTRY"
+
+
+def test_a_project_with_no_file_on_pypi_has_no_first_upload(ws: ModuleType) -> None:
+    first = ws.first_upload(pypi_project(("1.0.0", [])), "pkg")
+    assert first is None
+    old = ws.Tag("v1.0.0", NOW - dt.timedelta(days=30))
+    assert ws.publish_row(old, "pkg", False, NOW, GRACE, first).state == "NOT_PUBLISHED"
+
+
+@pytest.mark.parametrize(
+    "project",
+    [[], {"info": {}}, {"releases": []}, {"releases": {"1.0": {}}}, {"releases": {"1.0": [{"upload_time": "x"}]}}],
+)
+def test_a_malformed_pypi_project_stops_the_watch(ws: ModuleType, project: object) -> None:
+    with pytest.raises(ws.Refused) as refused:
+        ws.first_upload(project, "pkg")
+    assert refused.value.code == 2 and "PyPI pkg" in str(refused.value)
+
+
 def test_bot_detection(ws: ModuleType, tmp_path: Path) -> None:
     assert ws.bot_workflow(tmp_path) is None
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
@@ -619,6 +662,7 @@ REPORT_ROWS = [
     "BOT_OK",
     "PUBLISHED",
     "PUBLISHING",
+    "PREDATES_PUBLISH",
     "WORKTREE_STALE",
     "NEEDS_DECISION",
     "UNTRUSTED",
