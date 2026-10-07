@@ -12,10 +12,6 @@ bot.
 - Decision D-21: every gate session, interactive or headless, asks its questions through
   the needs-decision protocol, so a question nobody answers waits on GitHub instead of
   holding the gate (#206)
-- Spec 009: `shipmill status` becomes a short linked summary: the repo's link and the
-  verdict, one line each for the repo, every item that needs a decision with its own
-  link, the open issues and pull requests, the gate as `OK` or its problem, the mode,
-  the GitHub App, and shipmill; empty lines are dropped (#212)
 - Every `shipmill gate` session asks through the needs-decision protocol, interactive
   too: the interactive prompt ends with a `Gate session:` paragraph naming your `gh`
   login, so the session posts its question as a marked comment with the `needs-decision`
