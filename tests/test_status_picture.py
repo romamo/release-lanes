@@ -133,6 +133,17 @@ def test_s009_3_the_log_failure_after_a_decision_is_its_last_line() -> None:
     assert parse_waketime("{ sec = 0, usec = 0 }") is None
 
 
+def test_s009_3_a_traceback_shows_its_error_and_a_named_exit_code_is_still_a_number() -> None:
+    log = "QUIET: nothing\nTraceback (most recent call last):\n  File \"x\", line 1, in <module>\nKeyError: 'agent'\n"
+    found = parse_job({"StartInterval": 900}, "\tstate = not running\n\tlast exit code = 78: EX_CONFIG\n", log, NOW)
+    assert (found.last, found.failed, found.last_exit) == ("KeyError: 'agent'", True, "78: EX_CONFIG")
+    reasons = report(facts(gate=gate(job=found))).reasons
+    assert "the gate's last run exited 78: EX_CONFIG" in reasons
+    assert "the gate's last tick failed: KeyError: 'agent'" in reasons
+    later = parse_job({}, None, log + "QUIET: nothing needs an agent\n", NOW)
+    assert (later.last, later.failed) == ("QUIET: nothing needs an agent", False)
+
+
 def test_s009_4_a_failed_app_check_is_stuck_and_shown() -> None:
     found = facts(gate=gate(app=None, app_error="the App isn't installed on acme/web"))
     assert report(found).verdict is Verdict.STUCK

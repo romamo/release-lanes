@@ -228,8 +228,12 @@ def parse_job(plist: dict[str, object], printed: str | None, log: str | None, wr
     interval = plist.get("StartInterval")
     state = re.search(r"^\tstate = (.+)$", printed or "", re.MULTILINE)
     code = re.search(r"^\tlast exit code = (.+)$", printed or "", re.MULTILINE)
-    found = [line for line in (log or "").splitlines() if DECISION.match(line) or FAILURE.match(line)]
-    last = found[-1] if found else None
+    last, traceback = None, False
+    for line in (log or "").splitlines():
+        if DECISION.match(line) or FAILURE.match(line):
+            last, traceback = line, line.startswith("Traceback ")
+        elif traceback and line.strip() and not line[0].isspace():
+            last = line  # a traceback's last unindented line is its error
     return Job(
         interval=dt.timedelta(seconds=interval) if isinstance(interval, int) else None,
         loaded=printed is not None,
@@ -237,7 +241,7 @@ def parse_job(plist: dict[str, object], printed: str | None, log: str | None, wr
         last_exit=code.group(1).strip() if code else None,
         last_run=written,
         last=last,
-        failed=last is not None and FAILURE.match(last) is not None,
+        failed=traceback or (last is not None and FAILURE.match(last) is not None),
     )
 
 
@@ -411,7 +415,8 @@ def gate_reasons(gate: Gate, repo: str, now: dt.datetime) -> tuple[list[str], li
         elif not job.loaded:
             stuck.append("the gate's launchd job is installed but not loaded")
         else:
-            if job.last_exit is not None and job.last_exit.isdigit() and job.last_exit != "0":
+            code = re.match(r"^-?\d+", job.last_exit or "")  # launchctl may add a name: "78: EX_CONFIG"
+            if code is not None and int(code.group()) != 0:
                 stuck.append(f"the gate's last run exited {job.last_exit}")
             if job.interval is not None and job.last_run is not None and not job.running:
                 since = max(job.last_run, gate.woke) if gate.woke is not None else job.last_run
