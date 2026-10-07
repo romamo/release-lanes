@@ -273,6 +273,11 @@ Verified on Claude Code 2.1:
   - The session exited on its own about 10 seconds in, though its last reply ended with
     "Decision needed (@<login>): ..."; `claude agents` doesn't list it
   - Its transcript was saved under `--session-id`, so `claude --resume <uuid>` reopens it
+- A `claude -p` session that ends its turn while its background subagents run stops them
+  10 minutes later unless `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`; one gate session
+  landed 1 of 11 PRs that way (#246). The gate sets it to `0` in the process environment
+  of every headless launch (not argv, not `--settings`, so S-005-3's command line is
+  unchanged), and a value already in the gate's own environment passes through
 
 ### State
 

@@ -329,8 +329,19 @@ class Claude(Protocol):
 
 
 Runner = Callable[[list[str], Path], str]  # (command, cwd) -> its stdout
-Spawner = Callable[[list[str], Path, Path], int]  # (command, cwd, log) -> the detached process's pid
+Spawner = Callable[[list[str], Path, Path, Mapping[str, str]], int]  # (command, cwd, log, env) -> its pid
 StartTime = Callable[[int], str | None]  # pid -> its process's start time; None when no such process
+
+# Claude Code stops a `claude -p` session's background subagents this long after its last
+# turn; "0" waits for them however long they run (#246)
+BG_WAIT_CEILING = "CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS"
+
+
+def headless_env(environ: Mapping[str, str]) -> dict[str, str]:
+    """The headless session's process env: the gate's own, with no ceiling on how long `claude
+    -p` waits for its background subagents unless the gate's env sets one. Never `--settings`:
+    that env is for the session's tools, and Claude Code reads this variable from its own"""
+    return {**environ, BG_WAIT_CEILING: environ.get(BG_WAIT_CEILING, "0")}
 
 
 def run_command(cmd: list[str], cwd: Path) -> str:
@@ -341,14 +352,21 @@ def run_command(cmd: list[str], cwd: Path) -> str:
     return proc.stdout
 
 
-def spawn_detached(cmd: list[str], cwd: Path, log: Path) -> int:
-    """Start cmd in a new process session, stdin from /dev/null and its output appended to
-    log, and return without waiting for it (D-17): the tick that starts it exits, it goes on"""
+def spawn_detached(cmd: list[str], cwd: Path, log: Path, env: Mapping[str, str]) -> int:
+    """Start cmd with env in a new process session, stdin from /dev/null and its output
+    appended to log, and return without waiting for it (D-17): the tick that starts it exits,
+    it goes on"""
     log.parent.mkdir(parents=True, exist_ok=True)
     try:
         with log.open("ab") as out:
             proc = subprocess.Popen(
-                cmd, cwd=cwd, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, start_new_session=True
+                cmd,
+                cwd=cwd,
+                env=dict(env),
+                stdin=subprocess.DEVNULL,
+                stdout=out,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
             )
     except OSError as exc:
         raise ReleaseError(f"{' '.join(cmd[:2])} could not start: {exc}") from None
@@ -379,10 +397,17 @@ def host_login(workspace: Path, run: Runner = run_command) -> str:
 
 
 class ClaudeCli:
-    def __init__(self, args: Sequence[str] = (), run: Runner = run_command, spawn: Spawner = spawn_detached) -> None:
+    def __init__(
+        self,
+        args: Sequence[str] = (),
+        run: Runner = run_command,
+        spawn: Spawner = spawn_detached,
+        environ: Mapping[str, str] = os.environ,
+    ) -> None:
         self.args = tuple(args)  # extra flags for the launched session, such as --permission-mode
         self._run = run
         self._spawn = spawn
+        self._environ = environ  # the gate's own env, which a headless session inherits
 
     def sessions(self, workspace: Path, repo: str) -> list[Session]:
         return parse_sessions(self._run(["claude", "agents", "--json", "--cwd", str(workspace)], workspace), repo)
@@ -402,7 +427,8 @@ class ClaudeCli:
         settings = [] if env is None else ["--settings", json.dumps({"env": dict(env)})]
         tools = ["--allowedTools", HEADLESS_TOOLS, "--disallowedTools", "AskUserQuestion"]
         head = ["claude", "-p", "--permission-prompts", "none", *tools, "--session-id", str(session)]
-        return self._spawn([*head, *settings, "-n", name, *self.args, "--", text], workspace, log)
+        cmd = [*head, *settings, "-n", name, *self.args, "--", text]
+        return self._spawn(cmd, workspace, log, headless_env(self._environ))
 
     def stop(self, session: str) -> None:
         self._run(["claude", "stop", session], Path.cwd())

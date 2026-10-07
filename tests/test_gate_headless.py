@@ -11,7 +11,7 @@ import sys
 import time
 import tomllib
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,6 +23,7 @@ from shipmill.autonomy import Hold
 from shipmill.config import Table
 from shipmill.errors import ReleaseError
 from shipmill.gate import (
+    BG_WAIT_CEILING,
     HEADLESS_REFUSED,
     HEADLESS_TOOLS,
     RECORD,
@@ -173,10 +174,12 @@ class Spawned:
     """ClaudeCli's spawner and runner: records each detached command and answers `claude agents`"""
 
     commands: list[tuple[list[str], Path, Path]] = field(default_factory=list)
+    envs: list[dict[str, str]] = field(default_factory=list)
     run: list[list[str]] = field(default_factory=list)
 
-    def __call__(self, cmd: list[str], cwd: Path, log: Path) -> int:
+    def __call__(self, cmd: list[str], cwd: Path, log: Path, env: Mapping[str, str]) -> int:
         self.commands.append((cmd, cwd, log))
+        self.envs.append(dict(env))
         return PID
 
     def runner(self, cmd: list[str], cwd: Path) -> str:
@@ -389,6 +392,49 @@ def test_s005_3_with_an_app_the_settings_env_goes_before_the_name(checkout: Git,
     assert json.loads(cmd[at + 1])["env"]["GIT_AUTHOR_NAME"] == BOT
 
 
+# #246: Claude Code stopped a headless session's background subagents 10 minutes after its last turn
+
+
+GATE_ENV = {"PATH": "/opt/bin:/usr/bin", "HOME": "/Users/amy", "GH_CONFIG_DIR": "/Users/amy/.config/gh"}
+
+
+def test_246_a_headless_session_waits_for_its_background_subagents(checkout: Git) -> None:
+    spawned = Spawned()
+    claude = ClaudeCli([], run=spawned.runner, spawn=spawned, environ=GATE_ENV)
+    tick(checkout, headless(), claude, Reads())
+    [env] = spawned.envs
+    assert env == {**GATE_ENV, BG_WAIT_CEILING: "0"}
+    [(cmd, _, _)] = spawned.commands
+    assert not any(BG_WAIT_CEILING in arg for arg in cmd)  # neither argv nor --settings
+
+
+def test_246_a_ceiling_the_gate_env_sets_passes_through(checkout: Git, tmp_path: Path) -> None:
+    spawned = Spawned()
+    environ = {**GATE_ENV, BG_WAIT_CEILING: "3600000"}
+    claude = ClaudeCli([], run=spawned.runner, spawn=spawned, environ=environ)
+    prepared = Prepared(checkout, gh_path(tmp_path))
+    tick(checkout, headless(APP_ID), claude, Reads(), app=app_check_for(tmp_path), app_env=prepared)
+    assert spawned.envs == [environ]
+    [(cmd, _, _)] = spawned.commands
+    assert BG_WAIT_CEILING not in json.loads(cmd[cmd.index("--settings") + 1])["env"]
+
+
+def test_246_an_interactive_launch_spawns_nothing_with_the_ceiling(checkout: Git) -> None:
+    spawned = Spawned()
+    claude = ClaudeCli(["--permission-mode=auto"], run=spawned.runner, spawn=spawned, environ=GATE_ENV)
+    tick(checkout, interactive(), claude, Reads(), started=unasked)
+    assert spawned.envs == [] and not any(BG_WAIT_CEILING in arg for arg in spawned.run[1])
+
+
+def test_246_the_detached_process_runs_with_the_env_given(tmp_path: Path) -> None:
+    log = tmp_path / "env.log"
+    code = f"import os; print(repr(os.environ.get({BG_WAIT_CEILING!r})), os.environ.get('SHIPMILL_T'), flush=True)"
+    env = {**os.environ, BG_WAIT_CEILING: "0", "SHIPMILL_T": "kept"}
+    pid = spawn_detached([sys.executable, "-c", code], tmp_path, log, env)
+    assert os.waitpid(pid, 0)[0] == pid
+    assert log.read_text(encoding="utf-8") == "'0' kept\n"
+
+
 # S-005-5
 
 
@@ -568,7 +614,7 @@ def test_s005_19_the_session_runs_in_a_new_session_with_no_stdin_appending_its_l
         "print('stdin empty', sys.stdin.read() == '', flush=True);"
         "print('to stderr', file=sys.stderr)"
     )
-    pid = spawn_detached([sys.executable, "-c", code], tmp_path, log)
+    pid = spawn_detached([sys.executable, "-c", code], tmp_path, log, os.environ)
     deadline = time.monotonic() + 20
     while "to stderr" not in log.read_text(encoding="utf-8"):
         assert time.monotonic() < deadline, log.read_text(encoding="utf-8")
@@ -579,7 +625,7 @@ def test_s005_19_the_session_runs_in_a_new_session_with_no_stdin_appending_its_l
 
 def test_s005_19_the_launch_returns_without_waiting_and_its_start_time_is_read(tmp_path: Path) -> None:
     begun = time.monotonic()
-    pid = spawn_detached(["sleep", "30"], tmp_path, tmp_path / "sleep.log")
+    pid = spawn_detached(["sleep", "30"], tmp_path, tmp_path / "sleep.log", os.environ)
     try:
         assert time.monotonic() - begun < 10
         started = start_time(pid)
@@ -592,7 +638,7 @@ def test_s005_19_the_launch_returns_without_waiting_and_its_start_time_is_read(t
 
 def test_s005_19_a_command_that_cant_start_exits_2(tmp_path: Path) -> None:
     with pytest.raises(ReleaseError, match="could not start"):
-        spawn_detached([str(tmp_path / "no-claude"), "-p"], tmp_path, tmp_path / "x.log")
+        spawn_detached([str(tmp_path / "no-claude"), "-p"], tmp_path, tmp_path / "x.log", os.environ)
 
 
 # S-005-20
