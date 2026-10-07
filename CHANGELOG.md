@@ -7,6 +7,15 @@ bot.
 
 ## [Unreleased]
 
+### Fixed
+
+- The CLI's own hints name the full `uvx --from git+https://github.com/shipmill/shipmill@v0
+  shipmill` form instead of a bare `shipmill <command>`: the `next:` line after `init`,
+  doctor's workflow and operate details, the launchd error off macOS, the status picture's
+  launchd reason, `app-create`'s closing line, and the operate note in the config `init`
+  writes. A test fails on a bare command in any string the package prints, raises, or
+  writes (#223)
+
 ## [0.30.0] - 2026-10-07
 
 ### Added

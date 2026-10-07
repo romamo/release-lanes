@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from shipmill import CLI
 from shipmill.autonomy import HOLD_LABEL
 from shipmill.cli import main
 from shipmill.doctor import OPERATE_CALLER, doctor
@@ -411,7 +412,7 @@ def test_init_operate_writes_the_caller_and_doctor_wants_it_only_when_used(repo:
     assert operate_check() is None  # D-9: no from, no health, no warning
     configure(repo)
     status, detail = operate_check() or ("", "")
-    assert status == "WARN" and "`shipmill init --operate` writes it" in detail
+    assert status == "WARN" and f"`{CLI} init --operate` writes it" in detail
     init_operate(repo.root, force=False)
     assert operate_check() == (
         "PASS",

@@ -15,6 +15,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from shipmill import CLI
 from shipmill.agents import AgentsConfig, Mode
 from shipmill.app import Identity, default_key
 from shipmill.config import CONFIG_PATH, config_path, read
@@ -440,7 +441,7 @@ def gate_reasons(gate: Gate, repo: str, now: dt.datetime) -> tuple[list[str], li
         return stuck, yours
     if gate.launchd:
         if gate.job is None:  # another host may run it: the report reads only this one
-            yours.append(f"no launchd job runs the gate on this host: shipmill launchd {repo}")
+            yours.append(f"no launchd job runs the gate on this host: {CLI} launchd {repo}")
         else:
             for p in job_problems(gate, gate.job, repo, now):
                 if p.verdict is Verdict.STUCK:
