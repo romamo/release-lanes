@@ -18,10 +18,10 @@ Agents (the config's [agents] section, read by `shipmill gate`):
                    only on demand
   AGENTS_NO_APP    a prompt but no app_id, in either mode: no App is connected, so
                    sessions write as the host's gh login (their PRs, comments, and
-                   commits read as the user's, who can't approve them, and in
-                   headless mode GitHub won't notify them of a needs-decision
-                   mention). The gate still runs; shipmill-setup's step 3 under The
-                   gate connects one (D-19). --fix leaves it: it needs the user
+                   commits read as the user's, who can't approve them, and GitHub
+                   won't notify them of a needs-decision mention). The gate still
+                   runs; shipmill-setup's step 3 under The gate connects one (D-19).
+                   --fix leaves it: it needs the user
   AGENTS_NO_MODE   a prompt and app_id but no mode key: the gate runs interactive by
                    default, but nobody chose it, so a machine nobody watches may hold
                    the repo on a question. shipmill-setup's step 4 under The gate asks
@@ -40,9 +40,9 @@ Plugin (.claude/settings.json, so every session in the repo loads the skills):
 
 Labels (the triage skills and shipmill read them):
   LABELS_MISSING   some of postponed, blocked, shipmill-hold, the config's
-                   blocker_label (default release-blocker), and, with [agents]
-                   mode = "headless", needs-decision don't exist; --fix creates them
-                   on GitHub
+                   blocker_label (default release-blocker), and, with an [agents]
+                   section in either mode, needs-decision don't exist; --fix creates
+                   them on GitHub
   LABELS_OK        all exist
 
 Branches (the repo setting delete_branch_on_merge; github-pr-triage's stacked merges rely
@@ -146,12 +146,6 @@ def agents_section(repo_dir: Path) -> str | None:
     return section.group(1) if section else None
 
 
-def is_headless(repo_dir: Path) -> bool:
-    """[agents] mode = "headless" (spec 005); `shipmill gate` validates the value"""
-    section = agents_section(repo_dir)
-    return section is not None and policy_value(section, "mode") == "headless"
-
-
 def calls_shipmill(repo_dir: Path) -> bool:
     """release.yml calls shipmill's prepare workflow, from shipmill/shipmill (or its old
     path, romamo/shipmill) or, in shipmill itself and its forks, from a local copy"""
@@ -242,7 +236,7 @@ def wanted_labels(repo_dir: Path) -> dict[str, tuple[str, str]]:
     config = config_file(repo_dir)
     blocker = policy_value(config.read_text(encoding="utf-8"), "blocker_label") if config else None
     wanted[blocker or "release-blocker"] = BLOCKER
-    if is_headless(repo_dir):
+    if agents_section(repo_dir) is not None:  # every gate session asks this way, in either mode (D-21)
         wanted[NEEDS_DECISION] = NEEDS_DECISION_LABEL
     return wanted
 

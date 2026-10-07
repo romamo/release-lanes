@@ -17,7 +17,7 @@ from shipmill.errors import ReleaseError
 from shipmill.gate import Action, Decision, Finding, Waiting, gate, pruner, tick_lines, tick_record
 from shipmill.worktrees import Judged, LiveSession
 
-from .test_gate import ISSUES, FakeClaude, FakeNotifier, cfg, on_hold
+from .test_gate import ISSUES, FakeClaude, FakeNotifier, cfg, host, on_hold
 from .test_worktrees import CHANGELOG, Checkout, branches, fake_tool, run
 
 REPO = "romamo/demo"
@@ -65,6 +65,7 @@ def tick(
         FakeNotifier(),
         pruner(git, c.github, c.sessions),
         dry_run=dry_run,
+        login=host,
     )
 
 

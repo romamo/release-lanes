@@ -229,19 +229,34 @@ def test_s005_16_headless_wants_the_needs_decision_label(ss: ModuleType, tmp_pat
 
 @pytest.mark.parametrize(
     "text",
-    ["", 'mode = "release"\n', '[agents]\nprompt = "x"\n', '[agents]\nprompt = "x"\nmode = "interactive"\n'],
+    [
+        '[agents]\nprompt = "x"\n',
+        '[agents]\nprompt = "x"\nmode = "interactive"\n',
+        '[agents]\nprompt = "x"\napp_id = 1\n',
+    ],
 )
-def test_s005_16_interactive_or_no_agents_doesnt_want_the_label(ss: ModuleType, tmp_path: Path, text: str) -> None:
+def test_d21_interactive_wants_the_needs_decision_label_too(ss: ModuleType, tmp_path: Path, text: str) -> None:
+    # #206, D-21: an interactive gate session posts its questions as needs-decision too
+    write(tmp_path, ".github/shipmill.toml", text)
+    wanted = ss.wanted_labels(tmp_path)
+    assert set(wanted) == BASE_LABELS | {"needs-decision"}
+    assert ss.labels_row([], wanted).detail == (
+        "postponed, blocked, shipmill-hold, needs-decision, and the blocker label exist"
+    )
+
+
+@pytest.mark.parametrize("text", ["", 'mode = "release"\n', '[lanes.dev]\nmode = "headless"\n'])
+def test_s005_16_no_agents_doesnt_want_the_label(ss: ModuleType, tmp_path: Path, text: str) -> None:
     write(tmp_path, ".github/shipmill.toml", text)
     wanted = ss.wanted_labels(tmp_path)
     assert set(wanted) == BASE_LABELS
     assert ss.labels_row([], wanted).detail == "postponed, blocked, shipmill-hold, and the blocker label exist"
-    assert ss.agents_row(tmp_path).state in {"AGENTS_MISSING", "AGENTS_NO_APP"}
+    assert ss.agents_row(tmp_path).state == "AGENTS_MISSING"
 
 
 def test_s005_16_a_headless_mode_outside_agents_doesnt_count(ss: ModuleType, tmp_path: Path) -> None:
     write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "x"\napp_id = 1\n[lanes.dev]\nmode = "headless"\n')
-    assert set(ss.wanted_labels(tmp_path)) == BASE_LABELS
+    assert set(ss.wanted_labels(tmp_path)) == BASE_LABELS | {"needs-decision"}  # the [agents] section, D-21
     assert ss.agents_row(tmp_path).state == "AGENTS_NO_MODE"  # another table's mode isn't [agents]'s
 
 
@@ -253,7 +268,7 @@ def test_s005_16_fix_creates_the_label_only_when_wanted(ss: ModuleType, tmp_path
     create = ["gh", "label", "create", "needs-decision", "-R", "me/demo", "--color", "d876e3"]
     assert gh.calls == [[*create, "--description", description]]
 
-    write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "x"\nmode = "interactive"\n')
+    write(tmp_path, ".github/shipmill.toml", 'mode = "release"\n')
     wanted = ss.wanted_labels(tmp_path)
     gh.calls.clear()
     ss.create_labels("me/demo", wanted, [name for name in wanted if name == "release-blocker"], gh)

@@ -148,7 +148,7 @@ fix the bump lists or the tags, not the version.
    ```
 
 3. Create the labels the skills and gates read (`postponed`, `blocked`, `shipmill-hold`,
-   the blocker label, and in [headless mode](#run-it-headless) `needs-decision`). The setup checklist reports what's missing, and `--fix` creates
+   the blocker label, and with an `[agents]` section `needs-decision`). The setup checklist reports what's missing, and `--fix` creates
    it:
 
    ```bash
@@ -345,8 +345,9 @@ never falls back to your login. The gate's own reads still use your `gh` login. 
 ### Run it headless
 
 Optional, for a machine nobody watches. By default a session that asks you something
-waits, and the gate starts nothing else for the repo until you answer or
-`max_wait_minutes` stops it. With `mode = "headless"` in `[agents]`, merged like the rest
+posts the question on GitHub as the protocol below, then waits for your answer in the
+session (D-21); the gate starts nothing else for the repo until you answer or
+`max_wait_minutes` stops it, and the item then waits on GitHub. With `mode = "headless"` in `[agents]`, merged like the rest
 of the section, each launch runs `claude -p` instead: no permission prompts, no
 AskUserQuestion, and a fixed list of tools. It can't wait on you, so it ends, and a
 decision for you becomes a comment on the issue or pull request plus the `needs-decision`
@@ -359,8 +360,8 @@ A headless session isn't listed in `claude agents`: follow it with `tail -f` on 
 `$(git rev-parse --git-common-dir)/shipmill/sessions/`, and `claude --resume <uuid>`
 reopens it after it ends.
 
-1. **Create the label.** The setup checklist wants `needs-decision` in headless mode only;
-   `setup_state.py <owner/repo> --fix` creates it
+1. **Create the label.** The setup checklist wants `needs-decision` whenever the config
+   has an `[agents]` section, in either mode; `setup_state.py <owner/repo> --fix` creates it
 
 2. **Know the allowlist.** A headless session may use `HEADLESS_TOOLS`, defined in
    `src/shipmill/gate.py`:

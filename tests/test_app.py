@@ -31,7 +31,7 @@ from shipmill.errors import ReleaseError
 from shipmill.gate import RECORD, Action, Finding, gate, state_dir
 from shipmill.gitrepo import Git
 
-from .test_gate import ISSUES, NO_PRUNE, NOW, FakeClaude, FakeNotifier, bg, write_config
+from .test_gate import ISSUES, NO_PRUNE, NOW, FakeClaude, FakeNotifier, bg, host, write_config
 
 
 @pytest.fixture
@@ -202,6 +202,7 @@ def test_s004_2_app_key_is_checked_against_the_refreshed_config(tmp_path: Path) 
         app=check,
         app_key_named=True,
         app_env=lambda identity: {"GIT_AUTHOR_NAME": identity.login},
+        login=host,
     )
     assert AgentsConfig.load(root).app_id == APP_ID  # the checkout moved
     assert [path for path, _ in api.calls] == CHECKS
@@ -398,5 +399,6 @@ def test_with_app_id_unset_the_app_is_never_checked(checkout: Git) -> None:
         FakeNotifier(),
         NO_PRUNE,
         app=unchecked,
+        login=host,
     )
     assert (decision.action, launched) == (Action.LAUNCH, "s1")

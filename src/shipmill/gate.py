@@ -229,6 +229,23 @@ def headless_prompt(template: str, repo: str, work: Sequence[Finding], now: dt.d
     return f"{prompt(template, repo, work, now)}\n\n{headless_paragraph(login)}"
 
 
+def gate_paragraph(login: str) -> str:
+    """The paragraph an interactive gate prompt ends with (D-21, #206): the session may have
+    nobody attached, so every question goes to GitHub first and to the session too; login
+    is the host's gh login, the person who decides"""
+    return (
+        "Gate session: shipmill's gate started you, and nobody may be attached. Before you ask the user"
+        " anything, post the question with the needs-decision protocol (github-issue-triage's"
+        f" references/needs-decision.md): mention @{login} and label the item needs-decision. Then ask in"
+        " this session too. An answer here: post it on the item, remove the label, and go on."
+    )
+
+
+def interactive_prompt(template: str, repo: str, work: Sequence[Finding], now: dt.datetime, login: str) -> str:
+    """The mode 1 prompt with the gate paragraph at its end"""
+    return f"{prompt(template, repo, work, now)}\n\n{gate_paragraph(login)}"
+
+
 def refuse_headless_args(args: Sequence[str]) -> None:
     """Spec 005: a headless gate refuses HEADLESS_REFUSED's flags, alone or as --flag=value"""
     for arg in args:
@@ -348,12 +365,12 @@ def start_time(pid: int) -> str | None:
 
 
 def host_login(workspace: Path, run: Runner = run_command) -> str:
-    """The host's gh login, `gh api user -q .login`: whom a headless session's needs-decision
-    comment mentions (spec 005)"""
+    """The host's gh login, `gh api user -q .login`: whom a gate session's needs-decision
+    comment mentions (spec 005, D-21)"""
     try:
         login = run(["gh", "api", "user", "-q", ".login"], workspace).strip()
     except FileNotFoundError:
-        raise ReleaseError("gh is not on PATH; a headless gate reads your login with it") from None
+        raise ReleaseError("gh is not on PATH; the gate reads your login with it") from None
     if not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})", login):
         raise ReleaseError(f"gh api user -q .login printed {login[:100]!r}, not a GitHub login")
     return login
@@ -853,16 +870,19 @@ def gate(
     decision then names the bot as its identity. app_key_named (`--app-key`) without app_id
     is refused where the config is read, after the refresh, so a checkout the app_id change
     hasn't reached yet still moves. The gate never changes its own environment: its reads
-    (the findings, the hold, `claude agents`) keep the host's gh login (spec 004).
+    (the findings, the hold, `claude agents`) keep the host's gh login (spec 004). A LAUNCH
+    in either mode reads the host's login with login, dry run or not, after the App check,
+    and its prompt ends with the paragraph that names it: the gate paragraph, or in headless
+    mode the headless one (D-21), so a failed read starts nothing.
 
     With [agents] mode = "headless" (spec 005, D-17), every config read refuses the
     --claude-arg flags in HEADLESS_REFUSED. After the busy step, a last launch that was
     headless and whose process still runs (its pid with the recorded start time, as started
     reads it) reads RUNNING, whatever the mode is now. A headless state read passes
     --trusted-only, and with app_id set first checks the App, so a failure reads no state,
-    and passes --bot-login <slug>[bot]. A headless LAUNCH reads the host's login, dry run or
-    not, and on a real run starts `claude -p` detached under a new_session id, its output in
-    the state directory's sessions/<id>.log, and records its pid and start time. A headless
+    and passes --bot-login <slug>[bot]. A headless LAUNCH, on a real run, starts `claude -p`
+    detached under a new_session id, its output in the state directory's sessions/<id>.log,
+    and records its pid and start time. A headless
     tick that reads the state records the items of its NEEDS_DECISION row in
     needs-decision.json and, without app_id, notifies for them (spec 005); the decision
     carries the mode it read and what it did for each item"""
@@ -906,14 +926,15 @@ def gate(
         identity = None if agents.app_id is None else as_app(agents.app_id, now, app)
     if identity is not None:
         decision = replace(decision, identity=identity.login)
-    text = prompt(agents.prompt, repo, decision.work, now)
+    if login is None:
+        raise ReleaseError("a gate session's questions mention your gh login, but no login read was given")
+    host = login()
     if headless:
-        if login is None:
-            raise ReleaseError("headless mode mentions your gh login, but no login read was given; no session starts")
-        host = login()
         text = headless_prompt(agents.prompt, repo, decision.work, now, host)
         if identity is None:  # GitHub doesn't notify anyone of their own mention (spec 005)
             decision = replace(decision, asks_as=host)
+    else:
+        text = interactive_prompt(agents.prompt, repo, decision.work, now, host)
     if dry_run:
         return decision, None, waiting, pruned
     env = None

@@ -38,6 +38,7 @@ from shipmill.gate import (
     Waiting,
     fingerprint,
     gate,
+    gate_paragraph,
     headless_paragraph,
     host_login,
     load_launch,
@@ -227,10 +228,11 @@ def test_s005_2_interactive_launches_as_it_did_before(checkout: Git, config: Age
     spawned = Spawned()
     reads = Reads()
     claude = ClaudeCli(["--permission-mode=auto"], run=spawned.runner, spawn=spawned)
-    decision, launched, _, _ = tick(checkout, config, claude, reads, started=unasked, who=no_login)
+    decision, launched, _, _ = tick(checkout, config, claude, reads, started=unasked)
     assert (decision.action, launched, spawned.commands) == (Action.LAUNCH, "s9", [])
-    text = prompt("/t", REPO, [ISSUES], NOW)
+    text = prompt("/t", REPO, [ISSUES], NOW) + "\n\n" + gate_paragraph(LOGIN)  # D-21, #206
     assert spawned.run[1] == ["claude", "--bg", "-n", NAME, "--permission-mode=auto", text]
+    assert decision.asks_as is None  # the no app_id line stays headless's (S-005-14)
     assert reads.seen == [StateRead()]
     assert record_of(checkout) == {"fingerprint": fingerprint([ISSUES]), "session": "s9", "at": NOW.isoformat()}
     assert tick_lines(decision, launched, (), (), dry_run=False)[-1] == "  launched s9: claude attach s9"
@@ -255,6 +257,34 @@ def test_s005_2_interactive_takes_the_flags_headless_refuses(checkout: Git) -> N
     claude = FakeClaude(args=("--permission-mode=auto", "--bg", "--session-id"))
     decision, launched, _, _ = tick(checkout, interactive(), claude, Reads())
     assert (decision.action, launched) == (Action.LAUNCH, "s1")
+
+
+# D-21, #206: an interactive gate session asks through the needs-decision protocol too
+
+
+def test_d21_the_interactive_prompt_ends_with_the_gate_paragraph_naming_the_login(checkout: Git) -> None:
+    claude = FakeClaude()
+    tick(checkout, interactive(), claude, Reads())
+    [(_, text)] = claude.launched
+    paragraph = (
+        "Gate session: shipmill's gate started you, and nobody may be attached. Before you ask the user"
+        " anything, post the question with the needs-decision protocol (github-issue-triage's"
+        " references/needs-decision.md): mention @amy and label the item needs-decision. Then ask in"
+        " this session too. An answer here: post it on the item, remove the label, and go on."
+    )
+    assert text == prompt("/t", REPO, [ISSUES], NOW) + "\n\n" + paragraph
+
+
+def test_d21_an_interactive_launch_whose_login_read_fails_starts_nothing(checkout: Git) -> None:
+    claude = FakeClaude()
+    with pytest.raises(ReleaseError, match="HTTP 401"):
+        tick(checkout, interactive(), claude, Reads(), who=no_login)
+    assert claude.launched == [] and not (state_dir(checkout) / RECORD).exists()
+
+
+def test_d21_an_interactive_tick_that_launches_nothing_reads_no_login(checkout: Git) -> None:
+    decision, *_ = tick(checkout, interactive(), FakeClaude(), Reads(rows=[]), who=no_login)
+    assert decision.action is Action.QUIET
 
 
 # S-005-3

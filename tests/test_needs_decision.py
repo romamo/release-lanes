@@ -4,6 +4,7 @@ triage_state.py and watch_state.py, and what the gate makes of a repo whose work
 import datetime as dt
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -369,4 +370,24 @@ def test_s005_17_each_skill_carries_a_headless_rule_linking_it(skill: str) -> No
         else ("../github-issue-triage/references/needs-decision.md")
     )
     assert f"]({link})" in text
-    assert "**Headless:**" in text
+    assert "Headless:" in text
+
+
+@pytest.mark.parametrize("skill", ["github-issue-triage", "github-issue-resolve", "github-pr-triage"])
+def test_d21_each_skill_asks_on_github_first_in_every_gate_session(skill: str) -> None:
+    # #206, D-21: an interactive gate session asks through the protocol too, then in the session
+    text = folded(SKILLS / skill / "SKILL.md")
+    assert "`Gate session:`" in text and "`Headless:`" in text
+    assert re.search(r"also asks? with AskUserQuestion", text)
+    assert "started by hand asks with AskUserQuestion only" in text
+
+
+def test_d21_the_reference_covers_interactive_gate_sessions() -> None:
+    ref = folded(SKILLS / "github-issue-triage" / "references" / "needs-decision.md")
+    assert "**`Gate session:`** an interactive session" in ref
+    assert "**Interactive (`Gate session:`) only:** ask the same question" in ref
+    answered = ref.split("## Answered in the session", 1)[1].split(" ## ", 1)[0]
+    assert "`Answered in the session: <the option or the user's own words>`" in answered
+    assert "Remove the `needs-decision` label" in answered
+    comments = folded(SKILLS / "github-issue-triage" / "references" / "comments.md")
+    assert "[needs-decision protocol](needs-decision.md)" in comments and "(D-21)" in comments
