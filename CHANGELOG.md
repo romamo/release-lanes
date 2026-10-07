@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-10-07
+
 ### Added
 
 - Spec 010: each stable and hotfix release publishes shipmill to PyPI through a new
@@ -935,7 +937,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/shipmill/shipmill/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/shipmill/shipmill/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/shipmill/shipmill/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/shipmill/shipmill/compare/v0.26.0...v0.27.0
