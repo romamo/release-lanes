@@ -4,7 +4,11 @@ own output names the form it runs as, never a hard-coded bare `shipmill`"""
 
 import argparse
 import ast
+import os
 import re
+import subprocess
+import sys
+import sysconfig
 from pathlib import Path
 
 from shipmill import UVX, cli_command
@@ -192,16 +196,30 @@ def test_cli_command_is_bare_only_when_path_finds_the_running_install(tmp_path: 
     """#236: a uv tool install (a link on PATH into the running environment) reads bare"""
     env = tmp_path / "tools" / "shipmill"
     (env / "bin").mkdir(parents=True)
-    (env / "bin" / "shipmill").touch()
+    (env / "bin" / "shipmill").touch(mode=0o755)
     (tmp_path / "bin").mkdir()
     (tmp_path / "bin" / "shipmill").symlink_to(env / "bin" / "shipmill")
-    linked = str(tmp_path / "bin" / "shipmill")
-    assert cli_command(lambda _: linked, str(env)) == "shipmill"
-    assert cli_command(lambda _: str(env / "bin" / "shipmill"), str(env)) == "shipmill"
+    linked = str(tmp_path / "bin")
+    assert cli_command(linked, str(env)) == "shipmill"
     uvx_env = tmp_path / "cache" / "archive-v0" / "abc"
     uvx_env.mkdir(parents=True)
-    assert cli_command(lambda _: linked, str(uvx_env)) == LONG  # another install is on PATH
-    assert cli_command(lambda _: None, str(env)) == LONG  # nothing on PATH
+    assert cli_command(linked, str(uvx_env)) == LONG  # another install is on PATH
+    assert cli_command("", str(env)) == LONG  # nothing on PATH
+    assert cli_command(str(env / "bin"), str(env)) == LONG  # only the environment's own bin
+    (tmp_path / "tools" / "shipmill2" / "bin").mkdir(parents=True)
+    (tmp_path / "tools" / "shipmill2" / "bin" / "shipmill").touch(mode=0o755)
+    assert cli_command(str(tmp_path / "tools" / "shipmill2" / "bin"), str(env)) == LONG  # a sibling, not inside
+
+
+def test_cli_command_under_uvx_names_the_uvx_form() -> None:
+    """#236: uvx puts its cache environment's own bin first on PATH for the run, so that
+    `shipmill` resolves into the running environment yet isn't on the user's PATH"""
+    scripts = sysconfig.get_path("scripts")
+    assert (Path(scripts) / "shipmill").exists() or (Path(scripts) / "shipmill.exe").exists()
+    code = "from shipmill import cli_command; print(cli_command())"
+    env = {**os.environ, "PATH": scripts}
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True)
+    assert out.stdout.strip() == LONG
 
 
 def test_install_md_recommends_the_tool_install_with_the_uvx_fallback() -> None:
