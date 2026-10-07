@@ -27,6 +27,13 @@ bot.
   reply on GitHub to the bot's question wakes the item. `setup_state.py` wants the
   `needs-decision` label whenever the config has an `[agents]` section (D-21) (#206)
 
+### Fixed
+
+- `specs.py` honours a dropped criterion, one whose text starts `dropped in #N`:
+  `coverage` prints it as dropped instead of demanding a test, `split` leaves it out of
+  new build issues, and `check` needs no Issues line for it, so a built spec that drops
+  criteria can pass (#219)
+
 ## [0.28.0] - 2026-10-07
 
 ### Added

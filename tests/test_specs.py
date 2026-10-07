@@ -410,3 +410,38 @@ def test_split_refuses_a_bad_graph(tmp_path: Path) -> None:
     out = specs(root, "split", "7")
     assert out.returncode == 1
     assert "must pass check before it is split" in out.stderr
+
+
+# A dropped criterion (#219) keeps its id, needs no test, and no build issue delivers it
+
+DROPPED = ("1: dropped in #81, see S-007-3", "2: b", "3: c", "4: the flag is dropped in #9 of the output")
+
+
+def test_a_dropped_criterion_needs_no_test_but_a_mention_of_dropped_does(tmp_path: Path) -> None:
+    verified = "\n".join(("- S-007-1: dropped in #81", "- S-007-2: ran it", "- S-007-3: ran it", "- S-007-4: ran it"))
+    issues = "- o/r#21: S-007-2, S-007-3, S-007-4"
+    built_spec = spec("007", criteria=DROPPED, issues=issues, status="built", verification=verified)
+    root = repo(tmp_path, **{"007-dry-run.md": built_spec})
+    assert specs(root, "check").stdout == ""
+    write(root, "tests/test_run.py", "# proves: S-007-2, S-007-3", "def test_x(): pass")
+    out = specs(root, "coverage")
+    assert out.returncode == 1
+    assert "  S-007-1: dropped in #81, see S-007-3\n    dropped, no test needed\n" in out.stdout
+    assert "  S-007-4: the flag is dropped in #9 of the output\n    no test proves it\n" in out.stdout
+    assert specs(root, "criteria", "7").stdout.startswith("S-007-1: dropped in #81, see S-007-3\n")
+
+
+def test_split_leaves_out_a_dropped_criterion(tmp_path: Path) -> None:
+    root = repo(tmp_path, **{"007-dry-run.md": spec("007", criteria=DROPPED, issues="")})
+    out = specs(root, "split", "--json", "7")
+    assert out.returncode == 0, out.stderr
+    assert [i["criteria"] for i in json.loads(out.stdout)["issues"]] == [["S-007-2", "S-007-3", "S-007-4"]]
+    assert "S-007-1 is dropped" in specs(root, "split", "7", "--group", "1,2", "--group", "3,4").stderr
+    # Filed without it, the spec passes check, and split has nothing left to propose
+    filed = spec("007", criteria=DROPPED, issues="- o/r#21: S-007-2, S-007-3, S-007-4")
+    (root / "docs" / "specs" / "007-dry-run.md").write_text(filed)
+    assert specs(root, "check").stdout == ""
+    assert specs(root, "split", "7").stdout == "S-007: every criterion is in a build issue already\n"
+    # A criterion dropped after the split may stay in its build issue
+    (root / "docs" / "specs" / "007-dry-run.md").write_text(spec("007", criteria=DROPPED))
+    assert specs(root, "check").stdout == ""

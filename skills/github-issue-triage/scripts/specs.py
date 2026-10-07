@@ -31,7 +31,8 @@ check     every spec is well formed: its file name, title, and sections; criteri
           unique and sequential; the decisions it names exist in the log and are active;
           a built spec lists its issues and names every criterion under Verification;
           once an approved or built spec lists build issues, each criterion is assigned
-          to exactly one of them. A draft may keep the template's placeholder text
+          to exactly one of them, save a dropped one (its text starts "dropped in #N"),
+          which needs no build issue and may be in one. A draft may keep the template's placeholder text
           (D/TEMPLATE.md, or the built-in template: each paragraph of a section, word
           for word, past "- none"); an approved spec may not in Problem, Behaviour,
           Acceptance criteria, or Out of scope, and a built spec in no section. No
@@ -47,10 +48,11 @@ coverage  for every built spec (or each --spec, whatever its status), list each 
           as text: Python test_*.py and *_test.py; JS/TS *.test.* and *.spec.* and files
           under __tests__; Go *_test.go; every Rust .rs file. Hidden folders and
           node_modules, target, vendor, venv, dist, build are skipped, and so are the
-          lines inside a Python multi-line string (a fixture, not a test). No folder
+          lines inside a Python multi-line string (a fixture, not a test). A dropped
+          criterion needs no test and prints as dropped. No folder
           D (and no --spec): "no specs", exit 0
 split    propose the build issues of an approved spec, for the criteria its Issues
-          section doesn't assign yet: one issue per --group of criterion numbers (default:
+          section doesn't assign yet, dropped ones aside: one issue per --group of criterion numbers (default:
           all of them in one), in the order given, each depending on the earlier groups
           named by --after B:A (B depends on A). Prints each issue's title and body, whose
           "Depends on #{Bk}" lines and the Issues lines to add name the issues by key
@@ -101,6 +103,9 @@ STATUSES = ("draft", "approved", "built")
 # built spec must have filled in every section (Issues and Verification come last)
 FILLED_WHEN_APPROVED = ("Problem", "Behaviour", "Acceptance criteria", "Out of scope")
 CRITERION = re.compile(r"^- S-(\d{3,})-(\d+): (\S.*)$")
+# A criterion dropped by a later change keeps its id and says so first: "dropped in #81, see
+# S-007-5". It needs no test, no build issue, and a Verification line such as "dropped in #81"
+DROPPED = re.compile(r"^dropped in (?:[\w.-]+/[\w.-]+)?#\d+\b")
 DECISION_ITEM = re.compile(r"^- D-(\d+)\b")
 ISSUE_ITEM = re.compile(r"^- ((?:[\w.-]+/[\w.-]+)?#\d+)(?::[ \t]*(.*))?$")
 ASSIGNED = re.compile(r"^S-(\d{3,})-(\d+)$")
@@ -179,6 +184,10 @@ class Criterion:
 
     def __post_init__(self) -> None:
         self.end = self.end or self.line
+
+    @property
+    def dropped(self) -> bool:
+        return DROPPED.match(self.text) is not None
 
 
 @dataclass
@@ -357,7 +366,7 @@ def check_assignment(spec: Spec, problem: ProblemSink) -> None:
             else:
                 owner[number] = issue.ref
     for criterion in spec.criteria:
-        if criterion.number not in owner:
+        if criterion.number not in owner and not criterion.dropped:
             problem(criterion.line, f"{spec.id}-{criterion.number} {UNASSIGNED}")
 
 
@@ -605,7 +614,9 @@ def coverage(directory: Path, root: Path, wanted: list[str]) -> int:
             print(f"  {spec.id}-{criterion.number}: {criterion.text}")
             for place in places:
                 print(f"    {place}")
-            if not places:
+            if not places and criterion.dropped:
+                print("    dropped, no test needed")
+            elif not places:
                 print("    no test proves it")
                 failed = True
         known = {c.number for c in spec.criteria}
@@ -632,6 +643,7 @@ def groups_of(spec: Spec, groups: list[str], unassigned: list[int], assigned: di
     unassigned criterion in exactly one"""
     chosen = [[criterion_number(spec, n) for n in g.split(",") if n.strip()] for g in groups] or [unassigned]
     known = {c.number for c in spec.criteria}
+    dropped = {c.number for c in spec.criteria if c.dropped}
     seen: dict[int, int] = {}
     for k, group in enumerate(chosen, 1):
         if not group:
@@ -639,6 +651,8 @@ def groups_of(spec: Spec, groups: list[str], unassigned: list[int], assigned: di
         for number in group:
             if number not in known:
                 raise SpecError(f"--group {k}: {spec.id} has no criterion {spec.id}-{number}")
+            if number in dropped:
+                raise SpecError(f"--group {k}: {spec.id}-{number} is dropped; no build issue delivers it")
             if number in assigned:
                 raise SpecError(f"--group {k}: {spec.id}-{number} is already in {assigned[number]}")
             if number in seen:
@@ -675,7 +689,7 @@ def task_graph(spec: Spec, groups: list[str], after: list[str], repo: str | None
     if repo is not None and REPO.match(repo) is None:
         raise SpecError(f"--repo must be owner/repo, got {repo!r}")
     assigned = {n: issue.ref for issue in spec.issues for n in issue.criteria}
-    unassigned = [c.number for c in spec.criteria if c.number not in assigned]
+    unassigned = [c.number for c in spec.criteria if c.number not in assigned and not c.dropped]
     chosen = groups_of(spec, groups, unassigned, assigned)
     depends = dependencies(after, len(chosen))
     texts = {c.number: c.text for c in spec.criteria}
@@ -719,7 +733,8 @@ def split(directory: Path, wanted: str, groups: list[str], after: list[str], rep
             print(problem, file=sys.stderr)
         print(f"{spec.id} must pass check before it is split", file=sys.stderr)
         return 1
-    if spec.status == "approved" and all(any(c.number in i.criteria for i in spec.issues) for c in spec.criteria):
+    open_criteria = [c for c in spec.criteria if not c.dropped]
+    if spec.status == "approved" and all(any(c.number in i.criteria for i in spec.issues) for c in open_criteria):
         if groups or after:
             raise SpecError(f"every criterion of {spec.id} is in a build issue already; there is nothing to group")
         print(f"{spec.id}: every criterion is in a build issue already")

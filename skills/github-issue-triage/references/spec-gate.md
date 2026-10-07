@@ -96,3 +96,5 @@ The spec reaches `built` before its last issue closes, so CI holds every later c
 ## Changing a merged spec
 
 A spec changes through a PR like any other file, reviewed before the build follows it. Never renumber criteria that tests or PRs already cite: add new ids at the end, and mark a dropped one in its text ("S-007-3: dropped in #81, see S-007-5") rather than deleting it.
+
+A criterion whose text starts `dropped in #N` is dropped: `coverage` prints it as dropped and needs no test for it, `split` leaves it out of new build issues (and refuses a `--group` that names it), and `check` needs no Issues line for it, though one assigned before it was dropped may stay. A built spec still names it under Verification, as `- S-NNN-k: dropped in #N`. A criterion that only mentions "dropped" later in its text is not dropped and still needs its test.
