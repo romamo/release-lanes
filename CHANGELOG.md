@@ -7,17 +7,20 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- `.github/workflows/publish.yml` builds the release tag it is given, checks that the tag is
+  `vX.Y.Z` and matches `pyproject.toml`, runs `shipmill --help` from the wheel in a fresh
+  environment and checks the wheel holds the skills' state scripts, then uploads with `uv
+  publish` through trusted publishing in the `pypi` environment. The stable and hotfix lanes
+  dispatch it, and `docs/install.md` says shipmill is on PyPI and needs Python 3.14 (#224)
+
 ## [0.30.0] - 2026-10-07
 
 ### Added
 
 - Spec 010: each stable and hotfix release publishes shipmill to PyPI through a new
   `publish.yml`, with trusted publishing and a smoke test of the built wheel (#216)
-- `.github/workflows/publish.yml` builds the release tag it is given, checks that the tag is
-  `vX.Y.Z` and matches `pyproject.toml`, runs `shipmill --help` from the wheel in a fresh
-  environment and checks the wheel holds the skills' state scripts, then uploads with `uv
-  publish` through trusted publishing in the `pypi` environment. The stable and hotfix lanes
-  dispatch it, and `docs/install.md` says shipmill is on PyPI and needs Python 3.14 (#224)
 
 ### Fixed
 
