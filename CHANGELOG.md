@@ -7,6 +7,19 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- `.github/workflows/publish.yml` builds the release tag it is given, checks that the tag is
+  `vX.Y.Z` and matches `pyproject.toml`, runs `shipmill --help` from the wheel in a fresh
+  environment and checks the wheel holds the skills' state scripts, then uploads with `uv
+  publish` through trusted publishing in the `pypi` environment. The stable and hotfix lanes
+  dispatch it, and `docs/install.md` says shipmill is on PyPI and needs Python 3.14 (#224)
+
+### Changed
+
+- shipmill's own gate runs headless: `[agents] mode = "headless"`, so each gated session
+  is a detached `claude -p` that asks on GitHub and ends
+
 ### Fixed
 
 - The CLI's own hints name the full `uvx --from git+https://github.com/shipmill/shipmill@v0

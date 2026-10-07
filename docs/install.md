@@ -47,6 +47,10 @@ Don't `uv tool install` it instead: that pins a copy which drifts from the `@v0`
 and the skills fetch, and the gate's headless sessions allow `Bash(uvx *)` but not a bare
 `shipmill`. Agents keep the full `uvx` form.
 
+shipmill is also published to PyPI on each stable and hotfix release, as `shipmill`. It
+needs Python 3.14: `uvx` and `uv tool install` fetch that interpreter when you don't have
+it, while `pip install shipmill` on an older Python fails to find a version that fits.
+
 ## 1. Install the skills
 
 In Claude Code, run these one at a time. The first adds the marketplace, the second
