@@ -11,8 +11,9 @@
   notes           print a release's notes
   operate         check environment health, promote after the bake, roll back; approve a proposal
   doctor          check that the repository is ready for the bot
-  status          print what the pipeline owes, github-ship-watch's report for the checkout's repo;
-                  --json for its JSON lines
+  status          say whether the factory works or is stuck: a verdict and its reasons, then the
+                  repo, issues, pull requests, gate, and shipmill; --rows for github-ship-watch's
+                  table, --json for its JSON lines
   init            write a starting policy and the calling workflow (--operate: the operate one)
   gate            start a Claude Code session for the repo only when its state needs one; each tick,
                   held or not, prunes the worktrees that landed, as `worktrees --prune` does
@@ -31,6 +32,7 @@ action, or app-create or app-install left a repo without the App; 2 bad input or
 import argparse
 import dataclasses
 import datetime as dt
+import importlib.metadata
 import json
 import os
 import re
@@ -42,6 +44,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TextIO
 
+from shipmill import status
 from shipmill.agents import AgentsConfig
 from shipmill.app import (
     CACHE,
@@ -232,11 +235,13 @@ def _parser() -> argparse.ArgumentParser:
 
     sub.add_parser("doctor", help="check that the repository is ready for the bot")
 
-    p = sub.add_parser("status", help="print what the pipeline owes: github-ship-watch's report (spec 008)")
+    p = sub.add_parser("status", help="say whether the factory works or is stuck (specs 008, 009)")
     p.add_argument(
         "slug", nargs="?", metavar="owner/name", help="the GitHub repo (default: origin's); --repo is its checkout"
     )
-    p.add_argument("--json", action="store_true", help="print the report's JSON lines")
+    shown = p.add_mutually_exclusive_group()
+    shown.add_argument("--rows", action="store_true", help="print github-ship-watch's table instead")
+    shown.add_argument("--json", action="store_true", help="print github-ship-watch's JSON lines instead")
 
     p = sub.add_parser("init", help=f"write {CONFIG_PATH} and {CALLER}")
     p.add_argument("--ci", default="ci.yml", help="the CI workflow a release commit must pass (default: ci.yml)")
@@ -369,7 +374,7 @@ def main(
         ask = input if sys.stdin.isatty() and not args.owner else None
         return _app_create(root, args, api or UrllibApi(), signer or Openssl(), ask=ask)
     if args.command == "status":
-        return _status(root, args, state or run_state)
+        return _status(root, args, state or run_state, api or UrllibApi(), signer or Openssl())
     hub = github or GhCli(root)
     if args.command == "init" and args.operate:
         print(f"wrote {init_operate(root, args.force).relative_to(root)}")
@@ -632,9 +637,19 @@ def _app_create(
     return 1 if missing else 0
 
 
-def _status(root: Path, args: argparse.Namespace, run: StateRunner) -> int:
-    """Spec 008: github-ship-watch's report for the checkout's repo, passed through; exit 1
-    when a row needs action, 2 when the script failed rather than reported"""
+def _status(
+    root: Path,
+    args: argparse.Namespace,
+    run: StateRunner,
+    api: Api,
+    signer: Signer,
+    home: Path | None = None,
+    platform: str = sys.platform,
+    now: dt.datetime | None = None,
+) -> int:
+    """Specs 008 and 009: the factory's picture for the checkout's repo, or with --rows or
+    --json github-ship-watch's report passed through; exit 1 when a row needs action, 2 when
+    the script failed rather than reported"""
     git = Git(root)
     if not git.ok("rev-parse", "--show-toplevel"):  # S-008-9: first, before any other git call
         raise ReleaseError(f"{root} is not a git checkout; run status in a checkout of the repo, or pass --repo PATH")
@@ -646,13 +661,39 @@ def _status(root: Path, args: argparse.Namespace, run: StateRunner) -> int:
             raise ReleaseError(f"{top}'s origin isn't a GitHub repo; name the repo, such as owner/name")
     else:
         check_checkout(Git(top), slug)
-    proc = run(watch_command(slug, top, StateRead(), json=args.json))
+    picture = not (args.rows or args.json)
+    home = home if home is not None else Path.home()
+    when = now if now is not None else dt.datetime.now(dt.UTC)
+
+    def check(app_id: int, key: Path) -> Identity:
+        return app_check(slug, key, home, signer, api)(app_id, when)
+
+    # the picture reads as the gate's App, whose needs-decision questions are its own (spec 005)
+    gate = status.read_gate(slug, top, home, platform, run, check, os.getuid()) if picture else None
+    login = None if gate is None else gate.login
+    proc = run(watch_command(slug, top, StateRead(bot_login=login), json=not args.rows))
     sys.stderr.write(proc.stderr)  # S-008-10: warnings on 0 and 1, the whole traceback on a failure
     if state_failed(proc):
         print(f"shipmill: watch_state.py failed (exit {proc.returncode})", file=sys.stderr)
         return 2
-    sys.stdout.write(proc.stdout)
-    return proc.returncode
+    if gate is None:
+        sys.stdout.write(proc.stdout)
+        return proc.returncode
+    git = Git(top)
+    main = status.read_main(git, status.read_branch(slug, run))
+    facts = status.Facts(
+        repo=slug,
+        rows=status.parse_rows(proc.stdout),
+        issues=status.read_issues(slug, run, login),
+        pulls=status.read_pulls(slug, run),
+        main=main,
+        release=status.read_release(slug, git, main, run),
+        gate=gate,
+        cli=importlib.metadata.version("shipmill"),
+        now=when,
+    )
+    sys.stdout.write(status.report(facts).text(slug))
+    return proc.returncode  # S-009-14: spec 008's code, whatever the verdict
 
 
 def _origin_repo(root: Path) -> str | None:

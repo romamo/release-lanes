@@ -38,7 +38,9 @@ def checkout(root: Path, origin: str = f"git@github.com:{REPO}.git") -> Path:
 
 
 def status(root: Path, script: Script, *extra: str) -> int:
-    return main(["--repo", str(root), "status", *extra], state=script)
+    """Spec 008's report: --rows for its table (spec 009's picture is the default now)"""
+    shown = extra if "--json" in extra else ("--rows", *extra)
+    return main(["--repo", str(root), "status", *shown], state=script)
 
 
 def test_s008_1_the_default_repo_is_origins_with_the_checkouts_top_level(tmp_path: Path) -> None:
