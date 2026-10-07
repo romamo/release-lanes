@@ -17,6 +17,12 @@ bot.
   shipmill's own gate sets it, and `shipmill init`'s template shows it with its default
   (#233)
 
+### Changed
+
+- Decision D-22: the gate updates its checkout's plugin at most once a day, and only when
+  `[agents] plugin_update = true`; otherwise status, doctor, and setup report the behind
+  install with a fix that works in its folder (#233)
+
 ### Fixed
 
 - `shipmill status` (github-ship-watch's `SHIPMILL_OUTDATED`) reports a stale plugin

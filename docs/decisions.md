@@ -175,3 +175,11 @@ entry that supersedes it, never by editing an old one.
 - Why: An interactive gate session nobody attached to improvised plain question comments without the marker or the label (romamo/treaty), so watch_state.py kept counting the items as work and the gate stuck in its UNCHANGED cooldown; a session can't tell whether anyone is attached, and posting first takes the item out of the gate's work at once. Switching to headless after a wait would need new gate behaviour to restart sessions
 - Applies to: skills/github-issue-triage/references/needs-decision.md, skills/github-issue-triage/SKILL.md, skills/github-issue-resolve/SKILL.md, skills/github-pr-triage/SKILL.md, skills/shipmill-setup/scripts/setup_state.py, src/shipmill/gate.py, needs-decision label
 - Enforced by: the setup_state.py and gate prompt tests (with the implementing PR)
+
+## D-22: The gate updates its checkout's plugin once a day, only when the config allows it
+
+- Decided: 2026-10-07, in shipmill/shipmill#233
+- Rule: With [agents] plugin_update = true, shipmill gate checks at most once per 24 hours (the last check recorded under the repo's git directory) whether its checkout's project install of shipmill@shipmill is behind the latest release and, when it is, updates that install before it starts a session; a failed update is reported on the tick and the session still starts. The key defaults to false, and then the gate changes no install. Either way, shipmill status, doctor, and setup_state.py report a behind install in the repo's folder and in the gate's checkout as separate rows, each with a fix that works when run in that folder
+- Why: Gate sessions ran a plugin install in tmp/shipmill-gate that was 0.25.0 while 0.32.1 was out, and the update status printed resolved to that nested install, so the repo's own install stayed stale and the line never cleared (romamo/treaty). A check before every session would cost a claude call per tick; a default of false keeps gates already installed from changing installs without a config change
+- Applies to: src/shipmill/gate.py, src/shipmill/agents.py, src/shipmill/init.py, src/shipmill/doctor.py, skills/github-ship-watch/scripts/watch_state.py, skills/shipmill-setup/scripts/setup_state.py, [agents] plugin_update, shipmill status
+- Enforced by: the gate, watch_state.py, and setup_state.py tests (with the implementing PR)
