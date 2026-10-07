@@ -143,6 +143,21 @@ class Action(enum.Enum):
 
 
 @dataclass(frozen=True, slots=True)
+class Detached:
+    """A --refresh tick found the gate's linked worktree on a branch, left there by a session,
+    and detached it (#247); the branch and its commits stay"""
+
+    path: Path
+    branch: str
+
+    def line(self) -> str:
+        return f"detached {self.path} from {self.branch}"
+
+    def record(self) -> dict[str, str]:
+        return {"path": str(self.path), "branch": self.branch}
+
+
+@dataclass(frozen=True, slots=True)
 class Decision:
     action: Action
     reason: str
@@ -154,6 +169,7 @@ class Decision:
     decisions: tuple[Asked, ...] = ()  # what the tick did for each item waiting on a decision (spec 005)
     asks_as: str | None = None  # a headless launch without an App: the login its questions post as
     plugin: PluginUpdate | None = None  # the daily plugin check before a launch (D-22); None: none ran
+    detached: Detached | None = None  # the branch --refresh detached the gate's worktree from (#247)
 
 
 def fingerprint(work: Iterable[Finding]) -> str:
@@ -811,22 +827,48 @@ def check_checkout(git: Git, repo: str) -> None:
         raise ReleaseError(f"{git.root}'s origin is {origin}, not {repo}")
 
 
-def require_dedicated(git: Git) -> None:
+def linked(git: Git) -> bool:
+    """A linked worktree (`git worktree add`), whose git dir is not the common one; False for
+    the main working tree, a person's working copy"""
+    out = git.run("rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir").split("\n")
+    return Path(out[0]).resolve() != Path(out[1]).resolve()
+
+
+def require_dedicated(git: Git, default: str, detach: bool = False) -> str | None:
     """A gate checkout is detached and clean: one with a branch or changes is someone's
-    working copy, and a session started there would branch and commit in it"""
-    hint = "create one with `git worktree add --detach <path> origin/<default>`"
-    if git.run("rev-parse", "--abbrev-ref", "HEAD").strip() != "HEAD":
-        raise ReleaseError(f"the gate needs a detached checkout; {git.root} is on a branch ({hint})")
-    if git.run("status", "--porcelain", "--untracked-files=no").strip():
-        raise ReleaseError(f"the gate needs a clean checkout; {git.root} has changes ({hint})")
+    working copy, and a session started there would branch and commit in it. With detach (a
+    --refresh tick), a clean linked worktree on a branch passes, and the branch is returned
+    for the refresh's checkout to detach it from; the main working tree never does. Returns
+    None for a checkout already detached"""
+    is_linked = linked(git)
+    # someone's working copy: the gate is better off in a worktree of its own
+    own = "" if is_linked else f", or give the gate its own with `git worktree add --detach <path> origin/{default}`"
+    changed = [line[3:] for line in git.run("status", "--porcelain", "--untracked-files=no").splitlines() if line]
+    if changed:
+        shown = ", ".join(changed[:3]) + (f" and {len(changed) - 3} more" if len(changed) > 3 else "")
+        raise ReleaseError(
+            f"the gate needs a clean checkout; {git.root} has tracked changes ({shown}): "
+            f"commit them on a branch or remove them{own}"
+        )
+    branch = git.run("rev-parse", "--abbrev-ref", "HEAD").strip()
+    if branch == "HEAD":
+        return None
+    if is_linked and detach:
+        return branch
+    fix = f"`git -C {git.root} switch --detach origin/{default}`{own}"
+    raise ReleaseError(f"the gate needs a detached checkout; {git.root} is on branch {branch} (detach it with {fix})")
 
 
-def refresh(git: Git) -> None:
+def refresh(git: Git, detach: bool = False) -> Detached | None:
     """Move a dedicated gate checkout to the head of origin's default branch, so the session
-    reads the current [agents] section, CLAUDE.md, and skills"""
-    require_dedicated(git)
-    git.run("fetch", "-q", "origin", git.default_branch())
+    reads the current [agents] section, CLAUDE.md, and skills. With detach (a --refresh
+    tick, not `launchd`), a clean linked worktree a session left on a branch is detached the
+    same way, and returned"""
+    default = git.default_branch()
+    branch = require_dedicated(git, default, detach)
+    git.run("fetch", "-q", "origin", default)
     git.run("checkout", "-q", "--detach", "FETCH_HEAD")
+    return None if branch is None else Detached(git.root, branch)
 
 
 Pruner = Callable[[dt.datetime, bool], list[Judged]]  # (now, dry_run) -> every worktree, as the prune left it
@@ -904,7 +946,9 @@ def gate(
     (the findings, the hold, `claude agents`) keep the host's gh login (spec 004). A LAUNCH
     in either mode reads the host's login with login, dry run or not, after the App check,
     and its prompt ends with the paragraph that names it: the gate paragraph, or in headless
-    mode the headless one (D-21), so a failed read starts nothing.
+    mode the headless one (D-21), so a failed read starts nothing. A real refresh_checkout
+    tick detaches a clean linked gate worktree that a session left on a branch, and the
+    decision names it (#247); a dry run moves nothing.
 
     With [agents] mode = "headless" (spec 005, D-17), every config read refuses the
     --claude-arg flags in HEADLESS_REFUSED. After the busy step, a last launch that was
@@ -942,8 +986,7 @@ def gate(
     working = still_working(last, state, started)
     if working is not None:
         return working, None, waiting, pruned
-    if refresh_checkout and not dry_run:
-        refresh(git)
+    detached = refresh(git, detach=True) if refresh_checkout and not dry_run else None
     agents = config()
     if app_key_named and agents.app_id is None:  # read after the refresh, so a stale checkout can't stall it
         raise ReleaseError(f"--app-key names an App's key, but [agents] in {CONFIG_PATH} sets no app_id")
@@ -955,7 +998,9 @@ def gate(
     retry = dt.timedelta(hours=agents.retry_hours)
     rows = findings(read)
     asked = ask(state / DECISIONS, repo, rows, agents, notifier, now, dry_run) if headless else ()
-    decision = replace(decide(rows, sessions, last, now, retry, agents.prs), mode=agents.mode, decisions=asked)
+    decision = replace(
+        decide(rows, sessions, last, now, retry, agents.prs), mode=agents.mode, decisions=asked, detached=detached
+    )
     if decision.action is not Action.LAUNCH:
         return decision, None, waiting, pruned
     if identity is not None:
@@ -1010,16 +1055,20 @@ def tick_record(
         "mode": None if decision.mode is None else decision.mode.value,
         "decisions": [a.record() for a in decision.decisions],
         "plugin": None if decision.plugin is None else decision.plugin.record(),
+        "detached": None if decision.detached is None else decision.detached.record(),
     }
 
 
 def tick_lines(
     decision: Decision, launched: str | None, waiting: Sequence[Waiting], pruned: Sequence[Judged], dry_run: bool
 ) -> list[str]:
-    """`shipmill gate`'s text: the decision (` as <slug>[bot]` when it launches as an App), one
-    line per blocked session, then one per pruned worktree"""
+    """`shipmill gate`'s text: the decision (` as <slug>[bot]` when it launches as an App), the
+    branch the refresh detached the checkout from, one line per blocked session, then one
+    per pruned worktree"""
     who = f" as {decision.identity}" if decision.identity is not None else ""
     lines = [f"{decision.action.value}: {decision.reason}{who}"]
+    if decision.detached is not None:
+        lines.append(f"  {decision.detached.line()}")
     if decision.asks_as is not None:
         lines.append(f"  no app_id: needs-decision comments post as {decision.asks_as}, so GitHub won't notify you")
     for w in waiting:

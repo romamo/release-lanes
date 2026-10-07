@@ -3,6 +3,7 @@
 import datetime as dt
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 import tomllib
@@ -19,6 +20,7 @@ from shipmill.errors import ReleaseError
 from shipmill.gate import (
     RECORD,
     Action,
+    Detached,
     Finding,
     Launch,
     Session,
@@ -486,15 +488,79 @@ def test_refresh_moves_a_detached_checkout_to_the_default_branch(gate_checkout: 
 
 
 def test_refresh_refuses_a_working_copy(gate_checkout: tuple[Git, Path]) -> None:
+    """The main working tree on a branch is a person's: refused, with or without detach (#247)"""
     git, _ = gate_checkout
     git.run("checkout", "-q", "main")
-    with pytest.raises(ReleaseError, match="is on a branch"):
-        refresh(git)
+    switch = re.escape(f"`git -C {git.root} switch --detach origin/main`")
+    for detach in (False, True):
+        with pytest.raises(ReleaseError, match=rf"is on branch main \(detach it with {switch}, or give the gate") as e:
+            refresh(git, detach=detach)
+        assert "git worktree add --detach <path> origin/main" in str(e.value)
+    assert git.run("rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
     git.run("checkout", "-q", "--detach")
     (git.root / "tracked.txt").write_text("x", encoding="utf-8")
     git.run("add", "tracked.txt")
-    with pytest.raises(ReleaseError, match="has changes"):
+    with pytest.raises(ReleaseError, match=r"has tracked changes \(tracked.txt\): commit them on a branch or remove"):
         refresh(git)
+
+
+def test_refresh_offers_a_worktree_for_a_dirty_working_copy(gate_checkout: tuple[Git, Path]) -> None:
+    """#247: a person's main working tree with work in progress is told to give the gate a
+    worktree of its own, not only to commit or remove their changes"""
+    git, _ = gate_checkout
+    git.run("checkout", "-q", "main")
+    (git.root / "wip.txt").write_text("x", encoding="utf-8")
+    git.run("add", "wip.txt")
+    with pytest.raises(ReleaseError, match=r"has tracked changes \(wip.txt\)") as e:
+        refresh(git, detach=True)
+    assert "git worktree add --detach <path> origin/main" in str(e.value)
+    assert git.run("rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
+
+
+@pytest.fixture
+def linked_gate(gate_checkout: tuple[Git, Path]) -> tuple[Git, Path]:
+    """A linked gate worktree, as tmp/shipmill-gate is, that a session left on its branch"""
+    main, pusher = gate_checkout
+    path = main.root / "tmp" / "shipmill-gate"
+    main.run("worktree", "add", "-q", "--detach", str(path), "origin/main")
+    git_("switch", "-q", "-c", "fix/1-thing", cwd=path)
+    return Git(path), pusher
+
+
+def test_refresh_detaches_a_linked_worktree_left_on_a_branch(linked_gate: tuple[Git, Path]) -> None:
+    """#247: the tick's refresh detaches it to the default branch's head; the branch, its
+    commits, and untracked files stay"""
+    git, pusher = linked_gate
+    git_("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "wip", cwd=git.root)
+    wip = git.run("rev-parse", "HEAD").strip()
+    (git.root / "notes.txt").write_text("keep", encoding="utf-8")
+    detached = refresh(git, detach=True)
+    assert detached == Detached(git.root, "fix/1-thing")
+    assert detached is not None and detached.line() == f"detached {git.root} from fix/1-thing"
+    assert git.run("rev-parse", "--abbrev-ref", "HEAD").strip() == "HEAD"
+    assert git.run("rev-parse", "HEAD") == git_("rev-parse", "HEAD", cwd=pusher)
+    assert git.run("rev-parse", "fix/1-thing").strip() == wip
+    assert (git.root / "notes.txt").read_text(encoding="utf-8") == "keep"
+    assert refresh(git, detach=True) is None  # already detached: nothing to report
+
+
+def test_refresh_without_detach_refuses_a_linked_worktree_on_a_branch(linked_gate: tuple[Git, Path]) -> None:
+    """`launchd` installs on a detached checkout only; the fix is to detach it, not a new worktree"""
+    git, _ = linked_gate
+    with pytest.raises(ReleaseError, match="is on branch fix/1-thing") as e:
+        refresh(git)
+    assert str(e.value).endswith(f"(detach it with `git -C {git.root} switch --detach origin/main`)")
+    assert git.run("rev-parse", "--abbrev-ref", "HEAD").strip() == "fix/1-thing"
+
+
+def test_refresh_refuses_a_dirty_linked_worktree_naming_the_files(linked_gate: tuple[Git, Path]) -> None:
+    git, _ = linked_gate
+    for name in ("a.txt", "b.txt", "c.txt", "d.txt", "e.txt"):
+        (git.root / name).write_text("x", encoding="utf-8")
+    git.run("add", "a.txt", "b.txt", "c.txt", "d.txt", "e.txt")
+    with pytest.raises(ReleaseError, match=r"has tracked changes \(a.txt, b.txt, c.txt and 2 more\): commit them"):
+        refresh(git, detach=True)
+    assert git.run("rev-parse", "--abbrev-ref", "HEAD").strip() == "fix/1-thing"
 
 
 def test_a_working_session_reads_no_config(checkout: Git) -> None:

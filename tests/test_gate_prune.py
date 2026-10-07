@@ -35,6 +35,7 @@ KEYS = {
     "mode",
     "decisions",
     "plugin",
+    "detached",
 }
 
 Tick = tuple[Decision, str | None, tuple[Waiting, ...], tuple[Judged, ...]]
@@ -63,6 +64,7 @@ def tick(
     hold: Callable[[], Hold] = Hold,
     findings: tuple[Finding, ...] = (ISSUES,),
     dry_run: bool = False,
+    refresh: bool = False,
 ) -> Tick:
     git = c.git(c.root / GATE)
     now = dt.datetime.now(dt.UTC)  # the worktrees' ages count from the real clock
@@ -76,9 +78,46 @@ def tick(
         hold,
         FakeNotifier(),
         pruner(git, c.github, c.sessions),
+        refresh_checkout=refresh,
         dry_run=dry_run,
         login=host,
     )
+
+
+def head(path: Path) -> str:
+    return run("git", "-C", str(path), "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+
+
+def test_a_refresh_tick_detaches_the_gate_worktree_a_session_left_on_a_branch(repo: Checkout) -> None:
+    """#247: a session switched tmp/shipmill-gate to its branch; the next tick detaches it,
+    says so, and launches, where it used to fail every tick"""
+    gate_root = repo.root / GATE
+    repo.git(gate_root).run("switch", "-q", "-c", "fix/1-thing")
+    claude = FakeClaude()
+    decision, launched, waiting, pruned = tick(repo, claude, refresh=True)
+    assert (decision.action, launched) == (Action.LAUNCH, "s1")
+    assert head(gate_root) == "HEAD"
+    assert "fix/1-thing" in branches(repo)  # the branch stays
+    lines = tick_lines(decision, launched, waiting, pruned, dry_run=False)
+    assert lines[1] == f"  detached {gate_root} from fix/1-thing"
+    record = json.loads(json.dumps(tick_record(decision, launched, waiting, pruned, dry_run=False)))
+    assert record["detached"] == {"path": str(gate_root), "branch": "fix/1-thing"}
+
+
+def test_a_refresh_tick_on_a_detached_gate_worktree_reports_no_detach(repo: Checkout) -> None:
+    decision, launched, waiting, pruned = tick(repo, FakeClaude(), refresh=True)
+    assert decision.detached is None
+    assert not any("detached" in line for line in tick_lines(decision, launched, waiting, pruned, dry_run=False))
+    assert tick_record(decision, launched, waiting, pruned, dry_run=False)["detached"] is None
+
+
+def test_a_dry_run_refresh_tick_leaves_the_gate_worktree_on_its_branch(repo: Checkout) -> None:
+    gate_root = repo.root / GATE
+    repo.git(gate_root).run("switch", "-q", "-c", "fix/1-thing")
+    decision, launched, waiting, pruned = tick(repo, FakeClaude(), dry_run=True, refresh=True)
+    assert (decision.action, decision.detached) == (Action.LAUNCH, None)
+    assert head(gate_root) == "fix/1-thing"
+    assert tick_record(decision, launched, waiting, pruned, dry_run=True)["detached"] is None
 
 
 def test_s002_15_a_tick_prunes_the_landed_worktrees_and_reports_them(repo: Checkout) -> None:

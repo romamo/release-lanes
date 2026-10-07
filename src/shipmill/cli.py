@@ -774,7 +774,7 @@ def _launchd(root: Path, args: argparse.Namespace) -> int:
     if args.print:
         sys.stdout.write(job.document.decode())
         return 0
-    refresh(git)  # a dedicated checkout, at the default branch's head
+    refresh(git)  # a dedicated checkout, at the default branch's head; strict: one on a branch is refused
     agents = AgentsConfig.load(root)  # the job would fail on every run without it
     if key is not None:  # as would a key for no App, or one the gate refuses
         if agents.app_id is None:
