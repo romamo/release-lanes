@@ -60,6 +60,11 @@ def no_prune(now: dt.datetime, dry_run: bool) -> list[Judged]:
 
 
 NO_PRUNE = no_prune
+HOST = "amy"  # the host's gh login, which a launch's prompt mentions (D-21)
+
+
+def host() -> str:
+    return HOST
 
 
 def watch_line(state: str, subject: str = "romamo/demo", detail: str = "", **extra: object) -> str:
@@ -300,6 +305,7 @@ def test_a_launch_is_recorded_and_not_repeated(checkout: Git) -> None:
         Hold,
         FakeNotifier(),
         NO_PRUNE,
+        login=host,
     )
     assert (decision.action, launched, claude.stopped) == (Action.LAUNCH, "s1", ["old"])
     name, text = claude.launched[0]
@@ -318,6 +324,7 @@ def test_a_launch_is_recorded_and_not_repeated(checkout: Git) -> None:
         Hold,
         FakeNotifier(),
         NO_PRUNE,
+        login=host,
     )
     assert (decision.action, launched, len(claude.launched)) == (Action.UNCHANGED, None, 1)
 
@@ -346,6 +353,7 @@ def test_a_dry_run_launches_nothing(checkout: Git) -> None:
         FakeNotifier(),
         NO_PRUNE,
         dry_run=True,
+        login=host,
     )
     assert (decision.action, launched, claude.launched, claude.stopped) == (Action.LAUNCH, None, [], [])
     assert not (state_dir(checkout) / RECORD).exists()
@@ -389,6 +397,7 @@ def test_prs_in_the_config_make_open_prs_work(checkout: Git) -> None:
         FakeNotifier(),
         NO_PRUNE,
         dry_run=True,
+        login=host,
     )
     assert decision.action is Action.QUIET
     decision, _, _, _ = gate(
@@ -402,6 +411,7 @@ def test_prs_in_the_config_make_open_prs_work(checkout: Git) -> None:
         FakeNotifier(),
         NO_PRUNE,
         dry_run=True,
+        login=host,
     )
     assert decision.action is Action.LAUNCH
 
@@ -569,5 +579,6 @@ def test_a_hold_launches_nothing_for_an_operate_failure_or_an_incident(checkout:
         FakeNotifier(),
         NO_PRUNE,
         dry_run=True,
+        login=host,
     )
     assert (decision.action, decision.work) == (Action.LAUNCH, (OPERATE_FAILED, incident))

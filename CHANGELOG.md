@@ -16,6 +16,16 @@ bot.
   verdict, one line each for the repo, every item that needs a decision with its own
   link, the open issues and pull requests, the gate as `OK` or its problem, the mode,
   the GitHub App, and shipmill; empty lines are dropped (#212)
+- Every `shipmill gate` session asks through the needs-decision protocol, interactive
+  too: the interactive prompt ends with a `Gate session:` paragraph naming your `gh`
+  login, so the session posts its question as a marked comment with the `needs-decision`
+  label before it asks in the session, and an unattended question waits on GitHub instead
+  of reading as work. An answer given in the session is posted on the item and the label
+  comes off. An interactive launch now reads your login with `gh api user` and starts
+  nothing when that fails. With `app_id` set, an interactive gate checks the App before it
+  reads the state, as headless does, and reads it with `--bot-login <slug>[bot]`, so a
+  reply on GitHub to the bot's question wakes the item. `setup_state.py` wants the
+  `needs-decision` label whenever the config has an `[agents]` section (D-21) (#206)
 
 ## [0.28.0] - 2026-10-07
 

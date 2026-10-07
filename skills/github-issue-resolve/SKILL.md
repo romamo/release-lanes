@@ -12,7 +12,7 @@ A workflow for turning a GitHub issue into a verified verdict and, if warranted,
 - Issue reference: URL (`https://github.com/<owner>/<repo>/issues/<n>`) or number plus repo
 - Scope from the user's wording: triage only, triage + fix + PR, or also merge (Phase 7 hands merging to `github-pr-triage`)
 
-**Headless:** when AskUserQuestion is unavailable or the prompt carries the gate's headless paragraph, nobody can answer. A product decision, a departure from a spec or a `D-n`, or a tool call that was denied becomes github-issue-triage's [needs-decision protocol](../github-issue-triage/references/needs-decision.md): a marked comment on the issue or PR mentioning the user, the `needs-decision` label, and the item left alone. Taking up an answered item, remove the label before acting on the reply.
+**Gate sessions and Headless:** a session whose prompt carries the gate's `Gate session:` or `Headless:` paragraph, or where AskUserQuestion is unavailable, may have nobody attached. A product decision, a departure from a spec or a `D-n`, or a tool call that was denied becomes github-issue-triage's [needs-decision protocol](../github-issue-triage/references/needs-decision.md) first: a marked comment on the issue or PR mentioning the user and the `needs-decision` label. Interactive (`Gate session:`), also ask with AskUserQuestion; an answer there is posted on the item, the label comes off, and the work goes on. Headless, leave the item alone. A session the user started by hand asks with AskUserQuestion only. Taking up an answered item, remove the label before acting on the reply.
 
 ## Phase 1: Read the issue
 

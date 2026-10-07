@@ -36,7 +36,7 @@ from shipmill.gate import (
     Finding,
     StateRead,
     gate,
-    prompt,
+    interactive_prompt,
     state_dir,
     tick_lines,
     tick_record,
@@ -45,7 +45,8 @@ from shipmill.gitrepo import Git
 from shipmill.launchd import build
 
 from .test_app import APP_ID, BOT, BOT_ID, BOT_PATH, CHECKS, REPO, FakeApi, FakeSigner, app_cfg, key_file
-from .test_gate import ISSUES, NO_PRUNE, NOW, FakeClaude, FakeNotifier, bg
+from .test_gate import HOST, ISSUES, NO_PRUNE, NOW, FakeClaude, FakeNotifier, bg
+from .test_gate import host as gh_login
 
 EMAIL = f"{BOT_ID}+{BOT}@users.noreply.github.com"
 NAME = f"shipmill {REPO} {NOW:%Y-%m-%d %H:%M}"
@@ -106,6 +107,7 @@ def launch_as_app(
         dry_run=dry_run,
         app=check,
         app_env=Prepared(git, gh_path(tmp_path)),
+        login=gh_login,
     )
     return decision, launched
 
@@ -202,6 +204,7 @@ def test_s004_6_helpers_that_cant_be_written_stop_and_start_nothing(checkout: Gi
             NO_PRUNE,
             app=check,
             app_env=Prepared(checkout, str(tmp_path / "empty")),
+            login=gh_login,
         )
     assert (claude.launched, claude.stopped) == ([], [])
     assert not (state_dir(checkout) / RECORD).exists()
@@ -211,7 +214,19 @@ def test_s004_6_with_app_id_set_and_no_session_env_nothing_starts(checkout: Git,
     claude = FakeClaude([bg("old", "idle", "done")])
     check = app_check(REPO, key_file(tmp_path), tmp_path, FakeSigner(), FakeApi())
     with pytest.raises(ReleaseError, match="no session env was given; no session starts"):
-        gate(checkout, REPO, app_cfg, claude, lambda _: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE, app=check)
+        gate(
+            checkout,
+            REPO,
+            app_cfg,
+            claude,
+            lambda _: [ISSUES],
+            NOW,
+            Hold,
+            FakeNotifier(),
+            NO_PRUNE,
+            app=check,
+            login=gh_login,
+        )
     assert (claude.launched, claude.stopped) == ([], [])
 
 
@@ -223,7 +238,7 @@ def test_s004_6_claude_gets_settings_after_the_name_and_no_token(checkout: Git, 
     [listing, started] = recorder.commands
     assert listing[:3] == ["claude", "agents", "--json"]
     settings = json.dumps({"env": expected_env(checkout, tmp_path)})
-    text = prompt("/t", REPO, [ISSUES], NOW)
+    text = interactive_prompt("/t", REPO, [ISSUES], NOW, HOST)
     assert started == ["claude", "--bg", "-n", NAME, "--settings", settings, "--permission-mode=auto", text]
     assert not (state_dir(checkout) / CACHE).exists()  # nothing was minted, so no token can be in it
     assert "GH_TOKEN" not in settings and "x-access-token" not in settings
@@ -284,9 +299,10 @@ def test_s004_7_with_app_id_unset_the_launch_is_todays(checkout: Git, tmp_path: 
         NO_PRUNE,
         app=unchecked,
         app_env=unprepared,
+        login=gh_login,
     )
     assert (decision.action, decision.identity, launched) == (Action.LAUNCH, None, "s9")
-    text = prompt("/t", REPO, [ISSUES], NOW)
+    text = interactive_prompt("/t", REPO, [ISSUES], NOW, HOST)
     assert recorder.commands[1] == ["claude", "--bg", "-n", NAME, "--permission-mode=auto", text]
     assert not helpers_of(checkout).exists()
     assert not (state_dir(checkout) / CACHE).exists()
@@ -305,7 +321,16 @@ def test_s004_11_a_launch_as_the_app_names_the_bot(checkout: Git, tmp_path: Path
 
 def test_s004_11_with_app_id_unset_identity_is_null(checkout: Git) -> None:
     decision, launched, _, _ = gate(
-        checkout, REPO, lambda: app_cfg(None), FakeClaude(), lambda _: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE
+        checkout,
+        REPO,
+        lambda: app_cfg(None),
+        FakeClaude(),
+        lambda _: [ISSUES],
+        NOW,
+        Hold,
+        FakeNotifier(),
+        NO_PRUNE,
+        login=gh_login,
     )
     assert tick_lines(decision, launched, (), (), dry_run=False)[0] == "LAUNCH: 1 finding(s) need an agent"
     record = json.loads(json.dumps(tick_record(decision, launched, (), (), dry_run=False)))
@@ -363,6 +388,7 @@ def test_s004_12_the_gates_own_reads_keep_the_hosts_environment(checkout: Git, t
             NO_PRUNE,
             app=check,
             app_env=Prepared(checkout, gh_path(tmp_path)),
+            login=gh_login,
         )
     assert len(claude.launched) == 2 and len(seen) == 4
     assert all(env == host for env in seen)
@@ -378,7 +404,18 @@ def test_s004_12_with_app_id_unset_the_reads_keep_the_hosts_environment(checkout
         seen.append(dict(os.environ))
         return [ISSUES]
 
-    gate(checkout, REPO, lambda: app_cfg(None), FakeClaude(), findings, NOW, Hold, FakeNotifier(), NO_PRUNE)
+    gate(
+        checkout,
+        REPO,
+        lambda: app_cfg(None),
+        FakeClaude(),
+        findings,
+        NOW,
+        Hold,
+        FakeNotifier(),
+        NO_PRUNE,
+        login=gh_login,
+    )
     assert seen == [host] and dict(os.environ) == host
 
 

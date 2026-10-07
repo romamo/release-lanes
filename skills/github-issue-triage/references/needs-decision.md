@@ -1,6 +1,15 @@
 # The needs-decision protocol
 
-A headless session can't ask the user: nobody answers AskUserQuestion or a permission prompt. A session is headless when AskUserQuestion is unavailable, or when its prompt carries the gate's headless paragraph. Every place github-issue-triage, github-issue-resolve, and github-pr-triage would ask with AskUserQuestion (triage's design-gate questions and a PR's "decisions for you", resolve's product decisions and spec departures, pr-triage's denied action and a departure from a `D-n`) follows this protocol instead, and the item waits on GitHub while the rest of the repo keeps moving (spec S-005, D-17).
+A session the shipmill gate started can't count on an answer in the session: it runs in the background, and nobody may attach. So every question a gate session asks goes to GitHub first, interactive or headless (D-21), and the item waits there while the rest of the repo keeps moving (spec S-005, D-17).
+
+A session is a **gate session** when its prompt carries one of the gate's paragraphs:
+
+- **`Gate session:`** an interactive session (`claude --bg`). Post the question with this protocol, then ask the same question in the session with AskUserQuestion too
+- **`Headless:`** a headless session (`claude -p`), or any session where AskUserQuestion is unavailable. Nobody answers AskUserQuestion or a permission prompt: post the question with this protocol and leave the item
+
+A session the user started by hand, whose prompt carries neither paragraph, asks with AskUserQuestion as usual and posts no marker or label.
+
+Every place github-issue-triage, github-issue-resolve, and github-pr-triage would ask the user (triage's design-gate questions and a PR's "decisions for you", resolve's product decisions and spec departures, pr-triage's denied action and a departure from a `D-n`) follows this protocol in a gate session, before anything else.
 
 ## Asking
 
@@ -17,8 +26,19 @@ A headless session can't ask the user: nobody answers AskUserQuestion or a permi
    ```
 
    The marker is the comment's first line, with or without an App: it is how `triage_state.py` and `watch_state.py` tell the question from the reply when the session posts as the maintainer. `<login>` is the person the gate's prompt names (the host's `gh` login). Put the recommendation first, and say in each option what it means for users and what it costs, in words a user of the tool knows. Name `D-n` entries and `S-NNN-k` criteria when the question is a departure from one
-2. Add the `needs-decision` label to the item: `gh issue edit <n> --add-label needs-decision` (or `gh pr edit`)
-3. Leave the item: don't build, push, merge, or comment on it further in this session. Go on with the other items, and report this one under the decisions you left
+2. Add the `needs-decision` label to the item: `gh issue edit <n> --add-label needs-decision` (or `gh pr edit`). From now on the scripts read the item as waiting, not as work, so the gate doesn't start a session for it again
+3. **Interactive (`Gate session:`) only:** ask the same question, with the same options in the same order, with AskUserQuestion. An answer in the session: follow [Answered in the session](#answered-in-the-session). No answer: the item already waits on GitHub, and the gate's `max_wait_minutes` stops the waiting session (D-15); whoever answers on GitHub later is read as below
+4. **Headless:** Leave the item: don't build, push, merge, or comment on it further in this session. Go on with the other items, and report this one under the decisions you left
+
+A triage verdict that waits on a decision says so in its first line ("Waits on your decision below") and leaves the **Decision needed** block out: the block is this comment, posted right after the verdict, since a comment can't start with both `Triage:` and the marker.
+
+## Answered in the session
+
+An interactive gate session that gets the answer through AskUserQuestion puts the record on GitHub before it acts, so the item doesn't wait on a question already answered and the thread shows who decided:
+
+1. Post the answer on the item as a comment without the marker, through `--body-file`: `Answered in the session: <the option or the user's own words>`
+2. Remove the `needs-decision` label: `gh issue edit <n> --remove-label needs-decision` (or `gh pr edit`)
+3. Record the answer with `decisions.py add` when it sets a rule, as the [design gate](design-gate.md) says, and go on
 
 ## A denied tool call is a decision
 

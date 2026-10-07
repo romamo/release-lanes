@@ -13,7 +13,7 @@ code decides when it runs and with what.
 
 | Mode | Session | Questions for you | Status |
 |---|---|---|---|
-| 1. Interactive | A new `claude --bg` session per launch: attachable, listed in `claude agents` | AskUserQuestion; the session waits, the gate notifies you and starts nothing for that repo until you answer or `max_wait_minutes` (15 by default) stops it | Built: `shipmill gate` |
+| 1. Interactive | A new `claude --bg` session per launch: attachable, listed in `claude agents` | The `needs-decision` protocol first, then AskUserQuestion (D-21); the session waits, the gate notifies you and starts nothing for that repo until you answer or `max_wait_minutes` (15 by default) stops it, and the item waits on GitHub | Built: `shipmill gate` |
 | 2. Headless | A new `claude -p` session per launch with a tool allowlist, for a machine nobody watches; tracked by its pid, not listed in `claude agents` | The `needs-decision` protocol: a label and a comment that mentions you; the item waits on GitHub and the session ends | Built: `mode = "headless"` (spec 005) |
 | 3. Ephemeral | A fresh container per job (GitHub Actions) | The same protocol | Parked: [ephemeral-mode.md](ephemeral-mode.md) |
 
@@ -143,7 +143,7 @@ and on pull requests whose head branch is in the repo, not a fork. Every other o
 goes to an `UNTRUSTED` row, `#N` only and `agent: false`: it starts no session and stays
 for an interactive one, and github-ship-watch reports it. An outsider's comment on a
 trusted issue still reaches the session, as data under the prompt's untrusted-text line.
-Mode 1 doesn't filter.
+Mode 1 doesn't filter, but with `app_id` set it checks the App before it reads the state and passes `--bot-login` too (D-21), so the bot's questions read as questions.
 
 **Waiting on GitHub.** A decision for you becomes the `needs-decision` protocol
 ([needs-decision.md](../../skills/github-issue-triage/references/needs-decision.md)): one
@@ -155,7 +155,17 @@ so it starts no session and doesn't change the fingerprint. Your reply, a newer 
 without the marker by an OWNER, MEMBER, or COLLABORATOR, makes it work again on the next
 tick; the session that takes it up removes the label. A comment from anyone else never
 wakes it. With `app_id`, the question is the newest marker comment by the bot.
-`shipmill-setup`'s `setup_state.py --fix` creates the label in headless mode only.
+`shipmill-setup`'s `setup_state.py --fix` creates the label whenever the config has an
+`[agents]` section, in either mode.
+
+Mode 1 asks the same way first (D-21, #206): the gate's interactive prompt ends with a
+`Gate session:` paragraph naming `@<login>` (read with `gh api user -q .login` on a
+launch, so a failed read launches nothing) and the protocol. The session posts the
+question and the label, then asks with AskUserQuestion. An answer in the session is posted
+on the item, the label comes off, and the session goes on; otherwise the item waits on
+GitHub like a headless one, and `max_wait_minutes` stops the session. The paragraph is how
+a skill tells a gate session from one the user started by hand, which asks with
+AskUserQuestion only.
 
 **Notifications.** With `app_id`, the question comes from `<slug>[bot]`, so its mention
 notifies you on GitHub and the gate sends no desktop notification for it. Without

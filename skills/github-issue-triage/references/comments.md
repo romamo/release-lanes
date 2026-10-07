@@ -7,7 +7,7 @@ Write each body to a file and post it with `gh issue comment <n> --body-file <fi
 ```markdown
 Triage: **implement**{, for the next release candidate | after rcN}.{ Waits on your decision below.}
 
-{Only while a design question is open (design-gate.md, step 3); the block goes first, before the plan:}
+{Only while a design question is open (design-gate.md, step 3), and only in a session the user started by hand; the block goes first, before the plan. A gate session posts the block as its own needs-decision comment instead, right after this one:}
 **Decision needed:** {the question in one sentence, in words a user of the tool knows}
 
 1. {option} (recommended): {what it means for users}
@@ -27,6 +27,8 @@ The plan:
 ```
 
 Write the decision block for the person who owes the answer, not for the implementer: no file, function, or permission names in the question or the options unless the answer turns on them, and then say what each one means. Name the effect instead ("repos without ship-watch stay stuck until someone notices"). Keep the options to the ones you'd accept, two or three, the recommended one first. The same block, under the same heading, asks a PR's "decisions for you" on the pull request (design-gate.md, step 3).
+
+In a gate session (its prompt carries the gate's `Gate session:` or `Headless:` paragraph), the block never sits in the verdict: the verdict keeps "Waits on your decision below" and the question follows as its own comment, the [needs-decision protocol](needs-decision.md)'s, with the marker as its first line and the `needs-decision` label on the issue (D-21). Without the marker and the label, the scripts read the issue as work and the gate keeps starting sessions for it.
 
 Once the PR is up:
 

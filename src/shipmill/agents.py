@@ -31,7 +31,7 @@ class AgentsConfig:
     remind_hours: int = _REMIND_HOURS  # repeat it while the session still waits
     max_wait_minutes: int = _MAX_WAIT_MINUTES  # stop a session that waited this long; 0: never
     app_id: int | None = None  # sessions write as this GitHub App (spec 004, D-14); None: the host's gh login
-    mode: Mode = Mode.INTERACTIVE  # headless: `claude -p`, decisions as needs-decision comments (spec 005)
+    mode: Mode = Mode.INTERACTIVE  # headless: `claude -p` (spec 005); either mode asks via needs-decision (D-21)
 
     @classmethod
     def parse(cls, table: Table) -> AgentsConfig:

@@ -70,7 +70,8 @@ repos it works on, a private key downloaded to the key path with mode `0600`.
 ### At launch
 
 When `app_id` is set and the tick decides LAUNCH, the gate, before stopping or starting
-any session:
+any session (since D-21, #206, steps 1 to 4 run before the state is read on every tick that
+reads it, so the state read can pass `--bot-login <slug>[bot]`):
 
 1. Reads the key file. A missing key exits 2 naming its path, and so does a key readable
    by group or others (the error says to `chmod 600` it). The key's contents never appear

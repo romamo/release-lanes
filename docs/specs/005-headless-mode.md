@@ -295,11 +295,12 @@ an empty list when nothing waits or the tick didn't read the state.
 
 `skills/shipmill-setup/scripts/setup_state.py`:
 
-- With `[agents] mode = "headless"`, `needs-decision` joins the labels it wants
+- With `[agents] mode = "headless"` (since D-21, any `[agents]` section), `needs-decision` joins the labels it wants
   (`LABELS_MISSING` names it when absent, `--fix` creates it with color `d876e3` and the
-  description `A shipmill session asked a question here; waits for a reply`). With
-  `interactive` or no `[agents]`, it isn't wanted, so existing setups see no new row
-  (D-9's reasoning: warn only where the feature is used)
+  description `A shipmill session asked a question here; waits for a reply`). Without
+  `[agents]`, it isn't wanted (D-9's reasoning: warn only where the feature is used);
+  since D-21 an interactive gate asks this way too, so an interactive setup reads
+  `LABELS_MISSING` once, until `--fix`
 - With `mode = "headless"` and no `app_id`, the agents row reads `AGENTS_NO_APP`, counted as
   done so it doesn't change the exit code, with the detail
   `headless without app_id: needs-decision comments post as you, so GitHub won't notify you; desktop notifications only`
@@ -316,7 +317,7 @@ an empty list when nothing waits or the tick didn't read the state.
 ## Acceptance criteria
 
 - S-005-1: `AgentsConfig` reads `mode` as `"interactive"` when `[agents]` omits it and as the given value when it is `"interactive"` or `"headless"`, and refuses any other value or a non-string with exit 2 naming the key
-- S-005-2: with `mode = "interactive"`, the gate's `claude --bg` command line and prompt are the ones it builds without this spec, and it calls `watch_state.py` without `--trusted-only` or `--bot-login`
+- S-005-2: with `mode = "interactive"`, the gate's `claude --bg` command line and prompt are the ones it builds without this spec, and it calls `watch_state.py` without `--trusted-only` or `--bot-login` (amended by D-21, #206: the prompt ends with the `Gate session:` paragraph naming `@<login>`, so an interactive launch reads the login too; with `app_id` set, the gate checks the App before it reads the state, a failure exiting 2 with no state read (D-14), and calls `watch_state.py` with `--bot-login <slug>[bot]`, still without `--trusted-only`)
 - S-005-3: on LAUNCH with `mode = "headless"`, the gate runs `claude -p` (never `--bg`) with `--permission-prompts none`, `--allowedTools` with exactly `HEADLESS_TOOLS` as one argument, `--disallowedTools AskUserQuestion`, and `--session-id` with a new UUID, the tool lists before `--session-id`, and the prompt as the last argument
 - S-005-4: `docs/design/agent-modes.md`, What Claude Code provides, names the Claude Code version on which a real `claude -p` started with S-005-3's flags, detached as Tracking a headless session says, met a denied Bash call, had no AskUserQuestion, outlived the process that started it, and exited on its own; the build issue that delivers this merges before any other headless code
 - S-005-5: with `mode = "headless"`, a `--claude-arg` of `--permission-mode`, `--permission-prompts`, `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--bg`, `--background`, or `--session-id` (alone or as `--flag=value`) exits 2 naming the flag, and stops and launches no session
@@ -330,7 +331,7 @@ an empty list when nothing waits or the tick didn't read the state.
 - S-005-13: an entry in `needs-decision.json` whose item no longer waits is dropped on the next tick that reads the state; a failed send prints `notify failed for #<n>: <error>` and leaves `notified` unchanged; a malformed file exits 2 naming its path; `--dry-run` sends nothing, writes no file, and prints `would notify #<n>`
 - S-005-14: headless with `app_id` set, the gate sends no desktop notification for a waiting item; headless without `app_id`, a launch prints `no app_id: needs-decision comments post as <login>, so GitHub won't notify you`
 - S-005-15: `shipmill gate --json` reports `mode` and a `decisions` list with each notified or waiting item's number, `since`, whole hours waited, whether it was notified, and the failed send's error or null; an empty list when nothing waits
-- S-005-16: `setup_state.py` with `[agents] mode = "headless"` reports `needs-decision` under `LABELS_MISSING` when the label is absent and `--fix` creates it; with `interactive` or no `[agents]` it doesn't want the label; headless with no `app_id` reads `AGENTS_NO_APP`, which leaves the exit code as `AGENTS_OK` would
+- S-005-16: `setup_state.py` with `[agents] mode = "headless"` reports `needs-decision` under `LABELS_MISSING` when the label is absent and `--fix` creates it; with no `[agents]` it doesn't want the label (amended by D-21, #206: with `interactive` it wants it too); headless with no `app_id` reads `AGENTS_NO_APP`, which leaves the exit code as `AGENTS_OK` would
 - S-005-17: `skills/github-issue-triage/references/needs-decision.md` defines the comment (the marker as its first line, the mention, the question, options with the recommendation first), the label, leaving the item, a denied tool call as a decision, and removing the label when an answered item is taken up, and the three SKILL.md files each carry a headless rule that links it
 - S-005-18: `docs/design/agent-modes.md`, `skills/shipmill-setup/SKILL.md`, and `docs/install.md` document `mode`, `HEADLESS_TOOLS` and how to widen it, the trust filter, the `needs-decision` label, and notifications with and without `app_id`
 - S-005-19: a headless launch starts the session in a new process session with stdin from `/dev/null` and its output appended to `<state dir>/sessions/<uuid>.log`, returns without waiting for it, and records in `gate.json` the `mode`, the session id, the `pid`, and the process's start time beside the fingerprint and `at`; `--dry-run` starts nothing and writes nothing
@@ -381,7 +382,7 @@ with one needs #192's fix); and `setup_state.py shipmill/shipmill` on this inter
 read the same five rows as before, exit 0.
 
 - S-005-1: `test_s005_1_mode_defaults_to_interactive_and_reads_what_is_given`, `test_s005_1_a_bad_mode_exits_2_naming_the_key`, `test_s005_1_mode_loads_from_the_config_file`, passing
-- S-005-2: `test_s005_2_interactive_launches_as_it_did_before`, `test_s005_2_interactive_reads_the_state_without_the_trust_filter`, `test_s005_2_interactive_with_an_app_reads_the_state_without_a_bot_login`, `test_s005_2_interactive_takes_the_flags_headless_refuses`, passing
+- S-005-2: `test_s005_2_interactive_launches_as_it_did_before`, `test_s005_2_interactive_reads_the_state_without_the_trust_filter`, `test_s005_2_interactive_with_an_app_reads_the_state_with_its_bot_login`, `test_d21_interactive_passes_bot_login_with_an_app_and_not_without`, `test_s005_2_interactive_takes_the_flags_headless_refuses`, passing
 - S-005-3: `test_s005_3_headless_runs_claude_p_with_the_allowlist`, `test_s005_3_a_widened_allowlist_never_reads_the_prompt_as_a_tool`, `test_s005_3_the_allowlist_is_exactly_the_specs`, `test_s005_3_each_launch_gets_a_new_session_id`, `test_s005_3_with_an_app_the_settings_env_goes_before_the_name`, passing
 - S-005-4: the probe on Claude Code 2.1.291 (#160), recorded in agent-modes.md's What Claude Code provides; `test_s005_4_the_design_doc_records_the_print_probe`, passing
 - S-005-5: `test_s005_5_the_refused_flags_are_the_specs`, `test_s005_5_a_refused_claude_arg_exits_2_and_stops_and_starts_nothing`, `test_s005_5_a_refused_claude_arg_stops_no_waiting_session_either`, passing

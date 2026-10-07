@@ -33,7 +33,7 @@ from shipmill.gate import (
 from shipmill.gitrepo import Git
 from shipmill.notify import NO_NOTIFIER, OSASCRIPT, Desktop, NotifyFailed, run
 
-from .test_gate import ISSUES, NO_PRUNE, NOW, FakeClaude, FakeNotifier, bg, on_hold
+from .test_gate import ISSUES, NO_PRUNE, NOW, FakeClaude, FakeNotifier, bg, host, on_hold
 
 HOUR = dt.timedelta(hours=1)
 REPO = "romamo/demo"
@@ -105,7 +105,7 @@ def test_s003_3_a_tick_with_no_blocked_session_reads_nothing_and_drops_the_recor
 
     claude = FakeClaude([bg("c", "idle", "done")])
     decision, _, waiting, _ = gate(
-        checkout, REPO, counted, claude, lambda _: [ISSUES], NOW, Hold, notifier, NO_PRUNE, dry_run=True
+        checkout, REPO, counted, claude, lambda _: [ISSUES], NOW, Hold, notifier, NO_PRUNE, dry_run=True, login=host
     )
     assert (decision.action, waiting, len(reads), notifier.sent) == (Action.LAUNCH, (), 1, [])
 
@@ -337,7 +337,7 @@ def test_s003_10_a_session_past_max_wait_minutes_is_stopped_and_the_tick_goes_on
     agents = limited(5 * 60)
     # gate() takes no GitHub writer: its only GitHub call is the hold read
     decision, launched, waiting, _ = gate(
-        checkout, REPO, lambda: agents, claude, lambda _: [ISSUES], NOW, Hold, notifier, NO_PRUNE
+        checkout, REPO, lambda: agents, claude, lambda _: [ISSUES], NOW, Hold, notifier, NO_PRUNE, login=host
     )
     assert claude.stopped == ["b", "d"]  # b by the limit, then d as a finished session before the launch
     assert (decision.action, launched) == (Action.LAUNCH, "s1")
@@ -395,7 +395,7 @@ def test_s003_10_after_a_stop_unchanged_findings_still_wait_for_retry_hours(chec
     agents = limited(5 * 60, notify=False)
     notifier = FakeNotifier(fail="no send should run")
     decision, launched, waiting, _ = gate(
-        checkout, REPO, lambda: agents, claude, lambda _: [ISSUES], NOW, Hold, notifier, NO_PRUNE
+        checkout, REPO, lambda: agents, claude, lambda _: [ISSUES], NOW, Hold, notifier, NO_PRUNE, login=host
     )
     assert (decision.action, launched, claude.stopped, claude.launched) == (Action.UNCHANGED, None, ["b"], [])
     assert (waiting[0].stopped, waiting[0].notified, notifier.sent) == (True, False, [])
@@ -478,7 +478,17 @@ def test_s003_14_a_dry_run_would_stop_and_stops_nothing(checkout: Git) -> None:
     agents = limited(5 * 60)
     notifier = FakeNotifier(fail="no send should run")
     decision, launched, waiting, _ = gate(
-        checkout, REPO, lambda: agents, claude, lambda _: [ISSUES], NOW, Hold, notifier, NO_PRUNE, dry_run=True
+        checkout,
+        REPO,
+        lambda: agents,
+        claude,
+        lambda _: [ISSUES],
+        NOW,
+        Hold,
+        notifier,
+        NO_PRUNE,
+        dry_run=True,
+        login=host,
     )
     assert (decision.action, launched, claude.stopped, claude.launched) == (Action.LAUNCH, None, [], [])
     assert path.read_text(encoding="utf-8") == before
