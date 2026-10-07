@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.32.2] - 2026-10-07
+
 ### Fixed
 
 - shipmill-setup no longer calls a stalled factory healthy: `setup_state.py` adds a
@@ -997,7 +999,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.32.1...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.32.2...HEAD
+[0.32.2]: https://github.com/shipmill/shipmill/compare/v0.32.1...v0.32.2
 [0.32.1]: https://github.com/shipmill/shipmill/compare/v0.32.0...v0.32.1
 [0.32.0]: https://github.com/shipmill/shipmill/compare/v0.31.1...v0.32.0
 [0.31.1]: https://github.com/shipmill/shipmill/compare/v0.31.0...v0.31.1
