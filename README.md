@@ -51,9 +51,11 @@ Prerequisites, every step, and how to pause or remove it: [docs/install.md](docs
    Merge, run the Release workflow by hand with dry-run on, read the release commit in
    its summary, then set `mode = "release"`
 
-   From then on, `shipmill status` answers "is anything stuck?" from the checkout: a failed
-   or stalled release, a release missing from PyPI, fixed issues not told the version, a
-   hold. It exits 1 when a row needs action, so a CI job can gate on it
+   From then on, `shipmill status` answers "is anything stuck?" from the checkout. It starts
+   with a verdict (STUCK, WAITS ON YOU, WORKING, or IDLE) and its reasons, then shows the
+   local `main` against GitHub's, the issues and pull requests that wait on you (with a
+   link), the gate's last run and mode, and the shipmill version. It exits 1 when a row
+   needs action, so a CI job can gate on it; `--rows` and `--json` print the raw rows
 
 3. **The agents' schedule** (optional): add an `[agents]` section to the config, then run
    `shipmill gate` from its own checkout every 15 minutes:
