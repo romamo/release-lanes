@@ -28,7 +28,7 @@ The repo decides what the session does, in the `[agents]` section of
 
 ```toml
 [agents]
-prompt = "/github-issue-triage {repo} merge when green"
+prompt = "/shipmill:github-issue-triage {repo} merge when green"
 prs = true          # open pull requests count as work
 retry_hours = 24    # unchanged findings start a new session after this
 notify = true       # a desktop notification when a session waits on you

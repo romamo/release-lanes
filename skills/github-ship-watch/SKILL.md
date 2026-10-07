@@ -58,6 +58,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | GATE_NO_APP | The config's `[agents]` has a prompt but no `app_id`, so the gate's sessions write as the host's `gh` login: their pull requests, comments, and commits read as the maintainer's, who can't approve them (D-19). Tell the user to connect an App with shipmill-setup's step 3 under The gate (`shipmill app-create`, then `app_id` in `[agents]` through a PR). The watch never creates an App or edits the config. An action (exit 1), never an agent's |
 | SHIPMILL_VERSION | The latest shipmill release, the `shipmill@shipmill` plugin installs that apply to the repo on this host (user scope, and local or project scope in the checkout or the gate's working directory, each read as the project Claude Code loads: a linked git worktree counts as its main checkout), the gate's checkout's own installs (`tmp/shipmill-gate`, the gate's launchd working directory, or the checkout itself when it is a linked worktree: Claude Code keys an install on each, #233), and a marketplace still on an old repo name. Report only |
 | SHIPMILL_OUTDATED | One row per install older than the latest release, so the skills it runs are stale: an install in the gate's checkout means the gate's sessions run them. Give the user the row's command, run in the folder it names (a restart applies it): `claude plugin update shipmill@shipmill --scope <scope>`, or for a folder with a nested install at the same scope (the repo, with the gate's checkout inside it) an uninstall and install at that scope, because `update` there picks the nested install (a Claude Code bug). The watch never updates a plugin; the gate updates its checkout's with `[agents] plugin_update = true` (D-22). An action (exit 1), never an agent's |
+| SKILL_SHADOWED | A link or copy of a shipmill skill in `~/.claude/skills` or `~/.agents/skills` (the subject is the skill's name), which a prompt's unprefixed `/<name>` loads in place of the plugin's, so a session can run a working copy that is behind or on a feature branch (#236). A link into the plugin's cache (`~/.claude/plugins/cache/shipmill/`) is the plugin's and never reported. Give the user the row's fix: remove the link or copy, or call the skill as `/shipmill:<name>`. The watch never deletes anything in the user's home folder. An action (exit 1), never an agent's |
 | PRS_OPEN, BOT_OK, BOT_NONE, NO_REGISTRY | Report only |
 
 `--json` prints one JSON object per row: `state`, `subject`, `detail`, and `agent`, which says whether the row needs an agent. `shipmill gate` starts a session only on `agent: true` rows (plus PRS_OPEN with `[agents] prs = true`), and refuses a row without the field. The script's `AGENT` set decides it, next to this table; change both together:
@@ -71,6 +72,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | `false` | BRANCH_DELETE_OFF | A repo setting only a person changes |
 | `false` | GATE_NO_APP | Only a person creates the App and owns its key; as an agent's row, every tick on an app-less repo would start a session |
 | `false` | SHIPMILL_OUTDATED | A person updates the plugin and restarts the session |
+| `false` | SKILL_SHADOWED | The fix is in the user's home folder; an agent never deletes files there |
 | `false` | UNHEALTHY | Operate owns it and rolls back after `rollback_after` failures; past that, the incident it opens reads INCIDENT_OPEN |
 | `false` | HOLD | Report only; the gate checks `shipmill-hold` itself before anything else (D-15) |
 | `false` | WORKTREE_STALE | Only a person knows whether kept work is wanted; the gate's prune already removes what landed |
@@ -85,7 +87,7 @@ HOLD and POSTMORTEM_DUE show for every repo with a shipmill config, since a hold
 
 ## Report
 
-Every report the user asks for covers the open issues (ISSUES and ISSUES_OPEN), the workflow runs (RUNS_ACTIVE), and the agents: the triage mode (TRIAGE_MODE), the sessions (AGENT_SESSION), and the loops (LOOP, plus this session's own); and whether this host's shipmill is current (SHIPMILL_VERSION, SHIPMILL_OUTDATED). Say "none open", "nothing running", or "no agents" when a row is absent; a status report that leaves one out reads as complete when it isn't.
+Every report the user asks for covers the open issues (ISSUES and ISSUES_OPEN), the workflow runs (RUNS_ACTIVE), and the agents: the triage mode (TRIAGE_MODE), the sessions (AGENT_SESSION), and the loops (LOOP, plus this session's own); and whether this host's shipmill is current (SHIPMILL_VERSION, SHIPMILL_OUTDATED, SKILL_SHADOWED). Say "none open", "nothing running", or "no agents" when a row is absent; a status report that leaves one out reads as complete when it isn't.
 
 Under /loop, a quiet pass (exit 0) is one line: "Nothing owed: bot OK, <latest tag> published and announced, no issues waiting." (add "held by #N" when a HOLD row shows). Otherwise lead with open incidents and holds, then what needs the user (each with a recommendation), then what the pass repaired with links, then what it left for the next pass.
 
@@ -115,7 +117,7 @@ The retro writes only the proposal issues and that one comment. It never edits a
 
 ## Running it on a schedule
 
-- In a session: `/loop 30m /github-ship-watch <owner/repo> — watch and triage`
+- In a session: `/loop 30m /shipmill:github-ship-watch <owner/repo> — watch and triage`
 - In the cloud: `/schedule` a routine whose prompt clones shipmill and follows this file, as `docs/flow.md` shows. A cloud session may not load plugins from the repo's settings
 - Don't start a loop or a routine unasked; offer it
 

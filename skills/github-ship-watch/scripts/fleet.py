@@ -91,6 +91,7 @@ ACTION = frozenset(
         "BRANCH_DELETE_OFF",
         "SHIPMILL_OUTDATED",
         "GATE_NO_APP",
+        "SKILL_SHADOWED",
     }
 )
 REPO_ERROR = "REPO_ERROR"
