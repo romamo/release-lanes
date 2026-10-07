@@ -87,6 +87,37 @@ def test_an_existing_shipmill_marketplace_is_kept(ss: ModuleType) -> None:
     assert merged["extraKnownMarketplaces"]["shipmill"] == fork
 
 
+ENABLED = {"enabledPlugins": {"shipmill@shipmill": True}}
+
+
+def test_an_outdated_install_is_one_row_each_and_not_done(ss: ModuleType) -> None:
+    # #233: setup called a repo with a 0.31.1 project install healthy while 0.32.1 was out
+    found = [
+        "plugin project: 0.31.1, latest v0.32.1; in /w/r: claude plugin uninstall ... && claude plugin install ...",
+        "plugin project: 0.25.0, latest v0.32.1; in /w/r/tmp/shipmill-gate: claude plugin update ...",
+    ]
+    rows = ss.plugin_rows(ENABLED, lambda: found)
+    assert [(r.state, r.detail) for r in rows] == [("PLUGIN_OUTDATED", d) for d in found]
+    assert "PLUGIN_OUTDATED" not in ss.DONE
+
+
+def test_current_installs_read_as_ok(ss: ModuleType) -> None:
+    assert [r.state for r in ss.plugin_rows(ENABLED, lambda: [])] == ["PLUGIN_OK"]
+
+
+@pytest.mark.parametrize("settings", [{}, {"enabledPlugins": {"shipmill@shipmill": False}}])
+def test_installs_are_read_only_with_the_plugin_enabled(ss: ModuleType, settings: dict[str, object]) -> None:
+    def unread() -> list[str]:
+        raise AssertionError("the installs should not be read")
+
+    assert [r.state for r in ss.plugin_rows(settings, unread)] in (["PLUGIN_MISSING"], ["PLUGIN_DISABLED"])
+
+
+def test_the_installs_are_read_through_watch_state(ss: ModuleType) -> None:
+    assert ss.WATCH_STATE.is_file()
+    assert callable(ss.watch_module().shipmill_rows)
+
+
 def test_a_plugin_turned_off_on_purpose_is_reported_not_missing(ss: ModuleType) -> None:
     assert ss.plugin_row({"enabledPlugins": {"shipmill@shipmill": False}}).state == "PLUGIN_DISABLED"
 

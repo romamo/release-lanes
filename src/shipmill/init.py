@@ -145,6 +145,12 @@ github_release = true
 # shipmill-hold turns every act into propose until it is closed.
 # [autonomy]
 # release = "act"
+
+# What the gate starts a Claude Code session for; shipmill-setup writes this section with you.
+# [agents]
+# prompt = "/shipmill:github-issue-triage {{repo}} triage the new issues; do not merge"
+# plugin_update = false             # the default: the gate changes no plugin install; true: it
+#                                   # updates its checkout's shipmill plugin once a day
 '''
 
 

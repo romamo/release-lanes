@@ -23,7 +23,19 @@ from .test_worktrees import CHANGELOG, Checkout, branches, fake_tool, run
 REPO = "romamo/demo"
 DONE = ".claude/worktrees/done"
 GATE = "tmp/shipmill-gate"
-KEYS = {"action", "reason", "work", "stopped", "launched", "identity", "waiting", "pruned", "mode", "decisions"}
+KEYS = {
+    "action",
+    "reason",
+    "work",
+    "stopped",
+    "launched",
+    "identity",
+    "waiting",
+    "pruned",
+    "mode",
+    "decisions",
+    "plugin",
+}
 
 Tick = tuple[Decision, str | None, tuple[Waiting, ...], tuple[Judged, ...]]
 

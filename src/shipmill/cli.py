@@ -79,7 +79,7 @@ from shipmill.app_create import (
 from shipmill.app_install import WAIT_SECONDS, guide
 from shipmill.autonomy import Hold
 from shipmill.config import CONFIG_PATH, config_path
-from shipmill.doctor import CALLER, OPERATE_CALLER, doctor
+from shipmill.doctor import CALLER, OPERATE_CALLER, doctor, read_plugin_rows
 from shipmill.errors import ReleaseError
 from shipmill.gate import (
     ClaudeCli,
@@ -387,7 +387,9 @@ def main(
         print(f"next: review the policy, then run `{cli_command()} doctor`")
         return 0
     if args.command == "doctor":
-        checks = doctor(root, github or (GhCli(root) if shutil.which("gh") else None))
+        slug = _doctor_repo(root)
+        plugins = None if slug is None else (lambda: read_plugin_rows(slug, root))
+        checks = doctor(root, github or (GhCli(root) if shutil.which("gh") else None), plugins)
         for check in checks:
             print(f"{check.status} {check.name}: {check.detail}")
         return 1 if any(c.status == "FAIL" for c in checks) else 0
@@ -694,6 +696,15 @@ def _status(
     )
     sys.stdout.write(status.report(facts).text(slug))
     return proc.returncode  # S-009-14: spec 008's code, whatever the verdict
+
+
+def _doctor_repo(root: Path) -> str | None:
+    """The repo doctor reads the plugin's installs for: the origin's, or None without a GitHub
+    origin, which doctor's remote check reports"""
+    try:
+        return _origin_repo(root)
+    except ReleaseError:  # no origin remote
+        return None
 
 
 def _origin_repo(root: Path) -> str | None:

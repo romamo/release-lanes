@@ -268,7 +268,12 @@ or the tags are wrong; fix those, not the version.
    enables the plugin, keeping every other key, creates the missing labels, and turns the
    setting on, all on GitHub at once; commit the settings change in a follow-up PR. A
    plugin turned off on purpose
-   (`PLUGIN_DISABLED`) is the user's call; ask before changing it
+   (`PLUGIN_DISABLED`) is the user's call; ask before changing it. With the plugin
+   enabled, each install on this host that is behind the latest release reads
+   `PLUGIN_OUTDATED` (not done; `--fix` leaves it): user scope, the repo's folder, and the
+   gate's checkout are separate rows, each with the command to run in its folder. Give the
+   user those commands; for the repo's folder it is a reinstall, because `claude plugin
+   update` there picks the gate checkout's nested install (a Claude Code bug)
 
    The last row is landing: `LANDING_OFF` when the config's `[agents]` has `prs = false`
    (or no `prs` key, which the config reads as false) and open non-draft pull requests
@@ -341,7 +346,13 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
    max_wait_minutes = 15 # stop a session that waited this long; 0: never
    app_id = 123456    # replace with the App ID step 3 prints; sessions write as its bot
    mode = "interactive" # step 4's answer: sessions ask you; "headless": they ask on GitHub
+   # plugin_update = true # default false: the gate changes no plugin install
    ```
+
+   `plugin_update = true` lets the gate update its checkout's own plugin install, at most
+   once a day, before it starts a session, so gate sessions run the released skills; a
+   failed update is printed on the tick and the session starts anyway (D-22). Ask the user
+   before setting it: it is the policy's permission to change an install
 
    Every time you set up the gate, ask two questions together, before writing the
    section: who should own the gate's GitHub App (step 3), and whether anyone watches

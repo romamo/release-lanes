@@ -1017,6 +1017,64 @@ def test_a_linked_worktree_is_its_main_checkouts_project(ws: ModuleType) -> None
     assert states(ws.plugin_rows(installed, MARKETPLACE, "v0.24.0", folders)) == ["SHIPMILL_VERSION"]
 
 
+GATE = Path("/work/r/tmp/shipmill-gate")
+
+
+def test_the_repos_install_and_the_gate_checkouts_are_separate_rows(ws: ModuleType) -> None:
+    # #233: `update --scope project` in /work/r updated the nested gate install, so the repo's
+    # stayed at 0.31.1; and the gate checkout's own 0.25.0 was never reported
+    installed = registry(
+        install("user", "0.32.1"), install("project", "0.31.1", "/work/r"), install("project", "0.25.0", str(GATE))
+    )
+    rows = ws.plugin_rows(installed, MARKETPLACE, "v0.32.1", [Path("/work/r")], [GATE])
+    assert [(r.state, r.detail) for r in rows if r.state == "SHIPMILL_OUTDATED"] == [
+        (
+            "SHIPMILL_OUTDATED",
+            "0.31.1, latest v0.32.1; in /work/r: claude plugin uninstall shipmill@shipmill --scope project"
+            " && claude plugin install shipmill@shipmill --scope project"
+            " (`update` picks the nested install in /work/r/tmp/shipmill-gate, a Claude Code bug)",
+        ),
+        (
+            "SHIPMILL_OUTDATED",
+            "0.25.0, latest v0.32.1; in /work/r/tmp/shipmill-gate:"
+            " claude plugin update shipmill@shipmill --scope project",
+        ),
+    ]
+
+
+def test_a_nested_install_at_another_scope_keeps_the_update(ws: ModuleType) -> None:
+    installed = registry(install("project", "0.31.1", "/work/r"), install("local", "0.32.1", str(GATE)))
+    rows = ws.plugin_rows(installed, MARKETPLACE, "v0.32.1", [Path("/work/r")], [GATE])
+    assert [r.detail for r in rows if r.state == "SHIPMILL_OUTDATED"] == [
+        "0.31.1, latest v0.32.1; in /work/r: claude plugin update shipmill@shipmill --scope project"
+    ]
+
+
+def test_without_gates_a_gate_keyed_install_is_still_left_out(ws: ModuleType) -> None:
+    installed = registry(install("project", "0.32.1", "/work/r"), install("project", "0.25.0", str(GATE)))
+    assert states(ws.plugin_rows(installed, MARKETPLACE, "v0.32.1", [Path("/work/r")])) == ["SHIPMILL_VERSION"]
+
+
+def test_a_project_path_that_is_not_a_string_is_refused(ws: ModuleType) -> None:
+    with pytest.raises(ws.Refused):
+        ws.plugin_rows([{**install("project", "0.1.0"), "projectPath": 3}], MARKETPLACE, "v0.24.0", FOLDERS)
+
+
+def test_the_gate_checkout_is_found_beside_the_main_checkout(ws: ModuleType, tmp_path: Path) -> None:
+    main = tmp_path / "r"
+    main.mkdir()
+    for cmd in (["init", "-q"], ["commit", "-q", "--allow-empty", "-m", "x"]):
+        subprocess.run(["git", "-C", str(main), "-c", "user.name=t", "-c", "user.email=t@t", *cmd], check=True)
+    subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", "--detach", "tmp/shipmill-gate"], check=True)
+    gate = (main / "tmp/shipmill-gate").resolve()
+    main = main.resolve()
+    assert ws.plugin_folders(main, None) == ([main], [main / "tmp/shipmill-gate"])
+    assert ws.plugin_folders(gate, None) == ([main], [gate])  # the gate reads the state from its checkout
+    elsewhere = tmp_path / "gate2"
+    subprocess.run(["git", "-C", str(main), "worktree", "add", "-q", "--detach", str(elsewhere)], check=True)
+    assert ws.plugin_folders(main, elsewhere.resolve()) == ([main], [main / "tmp/shipmill-gate", elsewhere.resolve()])
+
+
 def test_a_folder_outside_git_is_its_own_project(ws: ModuleType, tmp_path: Path) -> None:
     assert ws.project_folder(tmp_path / "missing") == tmp_path / "missing"
     assert ws.project_folder(tmp_path) == tmp_path

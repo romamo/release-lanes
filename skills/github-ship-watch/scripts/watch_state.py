@@ -114,10 +114,17 @@ shipmill on this host (from `claude plugin list --json` and `claude plugin marke
   SHIPMILL_VERSION   the latest shipmill release, the shipmill@shipmill plugin's installs
                   that apply to the repo (user scope, and local or project scope in the
                   checkout or the gate's launchd working directory, each taken as the project
-                  Claude Code loads it as: a linked worktree's main checkout), and the marketplace's
-                  source when it isn't shipmill/shipmill (reported, never an action)
-  SHIPMILL_OUTDATED  an install of those older than the latest release, with the command
-                  that updates it: an action for a person, never an agent's
+                  Claude Code loads it as: a linked worktree's main checkout), the gate's
+                  checkout's own installs (tmp/shipmill-gate, the launchd working directory,
+                  or the checkout itself when it is a linked worktree: Claude Code keys an
+                  install on each), and the marketplace's source when it isn't
+                  shipmill/shipmill (reported, never an action)
+  SHIPMILL_OUTDATED  one row per install of those older than the latest release, with the
+                  command that updates it, run in its folder. When an install at the same
+                  scope is keyed on a folder nested in it (the gate's checkout in the repo),
+                  `claude plugin update` picks the nested one (a Claude Code bug), so the
+                  fix reinstalls the folder's own instead: an action for a person, never an
+                  agent's
 
 --incident-label names the label the repo's incidents carry, in place of the config's
 [operate] incident_label (fleet.py passes a fleet file's incident_label this way).
@@ -195,6 +202,7 @@ GATE_SESSION = "shipmill "  # shipmill gate names its sessions "shipmill <owner/
 LAUNCH_AGENTS = Path.home() / "Library" / "LaunchAgents"
 SHIPMILL_REPO = "shipmill/shipmill"  # where shipmill releases
 PLUGIN = "shipmill@shipmill"  # the Claude Code plugin, in its marketplace
+GATE_CHECKOUT = Path("tmp/shipmill-gate")  # where shipmill-setup puts the gate's checkout
 # the gate log's decision lines: QUIET, LAUNCH, RUNNING, WAITING, UNCHANGED, HELD, or an error
 GATE_DECISION = re.compile(r"^(?:[A-Z]+|error): ")
 VERSION_TAG = re.compile(r"^v\d+\.\d+")  # skips moving major tags such as v0
@@ -1296,11 +1304,31 @@ def agent_rows(repo: str, repo_dir: Path, now: dt.datetime) -> list[Row]:
     return [*rows, loop_row(label, plist, printed, log, now)]
 
 
-def plugin_rows(plugins: object, marketplaces: object, latest: str, folders: list[Path]) -> list[Row]:
+def plugin_fix(scope: str, where: str | None, keyed: list[tuple[str, Path]]) -> str:
+    """The command that updates one install, run in its folder. Claude Code's `plugin update
+    --scope project` picks an install at the same scope keyed on a folder nested in the cwd,
+    such as the gate's tmp/shipmill-gate, over the cwd's own (#233, a Claude Code bug); with
+    one nested, the fix reinstalls the folder's own at that scope instead"""
+    update = f"claude plugin update {PLUGIN} --scope {scope}"
+    if where is None:
+        return update
+    folder = Path(where)
+    nested = sorted(p for s, p in keyed if s == scope and folder in p.parents)
+    if not nested:
+        return f"in {where}: {update}"
+    again = f"claude plugin uninstall {PLUGIN} --scope {scope} && claude plugin install {PLUGIN} --scope {scope}"
+    return f"in {where}: {again} (`update` picks the nested install in {nested[0]}, a Claude Code bug)"
+
+
+def plugin_rows(
+    plugins: object, marketplaces: object, latest: str, folders: list[Path], gates: list[Path] | None = None
+) -> list[Row]:
     """The plugin's installs that apply to the repo, against the latest release: from `claude
     plugin list --json` and `claude plugin marketplace list --json`, parsed (None when claude
     isn't on PATH). An install applies at user scope, or at local or project scope in one of
-    the folders"""
+    the folders (the projects Claude Code loads) or one of the gates (the gate's checkouts,
+    which Claude Code keys installs of their own on, #233). Each install behind the release is
+    its own SHIPMILL_OUTDATED row, with the fix to run in its folder"""
     newest = version_key(latest)
     if newest is None:
         raise Refused(f"error: {SHIPMILL_REPO}'s latest release {latest!r} is not a version tag")
@@ -1309,22 +1337,26 @@ def plugin_rows(plugins: object, marketplaces: object, latest: str, folders: lis
     if not isinstance(plugins, list):
         raise Refused("error: claude plugin list --json: expected a JSON array")
     installs = []
+    keyed = []  # every scope and folder an install of the plugin is keyed on
     for e in plugins:
         if not isinstance(e, dict) or e.get("id") != PLUGIN:
             continue
         if not isinstance(e.get("scope"), str) or not isinstance(e.get("version"), str):
             raise Refused(f"error: claude plugin list --json: {PLUGIN} install {e!r}")
         where = e.get("projectPath")
-        if e["scope"] == "user" or (isinstance(where, str) and Path(where) in folders):
-            installs.append((e["scope"], e["version"], where if isinstance(where, str) else None))
+        if where is not None and not isinstance(where, str):
+            raise Refused(f"error: claude plugin list --json: {PLUGIN} install {e!r}")
+        if where is not None:
+            keyed.append((e["scope"], Path(where)))
+        if e["scope"] == "user" or (where is not None and (Path(where) in folders or Path(where) in (gates or []))):
+            installs.append((e["scope"], e["version"], where))
     rows = []
     for scope, version, where in installs:
         key = version_key(f"v{version}")
         if key is None:
             raise Refused(f"error: {PLUGIN} {scope} install has version {version!r}")
         if key < newest:
-            update = f"claude plugin update {PLUGIN} --scope {scope}"
-            fix = f"in {where}: {update}" if where else update
+            fix = plugin_fix(scope, where, keyed)
             rows.append(Row("SHIPMILL_OUTDATED", f"plugin {scope}", f"{version}, latest {latest}; {fix}"))
     found = ", ".join(f"{scope} {version}" + (f" ({where})" if where else "") for scope, version, where in installs)
     detail = f"latest {latest}; plugin: {found or 'not installed for this repo on this host'}"
@@ -1368,19 +1400,32 @@ def project_folder(folder: Path) -> Path:
     return main_checkout(folder, proc.stdout)
 
 
+def plugin_folders(repo_dir: Path, workdir: Path | None) -> tuple[list[Path], list[Path]]:
+    """The projects Claude Code loads for the checkout and the gate's working directory, and
+    the gate's checkouts, keyed apart from them (#233): the conventional tmp/shipmill-gate,
+    the working directory, and the checkout itself when either is a linked worktree"""
+    main = project_folder(repo_dir)
+    folders, gates = [main], [main / GATE_CHECKOUT]
+    for folder in [repo_dir] if workdir is None else [repo_dir, workdir]:
+        project = project_folder(folder)
+        if project not in folders:
+            folders.append(project)
+        if folder != project and folder not in gates:
+            gates.append(folder)
+    return folders, gates
+
+
 def shipmill_rows(repo: str, repo_dir: Path) -> list[Row]:
     """The host's shipmill plugin against shipmill's latest release"""
     latest = run(["gh", "release", "view", "-R", SHIPMILL_REPO, "--json", "tagName", "-q", ".tagName"]).strip()
-    folders = [project_folder(repo_dir)]
     plist = gate_plist(repo)
     workdir = plist.get("WorkingDirectory") if plist else None
-    if isinstance(workdir, str):
-        folders.append(project_folder(Path(workdir)))
+    folders, gates = plugin_folders(repo_dir, Path(workdir) if isinstance(workdir, str) else None)
     claude = shutil.which("claude")
     if claude is None:
-        return plugin_rows(None, None, latest, folders)
+        return plugin_rows(None, None, latest, folders, gates)
     plugins = claude_json(claude, "plugin", "list")
-    return plugin_rows(plugins, claude_json(claude, "plugin", "marketplace", "list"), latest, folders)
+    return plugin_rows(plugins, claude_json(claude, "plugin", "marketplace", "list"), latest, folders, gates)
 
 
 # -- repository settings -------------------------------------------------------------------
