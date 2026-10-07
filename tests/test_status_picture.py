@@ -1,4 +1,5 @@
-"""Spec 009: `shipmill status` says whether the factory works or is stuck"""
+"""Spec 009: `shipmill status` says whether the factory works or is stuck, as a short linked
+summary"""
 
 import dataclasses
 import datetime as dt
@@ -20,7 +21,6 @@ from shipmill.status import (
     Job,
     Main,
     Pull,
-    Release,
     Row,
     Verdict,
     parse_job,
@@ -47,7 +47,7 @@ def facts(*rows: Row, **changes: object) -> Facts:
         issues=[],
         pulls=[],
         main=Main("main", SHA, SHA, 0, 0),
-        release=Release("v0.26.0", NOW - dt.timedelta(days=1), Described("v0.26.0", 0), Described("v0.26.0", 3)),
+        version=Described("v0.26.0", 0),
         gate=GATE,
         cli="0.26.0",
         now=NOW,
@@ -65,14 +65,6 @@ def job(**changes: object) -> Job:
 
 def lines(found: Facts) -> list[str]:
     return report(found).text(REPO).splitlines()
-
-
-def test_s009_1_the_verdict_line_comes_first_with_every_reason() -> None:
-    found = facts(Row("BOT_FAILED", REPO, "release.yml failed", True), Row("HOLD", "#3", "freeze", False))
-    text = lines(found)
-    assert text[0] == f"{REPO}: STUCK"
-    assert text[1:3] == [f"  - BOT_FAILED {REPO}: release.yml failed", "  - HOLD #3: freeze"]
-    assert lines(facts())[:2] == [f"{REPO}: IDLE", "  - nothing to do"]
 
 
 @pytest.mark.parametrize(
@@ -106,7 +98,7 @@ def test_s009_3_a_gate_after_sleep_or_before_its_first_run_isnt_stuck() -> None:
     assert report(facts(gate=gate(job=job(last_run=NOW - dt.timedelta(hours=8), running=True)))).verdict is Verdict.IDLE
     off_mac = gate(launchd=False, job=None)
     assert report(facts(gate=off_mac)).verdict is Verdict.IDLE
-    assert "  job          no launchd on this host" in lines(facts(gate=off_mac))
+    assert "  gate           can't check here: no launchd" in lines(facts(gate=off_mac))
 
 
 def test_s009_3_no_job_on_this_host_waits_on_you_rather_than_stuck() -> None:
@@ -147,8 +139,8 @@ def test_s009_3_a_traceback_shows_its_error_and_a_named_exit_code_is_still_a_num
 def test_s009_4_a_failed_app_check_is_stuck_and_shown() -> None:
     found = facts(gate=gate(app=None, app_error="the App isn't installed on acme/web"))
     assert report(found).verdict is Verdict.STUCK
-    assert "  app          7, not connected: the App isn't installed on acme/web" in lines(found)
-    assert "  app          acme-bot (7), connected" in lines(facts())
+    assert "  github app     not connected: the App isn't installed on acme/web" in lines(found)
+    assert "  github app     active" in lines(facts())
 
 
 def test_s009_4_an_app_key_missing_on_this_host_is_not_a_failure(tmp_path: Path) -> None:
@@ -165,8 +157,8 @@ def test_s009_4_an_app_key_missing_on_this_host_is_not_a_failure(tmp_path: Path)
     assert (found.app, found.app_error, found.mode_set) == (None, None, False)
     assert found.app_key is not None
     text = lines(facts(gate=found))
-    assert any("can't check here: no key at" in line for line in text)
-    assert "  mode         interactive (not set, the default)" in text
+    assert f"  github app     can't check here: no key at {found.app_key}" in text
+    assert "  mode           interactive (not set)" in text
     assert report(facts(gate=found)).verdict is Verdict.IDLE
 
 
@@ -200,91 +192,15 @@ def test_s009_6_agent_work_or_a_gate_session_or_a_run_is_working() -> None:
     assert report(facts(mine)).verdict is Verdict.IDLE
 
 
-def test_s009_7_issues_are_counted_and_listed_with_the_decision_link() -> None:
-    issues = [
-        Issue(6, "NEEDS_DECISION"),
-        Issue(5, "NEW"),
-        Issue(4, "NEEDS_PR"),
-        Issue(3, "IN_PROGRESS"),
-        Issue(2, "TRIAGED"),
-        Issue(1, "SUSPECT_CLOSE"),
-    ]
-    text = lines(facts(issues=issues))
-    start = text.index("issues       5 open")
-    link = "https://github.com/acme/web/issues?q=is%3Aopen%20label%3Aneeds-decision"
-    assert text[start + 1 : start + 6] == [
-        f"  wait on you  #6  {link}",
-        "  to triage    #5",
-        "  to build     #4",
-        "  in progress  #3",
-        "  parked       #2",
-    ]
-    assert "  closed?      #1 closed by a mention, not a fix (SUSPECT_CLOSE)" in text
-
-
-def test_s009_8_pull_requests_are_told_from_issues_waiting() -> None:
-    rows = (Row("NEEDS_DECISION", REPO, "#6 #9", False), Row("PRS_OPEN", REPO, "#8", False))
-    found = facts(*rows, issues=[Issue(6, "NEEDS_DECISION")], pulls=[Pull(9, False), Pull(8, False), Pull(7, True)])
-    text = lines(found)
-    start = text.index("pull requests  3 open")
-    link = "https://github.com/acme/web/pulls?q=is%3Aopen%20label%3Aneeds-decision"
-    assert text[start + 1 : start + 4] == [f"  wait on you  #9  {link}", "  to triage    #8", "  drafts       #7"]
-    assert report(found).reasons == ["issue #6 waits on your decision", "pull request #9 waits on your decision"]
-
-
-@pytest.mark.parametrize(
-    ("main_", "shown"),
-    [
-        (Main("main", SHA, SHA, 0, 0), "in sync"),
-        (Main("main", SHA, "b" * 40, 0, 2), "2 behind (git pull)"),
-        (Main("main", SHA, "b" * 40, 1, 0), "1 ahead"),
-        (Main("main", SHA, "b" * 40, 1, 2), "diverged (1 ahead, 2 behind)"),
-        (Main("main", None, SHA, 0, 0), "no local main"),
-    ],
-)
-def test_s009_9_the_main_line_compares_local_with_github(main_: Main, shown: str) -> None:
-    assert any(line.startswith("  main ") and line.endswith(shown) for line in lines(facts(main=main_)))
-
-
-def test_s009_10_the_version_line_names_the_release_and_where_each_main_is() -> None:
-    assert (
-        "  version      latest release v0.26.0 (1 h ago); local main at v0.26.0, github main at v0.26.0 +3 commits"
-        in lines(facts(now=NOW - dt.timedelta(hours=23)))
-    )
-    assert "  version      no release yet" in lines(facts(release=None))
-
-
-def test_s009_11_the_gate_block_shows_job_last_mode_and_app() -> None:
-    text = lines(facts())
-    start = text.index("gate")
-    assert text[start + 1 : start + 5] == [
-        "  job          launchd every 15 min, idle, last run 4 min ago, exit 0",
-        "  last         QUIET: nothing",
-        "  mode         headless",
-        "  app          acme-bot (7), connected",
-    ]
-    assert "gate         no [agents]: no gate runs for this repo" in lines(facts(gate=gate(agents=None)))
-
-
-def test_s009_12_the_shipmill_line_names_both_versions_and_the_updates() -> None:
-    assert lines(facts())[-1] == "shipmill     cli 0.26.0, plugin user 0.26.0, local 0.26.0; latest v0.26.0, up to date"
-    old = Row(
-        "SHIPMILL_OUTDATED", "plugin user", "0.25.0, latest v0.26.0; claude plugin update shipmill@shipmill", False
-    )
-    assert lines(facts(old, cli="0.25.0"))[-1].endswith(
-        "update available: claude plugin update shipmill@shipmill; uv tool upgrade shipmill"
-    )
-
-
 def test_s009_13_a_row_the_report_doesnt_place_is_printed_under_other() -> None:
     text = lines(facts(Row("WORKTREE_STALE", "/w", "kept 9 days", False)))
-    assert text[text.index("other") + 1] == "  WORKTREE_STALE /w kept 9 days"
+    assert "  other          WORKTREE_STALE /w kept 9 days" in text
 
 
 def test_s009_13_a_row_the_sessions_line_shows_is_not_under_other_too() -> None:
     text = lines(facts(Row("HOST_UNKNOWN", "claude", "not on PATH", False)))
-    assert "  sessions     not read: not on PATH" in text
-    assert "other" not in text
+    assert "  sessions       not read: not on PATH" in text
+    assert not any(line.startswith("  other") for line in text)
 
 
 VERSION_JSON = {"state": VERSION.state, "subject": VERSION.subject, "detail": VERSION.detail, "agent": False}
@@ -334,9 +250,10 @@ def test_s009_14_rows_json_and_the_exit_code_stay_spec_008s(
     fake = Fake(code)
     assert main(["--repo", str(root), "status"], state=fake) == code
     out = capsys.readouterr().out
-    assert out.startswith(f"{REPO}: STUCK\n  - BOT_FAILED {REPO}: failed\n")
-    assert "  version      latest release v1.0.0 (" in out
-    assert "  to triage    #4" in out
+    assert out.startswith(
+        f"{REPO} (https://github.com/{REPO}): STUCK\n  repo           in sync at v1.0.0, BOT_FAILED {REPO}\n"
+    )
+    assert f"  to triage      #4 https://github.com/{REPO}/issues/4" in out
     assert main(["--repo", str(root), "status", "--rows"], state=Fake(code)) == code
     assert capsys.readouterr().out == "BOT_FAILED table\n"
     rows = Fake(code)
@@ -366,7 +283,237 @@ def test_s009_15_with_the_app_the_reads_pass_its_bot_login(tmp_path: Path, capsy
     for cmd in reads:
         assert cmd[-2:] == ["--bot-login", test_app.BOT]
         assert "--trusted-only" not in cmd
-    assert f"  app          demo-agent ({test_app.APP_ID}), connected" in capsys.readouterr().out
+    assert "  github app     active" in capsys.readouterr().out
     rows = Fake(0)
     assert _status(root, _parser().parse_args(["--repo", str(root), "status", "--rows"]), rows, api, signer) == 0
     assert "--bot-login" not in rows.seen[0]
+
+
+URL = f"https://github.com/{REPO}"
+
+
+def test_s009_16_the_heading_is_the_repo_its_link_and_the_verdict_with_no_reasons_list() -> None:
+    found = facts(
+        Row("BOT_FAILED", "stable", f"failure: {URL}/actions/runs/1", True), Row("HOLD", "#3", "freeze", False)
+    )
+    text = lines(found)
+    assert text[0] == f"{REPO} ({URL}): STUCK"
+    assert not any(line.startswith("  - ") for line in text)
+    assert text[1] == f"  repo           in sync at v0.26.0, BOT_FAILED {URL}/actions/runs/1"
+    assert f"  hold           #3 {URL}/issues/3" in text
+    assert lines(facts())[0] == f"{REPO} ({URL}): IDLE"
+
+
+def test_s009_16_the_whole_summary_reads_as_the_spec_shows_it() -> None:
+    found = facts(
+        Row("NEEDS_DECISION", REPO, "#206", False),
+        issues=[Issue(206, "NEEDS_DECISION"), Issue(26, "POSTPONED")],
+        gate=gate(agents=dataclasses.replace(AGENTS, mode=Mode.INTERACTIVE)),
+    )
+    assert report(found).text(REPO) == "\n".join(
+        [
+            f"{REPO} ({URL}): WAITS ON YOU",
+            "  repo           in sync at v0.26.0, release ok",
+            f"  needs decision #206 {URL}/issues/206",
+            f"  parked         #26 {URL}/issues/26",
+            f"  open issues    2 {URL}/issues",
+            "  pull requests  none",
+            "  gate           OK, launchd every 15 min",
+            "  mode           interactive",
+            "  github app     active",
+            "  shipmill       0.26.0, up to date",
+            "",
+        ]
+    )
+
+
+@pytest.mark.parametrize(
+    ("row", "shown"),
+    [
+        (Row("HOLD", "#3", "freeze; opened by @a", False), f"  hold           #3 {URL}/issues/3"),
+        (Row("INCIDENT_OPEN", "#4", "down; open 1 h", True), f"  incident       #4 {URL}/issues/4"),
+        (Row("POSTMORTEM_DUE", "#5", "down; closed 1 h ago", False), f"  postmortem     #5 {URL}/issues/5"),
+        (
+            Row("PROMOTION_DUE", "prod", "#8 v1.2.0: gh workflow run x", False),
+            f"  promotion      prod #8 {URL}/issues/8",
+        ),
+        (
+            Row("OPERATE_FAILED", "operate.yml", f"failure: {URL}/actions/runs/2", True),
+            "  operate        operate.yml failure: ",
+        ),
+        (Row("UNHEALTHY", "prod", "v1.2.0: failing, since 1 h ago", False), "  operate        prod v1.2.0: failing"),
+        (Row("UNTRUSTED", REPO, "#9", False), f"  untrusted      #9 {URL}/issues/9"),
+        (Row("BRANCH_DELETE_OFF", REPO, "turn it on: gh api x", False), "  branches       merged branches kept"),
+        (
+            Row("SHIPMILL_OUTDATED", "plugin user", "0.25.0, latest v0.26.0; claude plugin update x", False),
+            "  shipmill       0.26.0, update available: claude plugin update x",
+        ),
+    ],
+)
+def test_s009_16_each_reason_is_a_line_of_the_summary(row: Row, shown: str) -> None:
+    found = facts(row)
+    assert report(found).verdict in (Verdict.STUCK, Verdict.WAITS)
+    assert any(line.startswith(shown) for line in lines(found))
+
+
+def test_s009_16_the_gate_reasons_are_lines_too() -> None:
+    no_job = facts(gate=gate(job=None))
+    assert report(no_job).verdict is Verdict.WAITS
+    assert "  gate           no launchd job on this Mac" in lines(no_job)
+    no_app = facts(gate=gate(agents=dataclasses.replace(AGENTS, app_id=None), app=None))
+    assert report(no_app).verdict is Verdict.WAITS
+    assert "  github app     not active" in lines(no_app)
+    old_cli = facts(cli="0.25.0")
+    assert report(old_cli).verdict is Verdict.WAITS
+    assert lines(old_cli)[-1] == (
+        "  shipmill       0.25.0, plugin user 0.26.0, local 0.26.0, update available: uv tool upgrade shipmill"
+    )
+
+
+@pytest.mark.parametrize(
+    ("main_", "shown"),
+    [
+        (Main("main", SHA, SHA, 0, 0), "in sync"),
+        (Main("main", SHA, "b" * 40, 0, 2), "2 behind (git pull)"),
+        (Main("main", SHA, "b" * 40, 1, 0), "1 ahead"),
+        (Main("main", SHA, "b" * 40, 1, 2), "diverged (1 ahead, 2 behind)"),
+        (Main("main", None, SHA, 0, 0), "no local main"),
+    ],
+)
+def test_s009_17_the_repo_line_compares_local_with_github(main_: Main, shown: str) -> None:
+    assert lines(facts(main=main_))[1] == f"  repo           {shown} at v0.26.0, release ok"
+
+
+def test_s009_17_the_repo_line_names_the_version_and_the_release_problem() -> None:
+    assert lines(facts(version=Described("v0.26.0", 3)))[1] == "  repo           in sync at v0.26.0 +3, release ok"
+    assert lines(facts(version=Described(None, 5)))[1] == "  repo           in sync, no release yet, release ok"
+    rows = (
+        Row("BOT_STALLED", "nightly", "due and not running: 02:00", True),
+        Row("WORK_BRANCH_STALE", "stable", "at abc, and no run", True),
+        Row("NOT_PUBLISHED", "v0.26.0", "x 0.26.0 missing from PyPI", True),
+        Row("UNANNOUNCED", "v0.25.0", "#4 (since v0.24.0)", True),
+        Row("BOT_OK", "rc", "", False),
+        Row("PUBLISHED", "v0.24.0", "on PyPI", False),
+    )
+    assert lines(facts(*rows))[1] == (
+        "  repo           in sync at v0.26.0, BOT_STALLED nightly; WORK_BRANCH_STALE stable; "
+        "NOT_PUBLISHED v0.26.0; UNANNOUNCED v0.25.0"
+    )
+
+
+def test_s009_18_each_item_has_its_own_link_never_a_search() -> None:
+    rows = (Row("NEEDS_DECISION", REPO, "#6 #9", False), Row("PRS_OPEN", REPO, "#8", False))
+    issues = [
+        Issue(6, "NEEDS_DECISION"),
+        Issue(5, "NEW"),
+        Issue(4, "NEEDS_PR"),
+        Issue(3, "IN_PROGRESS"),
+        Issue(2, "TRIAGED"),
+        Issue(11, "BLOCKED"),
+        Issue(1, "SUSPECT_CLOSE"),
+    ]
+    found = facts(*rows, issues=issues, pulls=[Pull(9, False), Pull(8, False), Pull(7, True)])
+    text = lines(found)
+    assert text[1:11] == [
+        "  repo           in sync at v0.26.0, release ok",
+        f"  needs decision #6 {URL}/issues/6",
+        f"                 #9 {URL}/pull/9",
+        f"  suspect close  #1 {URL}/issues/1",
+        f"  to triage      #5 {URL}/issues/5",
+        f"  to build       #4 {URL}/issues/4",
+        f"  in progress    #3 {URL}/issues/3",
+        f"  parked         #11 {URL}/issues/11",
+        f"                 #2 {URL}/issues/2",
+        f"  drafts         #7 {URL}/pull/7",
+    ]
+    assert not any("?q=" in line for line in text)
+    assert report(found).reasons == ["issue #6 waits on your decision", "pull request #9 waits on your decision"]
+
+
+def test_s009_18_an_untrusted_pull_request_links_to_the_pull() -> None:
+    found = facts(Row("UNTRUSTED", REPO, "#9", False), pulls=[Pull(9, False)])
+    assert f"  untrusted      #9 {URL}/pull/9" in lines(found)
+
+
+def test_s009_19_open_issues_and_pull_requests_are_counted_with_the_list_link() -> None:
+    found = facts(issues=[Issue(5, "NEW"), Issue(4, "TRIAGED"), Issue(1, "SUSPECT_CLOSE")], pulls=[Pull(9, False)])
+    text = lines(found)
+    assert f"  open issues    2 {URL}/issues" in text
+    assert f"  pull requests  1 {URL}/pulls" in text
+    assert {"  open issues    none", "  pull requests  none"} <= set(lines(facts()))
+
+
+@pytest.mark.parametrize(
+    ("changed", "shown"),
+    [
+        (gate(), "OK, launchd every 15 min"),
+        (gate(job=job(loaded=False)), "not loaded, launchd every 15 min"),
+        (gate(job=job(last_run=NOW - dt.timedelta(hours=1))), "stale: last run 1 h ago, launchd every 15 min"),
+        (gate(job=job(last_exit="2")), "failed: exit 2, launchd every 15 min"),
+        (
+            gate(job=job(last="shipmill: the gate needs a clean checkout", failed=True)),
+            "failed: shipmill: the gate needs a clean checkout, launchd every 15 min",
+        ),
+        (
+            gate(job=job(last="UNCHANGED: same findings as session s; retried after 2026-10-08T09:00+00:00")),
+            "cooldown: same findings, retry 2026-10-08T09:00+00:00, launchd every 15 min",
+        ),
+        (
+            gate(job=job(last="WAITING: session s1 waits on you: claude attach s1")),
+            "waiting on you: claude attach s1, launchd every 15 min",
+        ),
+        (
+            gate(job=job(last="HELD: held by shipmill-hold #3, #4: no session starts")),
+            f"held by #3 {URL}/issues/3, #4 {URL}/issues/4, launchd every 15 min",
+        ),
+        (gate(launchd=False, job=None), "can't check here: no launchd"),
+        (gate(job=None), "no launchd job on this Mac"),
+        (gate(agents=None), "none: no [agents] in the config"),
+    ],
+)
+def test_s009_20_the_gate_line_reads_ok_or_the_problem(changed: Gate, shown: str) -> None:
+    assert f"  gate           {shown}" in lines(facts(gate=changed))
+
+
+def test_s009_21_the_mode_and_github_app_lines() -> None:
+    assert "  mode           headless" in lines(facts())
+    assert "  mode           interactive (not set)" in lines(facts(gate=gate(mode_set=False)))
+    assert "  github app     active" in lines(facts())
+    no_app = gate(agents=dataclasses.replace(AGENTS, app_id=None), app=None)
+    assert "  github app     not active" in lines(facts(gate=no_app))
+    failed = gate(app=None, app_error="the App isn't installed")
+    assert "  github app     not connected: the App isn't installed" in lines(facts(gate=failed))
+
+
+def test_s009_22_the_shipmill_line_shows_the_version_and_the_updates() -> None:
+    assert lines(facts())[-1] == "  shipmill       0.26.0, up to date"
+    old = Row(
+        "SHIPMILL_OUTDATED", "plugin user", "0.25.0, latest v0.26.0; claude plugin update shipmill@shipmill", False
+    )
+    plugin = Row("SHIPMILL_VERSION", "shipmill", "latest v0.26.0; plugin: user 0.25.0 (/x)", False)
+    found = dataclasses.replace(facts(cli="0.25.0"), rows=[old, plugin])
+    assert lines(found)[-1] == (
+        "  shipmill       0.25.0, update available: claude plugin update shipmill@shipmill; uv tool upgrade shipmill"
+    )
+
+
+def test_s009_23_empty_lines_are_dropped_and_the_fixed_ones_always_shown() -> None:
+    labels = [line[2:16].strip() for line in lines(facts())[1:]]
+    assert labels == ["repo", "open issues", "pull requests", "gate", "mode", "github app", "shipmill"]
+    bare = [line[2:16].strip() for line in lines(facts(gate=gate(agents=None)))[1:]]
+    assert bare == ["repo", "open issues", "pull requests", "gate", "shipmill"]
+
+
+def test_s009_23_gate_sessions_and_runs_are_counted_with_their_links() -> None:
+    rows = (
+        Row("AGENT_SESSION", "s1", "gate busy, started 1 min ago: shipmill acme/web", False),
+        Row("AGENT_SESSION", "s2", "interactive busy, started 1 min ago: me", False),
+        Row("RUNS_ACTIVE", "CI", f"in_progress 1 min: push on main, {URL}/actions/runs/3", False),
+    )
+    text = lines(facts(*rows))
+    assert "  sessions       1: gate busy (s1)" in text
+    assert f"  runs           1: CI {URL}/actions/runs/3" in text
+    headless = gate(job=job(last="RUNNING: session s is still working: claude attach s"))
+    found = facts(gate=headless)
+    assert report(found).verdict is Verdict.WORKING
+    assert "  sessions       1: gate log RUNNING: session s is still working: claude attach s" in lines(found)

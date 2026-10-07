@@ -11,7 +11,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 
 - Repo `owner/name` and a local checkout (a scheduled cloud session has one)
 - Scope from the user's wording, read narrowly:
-  - "status": report only, change nothing. A person without an agent gets the same rows from `shipmill status --rows` in the checkout, and a verdict with the issues, pull requests, and gate from `shipmill status`
+  - "status": report only, change nothing. A person without an agent gets the same rows from `shipmill status --rows` in the checkout, and a verdict with a short linked summary (each waiting item its own link) from `shipmill status`
   - "watch" (the default): report, plus the repairs in the table below
   - "watch and triage": also run github-issue-triage on what the intake flags, passing on the user's own scope words for it ("merge when green" included only if the user said it)
 

@@ -11,8 +11,8 @@
   notes           print a release's notes
   operate         check environment health, promote after the bake, roll back; approve a proposal
   doctor          check that the repository is ready for the bot
-  status          say whether the factory works or is stuck: a verdict and its reasons, then the
-                  repo, issues, pull requests, gate, and shipmill; --rows for github-ship-watch's
+  status          say whether the factory works or is stuck: a verdict, then a short summary with
+                  a line per reason and a direct link per item; --rows for github-ship-watch's
                   table, --json for its JSON lines
   init            write a starting policy and the calling workflow (--operate: the operate one)
   gate            start a Claude Code session for the repo only when its state needs one; each tick,
@@ -687,7 +687,7 @@ def _status(
         issues=status.read_issues(slug, run, login),
         pulls=status.read_pulls(slug, run),
         main=main,
-        release=status.read_release(slug, git, main, run),
+        version=status.describe(git, main.remote),
         gate=gate,
         cli=importlib.metadata.version("shipmill"),
         now=when,
