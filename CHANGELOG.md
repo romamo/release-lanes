@@ -15,6 +15,11 @@ bot.
   publish` through trusted publishing in the `pypi` environment. The stable and hotfix lanes
   dispatch it, and `docs/install.md` says shipmill is on PyPI and needs Python 3.14 (#224)
 
+### Changed
+
+- shipmill's own gate runs headless: `[agents] mode = "headless"`, so each gated session
+  is a detached `claude -p` that asks on GitHub and ends
+
 ## [0.30.0] - 2026-10-07
 
 ### Added

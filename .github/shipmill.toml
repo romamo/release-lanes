@@ -50,4 +50,4 @@ prompt = "/github-issue-triage {repo} triage the new issues; merge when green"
 prs = true
 retry_hours = 24
 app_id = 5209412   # gated sessions write as shipmill-romamo[bot] (spec 004)
-mode = "interactive"  # what the gate runs; written out, not left to the default (D-20)
+mode = "headless"  # what the gate runs; written out, not left to the default (D-20)
