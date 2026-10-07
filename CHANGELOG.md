@@ -15,6 +15,8 @@ bot.
   only and counted as done), and github-ship-watch's `watch_state.py`, and so `shipmill
   status`, reports a new `GATE_NO_APP` row, an action for a person that never starts a
   gate session. The gate and `launchd` still run without one (#204)
+- Decisions D-19 and D-20: a gate set up without an App, or without an explicit
+  `[agents] mode`, is unfinished setup and reads as an action, never as done (#204, #205)
 
 ## [0.26.0] - 2026-10-06
 
