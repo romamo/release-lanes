@@ -22,7 +22,15 @@ Agents (the config's [agents] section, read by `shipmill gate`):
                    headless mode GitHub won't notify them of a needs-decision
                    mention). The gate still runs; shipmill-setup's step 3 under The
                    gate connects one (D-19). --fix leaves it: it needs the user
-  AGENTS_OK        a section with a prompt and app_id
+  AGENTS_NO_MODE   a prompt and app_id but no mode key: the gate runs interactive by
+                   default, but nobody chose it, so a machine nobody watches may hold
+                   the repo on a question. shipmill-setup's step 4 under The gate asks
+                   and writes mode = "interactive" or "headless" (D-20). --fix leaves it
+  AGENTS_OK        a section with a prompt, app_id, and mode
+
+The section reads as one row, the first that applies: AGENTS_MISSING, AGENTS_NO_APP,
+AGENTS_NO_MODE, then AGENTS_OK. Setup asks for the App and the mode together, so the
+one PR that sets app_id sets mode too.
 
 Plugin (.claude/settings.json, so every session in the repo loads the skills):
   PLUGIN_MISSING   shipmill@shipmill is not enabled; --fix adds the marketplace and
@@ -43,7 +51,7 @@ on GitHub retargeting a stacked PR when the branch under it is deleted):
   BRANCH_DELETE_ON   GitHub deletes a PR's branch when it merges
 
 Exit 0 when every row is RELEASE_READY, AGENTS_OK, PLUGIN_OK, LABELS_OK, or
-BRANCH_DELETE_ON, 1 otherwise (AGENTS_NO_APP included), 2 on bad input, a malformed
+BRANCH_DELETE_ON, 1 otherwise (AGENTS_NO_APP and AGENTS_NO_MODE included), 2 on bad input, a malformed
 settings.json, both config files, or a git or gh failure (a failed read of the repo
 setting never reads as off).
 Needs git and an authenticated gh. Python 3.10+, standard library only.
@@ -81,6 +89,11 @@ NEEDS_DECISION_LABEL = ("d876e3", "A shipmill session asked a question here; wai
 NO_APP = (
     "no app connected: sessions write as the host's gh login, so you can't approve their PRs"
     " and GitHub won't notify you of their mentions; run shipmill-setup's step 3 (app-create)"
+)
+# D-20: the gate defaults to interactive, but setup writes the mode the user chose
+NO_MODE = (
+    'no mode in [agents]: the gate runs interactive by default, which nobody chose; set mode = "interactive"'
+    ' or mode = "headless" (shipmill-setup\'s step 4)'
 )
 DONE = {"RELEASE_READY", "AGENTS_OK", "PLUGIN_OK", "LABELS_OK", "BRANCH_DELETE_ON"}
 
@@ -173,13 +186,16 @@ def release_row(repo_dir: Path) -> Row:
 def agents_row(repo_dir: Path) -> Row:
     """Presence only; `shipmill gate` and the release config loader validate the section.
     A prompt without app_id is unfinished setup in either mode (D-19): the gate runs, but its
-    sessions write as the host's gh login"""
+    sessions write as the host's gh login. Without a mode key it is unfinished too (D-20): the
+    gate's default, interactive, was never chosen"""
     section = agents_section(repo_dir)
     if section is None or not re.search(r"^prompt\s*=", section, re.MULTILINE):
         return Row("AGENTS_MISSING", f"no [agents] prompt in {CONFIG}: needed only for `shipmill gate`")
     if not re.search(r"^app_id\s*=", section, re.MULTILINE):
         return Row("AGENTS_NO_APP", NO_APP)
-    return Row("AGENTS_OK", "[agents] has a prompt and app_id")
+    if not re.search(r"^mode\s*=", section, re.MULTILINE):
+        return Row("AGENTS_NO_MODE", NO_MODE)
+    return Row("AGENTS_OK", "[agents] has a prompt, app_id, and mode")
 
 
 # -- plugin --------------------------------------------------------------------------------

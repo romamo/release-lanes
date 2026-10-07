@@ -119,7 +119,8 @@ def test_a_local_copy_of_shipmills_workflows_counts(ss: ModuleType, tmp_path: Pa
 
 
 def test_a_gate_only_config_has_no_release(ss: ModuleType, tmp_path: Path) -> None:
-    write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "/github-issue-triage {repo}"\napp_id = 1\n')
+    agents = '[agents]\nprompt = "/github-issue-triage {repo}"\napp_id = 1\nmode = "interactive"\n'
+    write(tmp_path, ".github/shipmill.toml", agents)
     assert bot(ss, tmp_path) == "RELEASE_MISSING"
     assert ss.agents_row(tmp_path).state == "AGENTS_OK"
 
@@ -241,7 +242,7 @@ def test_s005_16_interactive_or_no_agents_doesnt_want_the_label(ss: ModuleType, 
 def test_s005_16_a_headless_mode_outside_agents_doesnt_count(ss: ModuleType, tmp_path: Path) -> None:
     write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "x"\napp_id = 1\n[lanes.dev]\nmode = "headless"\n')
     assert set(ss.wanted_labels(tmp_path)) == BASE_LABELS
-    assert ss.agents_row(tmp_path).state == "AGENTS_OK"
+    assert ss.agents_row(tmp_path).state == "AGENTS_NO_MODE"  # another table's mode isn't [agents]'s
 
 
 def test_s005_16_fix_creates_the_label_only_when_wanted(ss: ModuleType, tmp_path: Path) -> None:
@@ -288,4 +289,36 @@ def test_a_gate_without_an_app_is_unfinished_in_either_mode(ss: ModuleType, tmp_
     assert (row.state, row.detail) == ("AGENTS_NO_APP", NO_APP)
     assert row.state not in ss.DONE  # so setup_state.py exits 1 on it
     write(tmp_path, ".github/shipmill.toml", agents + "app_id = 7\n")
+    assert ss.agents_row(tmp_path).state == ("AGENTS_OK" if mode else "AGENTS_NO_MODE")
+
+
+NO_MODE = (
+    'no mode in [agents]: the gate runs interactive by default, which nobody chose; set mode = "interactive"'
+    ' or mode = "headless" (shipmill-setup\'s step 4)'
+)
+
+
+@pytest.mark.parametrize("mode", ['mode = "interactive"\n', 'mode = "headless"\n', "mode = 'headless'  # unattended\n"])
+def test_a_gate_with_an_explicit_mode_is_done(ss: ModuleType, tmp_path: Path, mode: str) -> None:
+    write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "x"\napp_id = 7\n' + mode)
     assert ss.agents_row(tmp_path).state == "AGENTS_OK"
+
+
+@pytest.mark.parametrize("extra", ["", '# mode = "headless"\n', '[operate]\nmode = "interactive"\n'])
+def test_a_gate_without_a_mode_key_is_unfinished(ss: ModuleType, tmp_path: Path, extra: str) -> None:
+    # #205, D-20: setup skipped the mode question and an unattended gate ran interactive
+    write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "x"\napp_id = 7\n' + extra)
+    row = ss.agents_row(tmp_path)
+    assert (row.state, row.detail) == ("AGENTS_NO_MODE", NO_MODE)
+    assert row.state not in ss.DONE  # so setup_state.py exits 1 on it
+
+
+def test_a_missing_app_reads_before_a_missing_mode(ss: ModuleType, tmp_path: Path) -> None:
+    # one row for the section: AGENTS_NO_APP first, then AGENTS_NO_MODE once app_id is set
+    write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "x"\n')
+    assert ss.agents_row(tmp_path).state == "AGENTS_NO_APP"
+
+
+def test_shipmills_own_config_passes_its_agents_check(ss: ModuleType) -> None:
+    # #205: the repo runs its own gate interactive, and says so
+    assert ss.agents_row(SCRIPT.parents[3]).state == "AGENTS_OK"
