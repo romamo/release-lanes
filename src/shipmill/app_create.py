@@ -26,6 +26,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
 
+from shipmill import CLI
 from shipmill.app import PERMISSIONS, Api
 from shipmill.errors import ReleaseError
 
@@ -446,5 +447,5 @@ def config_lines(created: Created) -> list[str]:
         f"created {created.slug} (App ID {created.app_id}), key in {created.key}",
         "add to [agents] in each repo's .github/shipmill.toml:",
         f"  app_id = {created.app_id}",
-        "then prove it: shipmill --repo <gate checkout> gate <owner/repo> --dry-run",
+        f"then prove it: {CLI} --repo <gate checkout> gate <owner/repo> --dry-run",
     ]

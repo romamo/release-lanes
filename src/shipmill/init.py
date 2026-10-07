@@ -5,6 +5,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from shipmill import CLI
 from shipmill.config import CONFIG_PATH
 from shipmill.doctor import CALLER, OPERATE_CALLER
 from shipmill.errors import ReleaseError
@@ -118,8 +119,9 @@ github_release = true
 
 # Environments a release deploys to. The workflow runs on workflow_dispatch with `tag` and
 # `environment` inputs, and its job sets `environment: ${{{{ inputs.environment }}}}`, so
-# GitHub records a deployment for each run. With from or health, run `shipmill init
-# --operate`: its workflow checks health every 10 minutes and promotes after the bake.
+# GitHub records a deployment for each run. With from or health, run
+# `{CLI} init --operate`:
+# its workflow checks health every 10 minutes and promotes after the bake.
 # [environments.staging]
 # lane = "rc"                       # deploy every release of this lane when it lands
 # workflow = "deploy.yml"

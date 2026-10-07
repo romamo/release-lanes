@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from shipmill import CLI
 from shipmill.cli import main
 from shipmill.config import config_path
 from shipmill.doctor import doctor
@@ -424,3 +425,12 @@ def test_doctor_reports_the_roadmap_only_when_configured(repo: Repo) -> None:
     repo.write(repo.policy_file, repo.read(repo.policy_file).replace("wip = 3", "wip = 3\ncadence = 1\nteam = 2"))
     checks = {c.name: c for c in doctor(repo.root)}
     assert checks["policy"].status == "FAIL" and "[roadmap]: unknown keys ['team']" in checks["policy"].detail
+
+
+def test_init_hints_name_the_uvx_form_not_a_bare_shipmill(repo: Repo, capsys: pytest.CaptureFixture[str]) -> None:
+    """#223: a bare `shipmill` isn't on PATH when it runs through uvx"""
+    assert main(["--repo", str(repo.root), "init", "--force"]) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == f"next: review the policy, then run `{CLI} doctor`"
+    assert main(["--repo", str(repo.root), "init", "--operate", "--force"]) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == f"next: run `{CLI} doctor`"
+    assert f"run\n# `{CLI} init --operate`:" in config_path(repo.root).read_text(encoding="utf-8")
