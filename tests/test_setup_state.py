@@ -289,3 +289,9 @@ def test_a_gate_without_an_app_is_unfinished_in_either_mode(ss: ModuleType, tmp_
     assert row.state not in ss.DONE  # so setup_state.py exits 1 on it
     write(tmp_path, ".github/shipmill.toml", agents + "app_id = 7\n")
     assert ss.agents_row(tmp_path).state == "AGENTS_OK"
+
+
+def test_an_indented_app_id_counts(ss: ModuleType, tmp_path: Path) -> None:
+    # TOML allows an indented key, and the gate and watch_state.py read it: the checklist must too
+    write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "x"\n  app_id = 1\n')
+    assert ss.agents_row(tmp_path).state == "AGENTS_OK"
