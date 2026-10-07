@@ -14,6 +14,16 @@ bot.
   its environment unless the gate's own environment sets the variable, and
   github-issue-triage and github-pr-triage run their agents in the foreground when
   headless (#246)
+- The factory stalled when a gate session left the gate's own checkout
+  (`tmp/shipmill-gate`) on a branch: every tick refused it and told you to create a
+  worktree that already existed. A `--refresh` tick now detaches a clean linked worktree
+  on a branch to the default branch's head, keeping the branch and its commits, and
+  prints `detached <path> from <branch>` (`detached` in `gate --json`); a dry run moves
+  nothing. `launchd` and a tick in the main working tree still refuse a checkout on a
+  branch, now with `git -C <path> switch --detach origin/<default>` as the fix, and a
+  checkout with tracked changes is refused with the files named. github-issue-resolve and
+  github-pr-triage now tell a gate session to work in a new worktree and never switch
+  branches or commit in the checkout it started in (#247)
 
 ## [0.33.1] - 2026-10-07
 

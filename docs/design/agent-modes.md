@@ -45,7 +45,11 @@ shipmill --repo ~/PycharmProjects/treaty/tmp/shipmill-gate launchd romamo/treaty
 ```
 
 The gate runs in a dedicated checkout: a detached worktree inside the trusted repo, never
-the user's working copy, where the session would branch and commit. Each run:
+the user's working copy, where the session would branch and commit. A session works in a
+new worktree and leaves this one as it found it; one it left on a branch is detached by
+the next `--refresh` tick (step 5). `launchd`, and a tick in the main working tree, refuse
+a checkout on a branch with `git -C <path> switch --detach origin/<default>` as the fix,
+and any checkout with tracked changes, naming the files. Each run:
 
 1. Checks that the checkout's `origin` is the repo
 2. Lists this repo's gate sessions with `claude agents --json`. For each one whose state
@@ -63,7 +67,10 @@ the user's working copy, where the session would branch and commit. Each run:
 4. A session still `blocked` waits on you: **WAITING**, stop. One that is `working` or
    busy: **RUNNING**, stop. Both stop before the state is read or the checkout moves
 5. With `--refresh`, moves the detached, clean checkout to the head of origin's default
-   branch, so the session reads the current config, `CLAUDE.md`, and skills
+   branch, so the session reads the current config, `CLAUDE.md`, and skills. A clean
+   linked worktree a session left on a branch is detached the same way, and the tick
+   prints `detached <path> from <branch>` (`detached` in `--json`); the branch and its
+   commits stay. A dry run moves nothing
 6. Reads `[agents]`, then the state with github-ship-watch's `watch_state.py` (bundled in
    the wheel, so the gate and the script always come from the same version). The rows
    that need an agent are the ones it marks `agent: true` (a failed or stalled release

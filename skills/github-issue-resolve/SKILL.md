@@ -72,6 +72,8 @@ Pick a path `git worktree list` doesn't show yet; `tmp/` must be ignored by git 
 
 Skip the worktree when the session already runs inside a linked worktree, e.g. an implementer agent dispatched by github-issue-triage: there `git rev-parse --git-dir` differs from `git rev-parse --git-common-dir`, and `git switch -c fix/<short-slug> origin/<default>` in place is safe. In the main checkout the two print the same directory.
 
+A gate session (its prompt carries the `Gate session:` or `Headless:` paragraph) never skips it: it starts in the gate's own linked worktree, which the next tick needs detached and clean, so it creates the new worktree and never switches branches or commits in the checkout it started in.
+
 ## Phase 4: Implement
 
 1. Make the smallest change that fixes the root cause; match surrounding style
