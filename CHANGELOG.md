@@ -7,6 +7,11 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- Decisions D-19 and D-20: a gate set up without an App, or without an explicit
+  `[agents] mode`, is unfinished setup and reads as an action, never as done (#204, #205)
+
 ## [0.26.0] - 2026-10-06
 
 ### Added
