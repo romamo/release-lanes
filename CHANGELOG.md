@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-07
+
 ### Added
 
 - `[agents] plugin_update` (default `false`: the gate changes no install). With `true`, a
@@ -1034,7 +1036,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.32.2...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.33.0...HEAD
+[0.33.0]: https://github.com/shipmill/shipmill/compare/v0.32.2...v0.33.0
 [0.32.2]: https://github.com/shipmill/shipmill/compare/v0.32.1...v0.32.2
 [0.32.1]: https://github.com/shipmill/shipmill/compare/v0.32.0...v0.32.1
 [0.32.0]: https://github.com/shipmill/shipmill/compare/v0.31.1...v0.32.0
