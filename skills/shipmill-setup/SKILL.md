@@ -312,9 +312,13 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
    remind_hours = 4   # repeat it while the session still waits
    max_wait_minutes = 15 # stop a session that waited this long; 0: never
    app_id = 123456    # replace with the App ID step 3 prints; sessions write as its bot
-   # mode = "headless" # interactive (default): sessions ask you; headless: `claude -p`, they ask on GitHub
+   mode = "interactive" # step 4's answer: sessions ask you; "headless": they ask on GitHub
    ```
 
+   Every time you set up the gate, ask two questions together, before writing the
+   section: who should own the gate's GitHub App (step 3), and whether anyone watches
+   this machine, which picks `mode` (step 4). Write both answers into `[agents]`: `app_id`
+   and `mode = "interactive"` or `mode = "headless"`, never left to the default (D-20).
    A session that waits on a question holds the repo, so by default the gate stops it
    after 15 minutes. Ask whether the user answers questions sooner or later than that; set
    `max_wait_minutes` (0..10080) to match, or 0 to never stop one. `app_id` is a
@@ -391,11 +395,18 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
    works on other repos (fleet mode) fails there, since the token is limited to this one.
    A gate without `app_id` (one set up before D-19) still runs: its sessions launch as
    before, as the host's `gh` login, and the two reports above flag it until it is set
-4. **Headless (optional).** On a machine nobody watches, a session that asks a question
-   holds the repo until someone attaches. Ask whether anyone watches this one; if not,
-   offer `mode = "headless"` in `[agents]` (spec 005, D-17), recommended with `app_id`.
-   Each launch then runs `claude -p` with no prompts, AskUserQuestion removed, and an
-   allowlist of tools; it can't wait on anyone, so it ends, and a decision for the user
+4. **Interactive or headless (asked every time, D-20).** On a machine nobody watches, a
+   session that asks a question holds the repo until someone attaches. Ask whether anyone
+   watches this one, with step 3's App question, and write the answer in `[agents]`:
+   - **`mode = "interactive"`:** someone attaches to a session (`claude attach <id>`) and
+     answers its questions on this machine
+   - **`mode = "headless"`** (spec 005, D-17): questions go to GitHub instead
+
+   The config's default is interactive, so a gate set up before D-20 keeps working, but
+   never rely on it: with no `mode` key `setup_state.py` reads `AGENTS_NO_MODE`, an
+   action (exit 1) that `--fix` leaves to the user. In headless mode each launch runs
+   `claude -p` with no prompts, AskUserQuestion removed, and an allowlist of tools; it
+   can't wait on anyone, so it ends, and a decision for the user
    becomes the needs-decision protocol
    ([needs-decision.md](../github-issue-triage/references/needs-decision.md)): a comment
    whose first line is `<!-- shipmill:needs-decision -->`, mentioning the host's `gh`

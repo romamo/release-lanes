@@ -2,6 +2,7 @@
 and the setup docs document headless mode"""
 
 import re
+import tomllib
 from pathlib import Path
 
 from shipmill.gate import HEADLESS_REFUSED, HEADLESS_TOOLS
@@ -40,8 +41,9 @@ def test_s005_18_the_docs_document_headless_mode() -> None:
     assert "mode 2 built" in modes.split("## Modes", 1)[0]
 
     for name, doc in (("agent-modes.md", modes), ("shipmill-setup", setup), ("install.md", install)):
-        # mode
-        assert '# mode = "headless"' in doc and "claude -p" in doc, name
+        # mode: the skill writes it out (#205, D-20); the other docs show it commented out
+        written = name == "shipmill-setup"
+        assert ('mode = "headless"' if written else '# mode = "headless"') in doc and "claude -p" in doc, name
         # HEADLESS_TOOLS, where it lives, and how to widen it
         assert "HEADLESS_TOOLS" in doc and "src/shipmill/gate.py" in doc, name
         assert all(tool in doc for tool in re.findall(r"\w+(?:\([^)]*\))?", HEADLESS_TOOLS)), name
@@ -67,3 +69,17 @@ def test_s005_18_the_needs_decision_reference_widens_with_the_working_flag() -> 
     reference = folded("skills", "github-issue-triage", "references", "needs-decision.md")
     assert "--claude-arg=--allowedTools" in reference
     assert "--claude-arg --allowedTools" not in reference
+
+
+def test_the_setup_skill_writes_the_mode_out() -> None:
+    # #205, D-20: the example left mode commented, so a setup skipped the question and an
+    # unattended gate ran interactive
+    raw = ROOT.joinpath("skills", "shipmill-setup", "SKILL.md").read_text(encoding="utf-8")
+    block = raw.split("\n## The gate\n", 1)[1].split("[agents]\n", 1)[1].split("```", 1)[0]
+    agents = tomllib.loads("[agents]\n" + "\n".join(line.strip() for line in block.splitlines()))["agents"]
+    assert agents["mode"] == "interactive"
+    setup = folded("skills", "shipmill-setup", "SKILL.md").split("## The gate", 1)[1].split(" ## ", 1)[0]
+    assert "(optional)" not in setup
+    assert "**Interactive or headless (asked every time, D-20).**" in setup
+    assert 'mode = "interactive"` or `mode = "headless"`, never left to the default (D-20)' in setup
+    assert "`AGENTS_NO_MODE`" in setup

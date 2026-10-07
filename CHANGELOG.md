@@ -15,6 +15,11 @@ bot.
   only and counted as done), and github-ship-watch's `watch_state.py`, and so `shipmill
   status`, reports a new `GATE_NO_APP` row, an action for a person that never starts a
   gate session. The gate and `launchd` still run without one (#204)
+- shipmill-setup asks for the gate's `[agents] mode` every time, with the App question, and
+  writes `mode = "interactive"` or `mode = "headless"` (D-20); `setup_state.py` reads a new
+  `AGENTS_NO_MODE` row, exit 1, for a prompt with `app_id` and no `mode` key (after
+  `AGENTS_NO_APP`, one row for the section). The config's default stays interactive, and
+  shipmill's own config now says `mode = "interactive"` (#205)
 - Decisions D-19 and D-20: a gate set up without an App, or without an explicit
   `[agents] mode`, is unfinished setup and reads as an action, never as done (#204, #205)
 
