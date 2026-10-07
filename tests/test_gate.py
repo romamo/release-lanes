@@ -504,6 +504,19 @@ def test_refresh_refuses_a_working_copy(gate_checkout: tuple[Git, Path]) -> None
         refresh(git)
 
 
+def test_refresh_offers_a_worktree_for_a_dirty_working_copy(gate_checkout: tuple[Git, Path]) -> None:
+    """#247: a person's main working tree with work in progress is told to give the gate a
+    worktree of its own, not only to commit or remove their changes"""
+    git, _ = gate_checkout
+    git.run("checkout", "-q", "main")
+    (git.root / "wip.txt").write_text("x", encoding="utf-8")
+    git.run("add", "wip.txt")
+    with pytest.raises(ReleaseError, match=r"has tracked changes \(wip.txt\)") as e:
+        refresh(git, detach=True)
+    assert "git worktree add --detach <path> origin/main" in str(e.value)
+    assert git.run("rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
+
+
 @pytest.fixture
 def linked_gate(gate_checkout: tuple[Git, Path]) -> tuple[Git, Path]:
     """A linked gate worktree, as tmp/shipmill-gate is, that a session left on its branch"""

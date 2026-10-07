@@ -840,22 +840,22 @@ def require_dedicated(git: Git, default: str, detach: bool = False) -> str | Non
     --refresh tick), a clean linked worktree on a branch passes, and the branch is returned
     for the refresh's checkout to detach it from; the main working tree never does. Returns
     None for a checkout already detached"""
+    is_linked = linked(git)
+    # someone's working copy: the gate is better off in a worktree of its own
+    own = "" if is_linked else f", or give the gate its own with `git worktree add --detach <path> origin/{default}`"
     changed = [line[3:] for line in git.run("status", "--porcelain", "--untracked-files=no").splitlines() if line]
     if changed:
         shown = ", ".join(changed[:3]) + (f" and {len(changed) - 3} more" if len(changed) > 3 else "")
         raise ReleaseError(
             f"the gate needs a clean checkout; {git.root} has tracked changes ({shown}): "
-            "commit them on a branch or remove them"
+            f"commit them on a branch or remove them{own}"
         )
     branch = git.run("rev-parse", "--abbrev-ref", "HEAD").strip()
     if branch == "HEAD":
         return None
-    is_linked = linked(git)
     if is_linked and detach:
         return branch
-    fix = f"`git -C {git.root} switch --detach origin/{default}`"
-    if not is_linked:  # someone's working copy: the gate is better off in a worktree of its own
-        fix += f", or give the gate its own with `git worktree add --detach <path> origin/{default}`"
+    fix = f"`git -C {git.root} switch --detach origin/{default}`{own}"
     raise ReleaseError(f"the gate needs a detached checkout; {git.root} is on branch {branch} (detach it with {fix})")
 
 
