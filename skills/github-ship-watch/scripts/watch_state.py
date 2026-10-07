@@ -126,7 +126,8 @@ shipmill on this host (from `claude plugin list --json` and `claude plugin marke
                   fix reinstalls the folder's own instead: an action for a person, never an
                   agent's
   SKILL_SHADOWED  one row per link or copy of a shipmill skill (a folder name under skills/)
-                  in ~/.claude/skills or ~/.agents/skills that doesn't resolve into the
+                  in ~/.claude/skills or ~/.agents/skills, a folder with a SKILL.md (a broken
+                  link or a plain file loads as nothing), that doesn't resolve into the
                   plugin's cache (~/.claude/plugins/cache/shipmill): a prompt's /<name> loads
                   it, not the plugin's (#236). The fix, removing it or calling the skill as
                   /shipmill:<name>, is a person's in their home folder: an action, never an
@@ -1448,13 +1449,14 @@ def shadow_rows(home: Path, names: list[str]) -> list[Row]:
     """The links and copies of shipmill's skills, named in names, in the home folder's user
     skills (~/.claude/skills, ~/.agents/skills): a prompt's /<name> loads one of them in place
     of the plugin's (#236). A link into the plugin's cache is the plugin's own. A person's fix
-    in their home folder, never an agent's"""
+    in their home folder, never an agent's. Only a folder with a SKILL.md loads as a skill, so
+    a broken link or a plain file of that name shadows nothing"""
     cache = (home / PLUGIN_CACHE).resolve()
     rows = []
     for folder in USER_SKILLS:
         for name in names:
             path = home / folder / name
-            if not os.path.lexists(path):
+            if not (path / "SKILL.md").is_file():
                 continue
             target = path.resolve()
             if target == cache or cache in target.parents:

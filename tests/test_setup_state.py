@@ -529,6 +529,7 @@ def test_a_shadowing_link_in_the_home_folder_is_unfinished(ss: ModuleType, tmp_p
     # #236: the checklist names each link with its fix, and never touches the real home folder
     home, checkout = tmp_path / "home", tmp_path / "work" / "github-issue-triage"
     checkout.mkdir(parents=True)
+    (checkout / "SKILL.md").write_text("---\nname: github-issue-triage\n---\n", encoding="utf-8")
     (home / ".claude" / "skills").mkdir(parents=True)
     link = home / ".claude" / "skills" / "github-issue-triage"
     link.symlink_to(checkout)

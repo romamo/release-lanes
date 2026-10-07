@@ -961,6 +961,7 @@ def test_a_link_and_a_copy_in_the_users_skills_shadow_the_plugins(ws: ModuleType
     # #236: gate sessions ran ~/.claude/skills/github-issue-triage, a link to a working copy, not the plugin
     home, checkout = tmp_path / "home", tmp_path / "src" / "shipmill" / "skills" / "github-issue-triage"
     checkout.mkdir(parents=True)
+    (checkout / "SKILL.md").write_text("---\nname: github-issue-triage\n---\n", encoding="utf-8")
     (home / ".claude" / "skills").mkdir(parents=True)
     (home / ".claude" / "skills" / "github-issue-triage").symlink_to(checkout)
     copy = home / ".agents" / "skills" / "github-pr-triage"
@@ -997,6 +998,17 @@ def test_a_link_into_the_plugins_cache_and_other_skills_shadow_nothing(ws: Modul
     (skills / "github-issue-triage-notes").mkdir()
     assert ws.shadow_rows(home, SHIPMILL_SKILLS) == []
     assert ws.shadow_rows(tmp_path / "empty-home", SHIPMILL_SKILLS) == []
+
+
+def test_a_broken_link_a_file_and_a_folder_without_skill_md_shadow_nothing(ws: ModuleType, tmp_path: Path) -> None:
+    # none of them loads as a skill, so a SKILL_SHADOWED row for one would hold status at exit 1 for nothing
+    home = tmp_path / "home"
+    skills = home / ".claude" / "skills"
+    skills.mkdir(parents=True)
+    (skills / "github-issue-triage").symlink_to(tmp_path / "gone")
+    (skills / "github-ship-watch").write_text("not a skill\n", encoding="utf-8")
+    (skills / "github-pr-triage").mkdir()
+    assert ws.shadow_rows(home, SHIPMILL_SKILLS) == []
 
 
 MARKETPLACE = [{"name": "shipmill", "source": "github", "repo": "shipmill/shipmill"}]
