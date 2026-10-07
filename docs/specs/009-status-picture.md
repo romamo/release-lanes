@@ -32,6 +32,7 @@ shipmill/shipmill (https://github.com/shipmill/shipmill): WAITS ON YOU
   pull requests  none
   gate           OK, launchd every 15 min
   mode           interactive
+  landing        on
   github app     active
   shipmill       0.28.0, up to date
 ```
@@ -39,7 +40,7 @@ shipmill/shipmill (https://github.com/shipmill/shipmill): WAITS ON YOU
 The heading is `owner/name (<the repo's GitHub URL>): <VERDICT>`. There is no separate
 list of reasons: each reason the verdict has is a line of the summary, so a line that
 holds something is either a fact a person asked for (repo, open issues, pull requests,
-gate, mode, github app, shipmill) or a reason. A line whose label has nothing to report
+gate, mode, landing, github app, shipmill) or a reason. A line whose label has nothing to report
 is dropped, except the always-shown lines named below.
 
 ### The verdict
@@ -64,12 +65,18 @@ summary (Each line):
   postmortem is due, an item is `UNTRUSTED`, the plugin or the CLI is older than
   shipmill's latest release, the repo keeps merged branches (`BRANCH_DELETE_OFF`), the
   gate has no App, or `[agents]` is set and this Mac has no launchd job for the repo
-  (another host, or a `/loop`, may run the gate; the report reads only this one)
+  (another host, or a `/loop`, may run the gate; the report reads only this one). Or open
+  pull requests (`PRS_OPEN`) wait to land and no gate lands them: with `[agents] prs =
+  false` the reason reads `pull request #409 #408 wait to land: the gate doesn't land pull
+  requests ([agents] prs = false); set [agents] prs = true, or land them by hand`, and
+  without `[agents]`, `pull request #N wait to land: no gate lands pull requests (no
+  [agents] in the config)` (#231: the gate logged QUIET while green pull requests waited)
 - **WORKING**: nothing above, and there is work for an agent (a row github-ship-watch marks
   `agent`), a gate session runs (an `AGENT_SESSION` row whose detail starts with `gate`;
   the interactive sessions in the checkout, such as the one running `status`, don't
   count), the gate's last decision is `RUNNING` or `LAUNCH` (a headless session isn't in
-  `claude agents`, D-17), or a workflow run is active
+  `claude agents`, D-17), a workflow run is active, or open pull requests (`PRS_OPEN`)
+  wait for a gate with `[agents] prs = true` to land them (`pull request #N to land`)
 - **IDLE**: none of these
 
 ### Each line
@@ -101,6 +108,9 @@ Always shown, in this order around the item lines:
   Without `[agents]`, `none: no [agents] in the config`
 - **mode**: `[agents] mode` as `interactive` or `headless`, or `interactive (not set)`
   without the key; dropped without `[agents]`
+- **landing**: whether the gate lands pull requests: `on` with `[agents] prs = true`, `off:
+  [agents] prs = false (the gate opens PRs but never lands them)` otherwise; dropped without
+  `[agents]`
 - **github app**: with `[agents] app_id`, the gate's own App check (`app_check` in
   `src/shipmill/app.py`, with the key the launchd job passes the gate, else the App's
   default key): `active` when it passes, or the problem in its place (`not connected:
@@ -124,7 +134,9 @@ label on the first line of each group:
 - **to triage**, **to build**, **in progress**, and **parked**, by `triage_state.py
   --json`'s states as before: to triage (`NEW`, `REVISIT`, `SPEC_REFUSED`, `UNFILLED`,
   `DONE_NOT_CLOSED`), to build (`NEEDS_PR`, `UNBLOCKED`), in progress (`IN_PROGRESS`),
-  parked (`BLOCKED`, `POSTPONED`, `TRIAGED`); and **drafts**, the draft pull requests
+  parked (`BLOCKED`, `POSTPONED`, `TRIAGED`); **to land**, after in progress, the open
+  pull requests in the `PRS_OPEN` row (whose detail is only `#N` tokens; any other detail
+  fails the report), newest first; and **drafts**, the draft pull requests
 - **sessions** and **runs**: the gate's sessions (`AGENT_SESSION` rows whose detail starts
   with `gate`) and active runs (`RUNS_ACTIVE`), counted, with the run links
 - **other**: any row github-ship-watch prints that the summary doesn't place, as the
@@ -213,6 +225,16 @@ leaves out `--trusted-only`, so a person sees every item (spec 008).
   repo, open issues, pull requests, gate, and shipmill are always shown, mode and github
   app whenever the config has `[agents]`
 
+- S-009-24: each open pull request in the `PRS_OPEN` row is on a `to land` line after `in
+  progress`, newest first, with its own `.../pull/N` link, never under `other`; the line is
+  dropped without one, and a `PRS_OPEN` detail that isn't `#N` tokens fails the report
+- S-009-25: with `[agents]`, a `landing` line after `mode` reads `on` with `prs = true` and
+  `off: [agents] prs = false (the gate opens PRs but never lands them)` otherwise; it is
+  dropped without `[agents]`
+- S-009-26: open pull requests in `PRS_OPEN` are a WAITS ON YOU reason naming them, the
+  setting, and the fix when `[agents] prs = false` or the config has no `[agents]`, and a
+  WORKING reason (`pull request #N to land`), never WAITS, with `prs = true`
+
 ## Out of scope
 
 - Repairing anything the report names: that stays github-ship-watch's "watch" scope
@@ -238,6 +260,7 @@ leaves out `--trusted-only`, so a person sees every item (spec 008).
 
 - shipmill/shipmill#211: S-009-1, S-009-2, S-009-3, S-009-4, S-009-5, S-009-6, S-009-7, S-009-8, S-009-9, S-009-10, S-009-11, S-009-12, S-009-13, S-009-14, S-009-15
 - shipmill/shipmill#212: S-009-16, S-009-17, S-009-18, S-009-19, S-009-20, S-009-21, S-009-22, S-009-23
+- shipmill/shipmill#231: S-009-24, S-009-25, S-009-26
 
 ## Verification
 
@@ -269,3 +292,6 @@ real on this repo on 2026-10-07: WORKING, with the summary's lines as Each line 
 - S-009-21: `test_s009_21_the_mode_and_github_app_lines`, passing
 - S-009-22: `test_s009_22_the_shipmill_line_shows_the_version_and_the_updates`, passing
 - S-009-23: `test_s009_23_empty_lines_are_dropped_and_the_fixed_ones_always_shown` and `test_s009_23_gate_sessions_and_runs_are_counted_with_their_links`, passing
+- S-009-24: `test_s009_24_open_pull_requests_are_listed_to_land_newest_first` and `test_s009_24_an_unreadable_pull_request_row_fails`, passing
+- S-009-25: `test_s009_25_the_landing_line_says_whether_the_gate_lands_pull_requests`, passing
+- S-009-26: `test_s009_26_pull_requests_no_gate_lands_wait_on_you` and `test_s009_26_pull_requests_the_gate_lands_are_work_not_waiting`, passing

@@ -375,6 +375,30 @@ def _row_numbers(rows: Sequence[Row], state: str) -> list[int]:
     return [int(n) for r in rows if r.state == state for n in re.findall(r"#(\d+)", r.detail)]
 
 
+def to_land(rows: Sequence[Row]) -> list[int]:
+    """The pull requests in the PRS_OPEN row, newest first; its detail is only `#N` tokens"""
+    for r in rows:
+        if r.state == "PRS_OPEN" and re.fullmatch(r"#\d+(?: #\d+)*", r.detail) is None:
+            raise ReleaseError(f"watch_state.py's PRS_OPEN row is unreadable: {r.detail!r}")
+    return sorted(set(_row_numbers(rows, "PRS_OPEN")), reverse=True)
+
+
+def landing_reasons(facts: Facts) -> tuple[list[str], list[str]]:
+    """The open pull requests as waits-on-you reasons when no gate lands them, else as work
+    for the gate (S-009-26)"""
+    found = to_land(facts.rows)
+    if not found:
+        return [], []
+    listed = f"pull request {numbers(found)}"
+    agents = facts.gate.agents
+    if agents is None:
+        return [f"{listed} wait to land: no gate lands pull requests (no [agents] in the config)"], []
+    if not agents.prs:
+        why = "the gate doesn't land pull requests ([agents] prs = false)"
+        return [f"{listed} wait to land: {why}; set [agents] prs = true, or land them by hand"], []
+    return [], [f"{listed} to land"]
+
+
 @dataclass(frozen=True, slots=True)
 class Waiting:
     """The items waiting on a decision, told apart: the NEEDS_DECISION row's pull requests
@@ -495,7 +519,10 @@ def verdict(facts: Facts) -> tuple[Verdict, list[str]]:
     latest, _ = latest_shipmill(rows)
     if cli_outdated(facts.cli, latest):
         yours.append(f"the shipmill CLI {facts.cli} is older than {latest}")
+    land_yours, land_working = landing_reasons(facts)
+    yours += land_yours
     working = [r.text() for r in rows if r.agent and r.state not in STUCK_ROWS]
+    working += land_working
     working += [
         f"session {r.subject}: {r.detail}" for r in rows if r.state == "AGENT_SESSION" and r.detail.startswith("gate ")
     ]
@@ -593,6 +620,8 @@ def item_lines(facts: Facts) -> list[str]:
     for name, states in ISSUE_LINES:
         found = sorted((i.number for i in facts.issues if i.state in states), reverse=True)
         lines += _group(name, [item(repo, n, False) for n in found])
+        if name == "in progress":  # S-009-24: the pull requests waiting to land follow the work
+            lines += _group("to land", [item(repo, n, True) for n in to_land(rows)])
     drafts = sorted((p.number for p in facts.pulls if p.draft), reverse=True)
     lines += _group("drafts", [item(repo, n, True) for n in drafts])
     lines += _group("sessions", session_values(facts))
@@ -609,7 +638,8 @@ def count_line(label_: str, count: int, link: str) -> str:
 
 
 def gate_lines(facts: Facts) -> list[str]:
-    """S-009-20, S-009-21: the gate, then with [agents] its mode and the App"""
+    """S-009-20, S-009-21, S-009-25: the gate, then with [agents] its mode, whether it lands
+    pull requests, and the App"""
     gate = facts.gate
     if gate.agents is None:
         return [_line("gate", "none: no [agents] in the config")]
@@ -631,7 +661,8 @@ def gate_lines(facts: Facts) -> list[str]:
         app = "active"
     else:
         app = f"not connected: {gate.app_error}"
-    return [_line("gate", value), _line("mode", mode), _line("github app", app)]
+    landing = "on" if gate.agents.prs else "off: [agents] prs = false (the gate opens PRs but never lands them)"
+    return [_line("gate", value), _line("mode", mode), _line("landing", landing), _line("github app", app)]
 
 
 def shipmill_line(facts: Facts) -> str:
