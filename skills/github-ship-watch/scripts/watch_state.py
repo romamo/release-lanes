@@ -99,6 +99,14 @@ Agents (all reported, never an action by itself):
                   session or the cloud, where no script reads it
   HOST_UNKNOWN    the agent sessions weren't read: claude isn't on PATH (a cloud session)
 
+Gate setup (the config's [agents] table):
+  GATE_NO_APP     an [agents] prompt with no app_id: no GitHub App is connected, so the
+                  gate's sessions write as the host's gh login (their PRs, comments, and
+                  commits read as the maintainer's, who can't approve them). A person
+                  connects one with shipmill-setup's step 3 under The gate (app-create,
+                  then app_id in [agents]), so an action but never an agent's (D-19); no
+                  row without a prompt or with app_id
+
 shipmill on this host (from `claude plugin list --json` and `claude plugin marketplace list --json`):
   SHIPMILL_VERSION   the latest shipmill release, the shipmill@shipmill plugin's installs
                   that apply to the repo (user scope, and local or project scope in the
@@ -118,8 +126,8 @@ item is in no agent row, so it neither starts a session nor changes the gate's f
 
 Holds and incidents lead the report. Exit 0 when nothing needs action, 1 when any
 BOT_FAILED, BOT_STALLED, WORK_BRANCH_STALE, NOT_PUBLISHED, UNANNOUNCED, ISSUES,
-OPERATE_FAILED, UNHEALTHY, PROMOTION_DUE, INCIDENT_OPEN, POSTMORTEM_DUE, or NEEDS_DECISION
-row is present, 2 on bad input or a git,
+OPERATE_FAILED, UNHEALTHY, PROMOTION_DUE, INCIDENT_OPEN, POSTMORTEM_DUE, NEEDS_DECISION,
+BRANCH_DELETE_OFF, SHIPMILL_OUTDATED, or GATE_NO_APP row is present, 2 on bad input or a git,
 gh, or uvx failure (a failing `shipmill plan` or `shipmill worktrees`).
 Needs git, an authenticated gh, and uvx (for a shipmill bot's plan and worktrees; `shipmill
 worktrees` needs claude on PATH too, to see the live sessions). Python 3.10+,
@@ -202,6 +210,7 @@ ACTION = {
     "NEEDS_DECISION",
     "BRANCH_DELETE_OFF",
     "SHIPMILL_OUTDATED",
+    "GATE_NO_APP",
 }
 # the states whose row needs an agent: --json marks each row's "agent" from this, and
 # shipmill gate starts a session on those rows (SKILL.md's repair table says what it does)
@@ -1112,6 +1121,15 @@ def triage_mode_row(text: str, policy: Path) -> Row:
     return Row("TRIAGE_MODE", "[agents]", "; ".join(f"{k} = {table[k]}" for k in keys))
 
 
+def gate_app_rows(table: dict[str, str] | None) -> list[Row]:
+    """D-19: the [agents] table (agents_table's) configures a gate without an App, which only a
+    person connects; never an agent's row, or every tick on an app-less repo would start a session"""
+    if table is None or "prompt" not in table or "app_id" in table:
+        return []
+    fix = "run shipmill-setup's step 3 (app-create), then set app_id in [agents]"
+    return [Row("GATE_NO_APP", "[agents]", f"no app connected: sessions write as the host's gh login; {fix}")]
+
+
 def agents_table(text: str, policy: Path) -> dict[str, str] | None:
     """[agents] of the config, each value as TOML writes it; None without the table"""
     if tomllib is None:
@@ -1430,8 +1448,10 @@ def main() -> int:
                 rows.append(Row("UNANNOUNCED", tag.name, f"{' '.join(issues)} (since {tags[i + 1].name})"))
 
     if policy is not None:
-        rows.append(triage_mode_row((repo_dir / policy).read_text(encoding="utf-8"), policy))
-        read = config((repo_dir / policy).read_text(encoding="utf-8"), policy, args.incident_label)
+        text = (repo_dir / policy).read_text(encoding="utf-8")
+        rows.append(triage_mode_row(text, policy))
+        rows += gate_app_rows(agents_table(text, policy))
+        read = config(text, policy, args.incident_label)
         holds = hold_rows(fetch_issues(args.repo, "--label", HOLD_LABEL), now)
         rows += holds
         closed = fetch_issues(args.repo, "--label", read.incident_label, state="closed")

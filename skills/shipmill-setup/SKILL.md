@@ -311,17 +311,22 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
    notify = true      # a desktop notification when a session waits on you
    remind_hours = 4   # repeat it while the session still waits
    max_wait_minutes = 15 # stop a session that waited this long; 0: never
-   # app_id = 123456  # sessions write as this GitHub App; unset: as the host's gh login
+   app_id = 123456    # replace with the App ID step 3 prints; sessions write as its bot
    # mode = "headless" # interactive (default): sessions ask you; headless: `claude -p`, they ask on GitHub
    ```
 
    A session that waits on a question holds the repo, so by default the gate stops it
    after 15 minutes. Ask whether the user answers questions sooner or later than that; set
-   `max_wait_minutes` (0..10080) to match, or 0 to never stop one
-3. **Its own identity (optional).** Without `app_id`, a session writes as the host's `gh`
-   login: its pull requests, comments, merges, and commits read as the user's own, and
-   the user can't approve its pull requests. To have them made by a GitHub App's bot
-   instead (D-14), create the App with `$CR app-create` (spec 006):
+   `max_wait_minutes` (0..10080) to match, or 0 to never stop one. `app_id` is a
+   placeholder until step 3 replaces it; never merge `123456` itself
+3. **Its own identity (required for the gate, D-19).** Every gate gets a GitHub App, so its
+   sessions' pull requests, comments, merges, and commits are made by the App's bot
+   (D-14). Without `app_id`, a session writes as the host's `gh` login: its work reads as
+   the user's own, the user can't approve its pull requests, and GitHub doesn't notify
+   them of its mentions. Until `app_id` is set, `setup_state.py` reads `AGENTS_NO_APP` and
+   github-ship-watch reads `GATE_NO_APP`, both an action for the user (exit 1). Ask the
+   user who should own the App (below), then create it with `$CR app-create` (spec 006),
+   or for a repo added to an existing App, run `$CR app-install`:
    - **Plan it:** `$CR app-create --dry-run` finds the accounts the user's `gh` login
      administers and the repos in them holding `.github/shipmill.toml`, and prints the
      plan: the App is the user's own (personal account) by default, **private** when every
@@ -340,7 +345,8 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
      page and click again. Then they pick the repos on the install page it opens next. It saves the key to `~/.config/shipmill/app-<app_id>.pem`
      (mode `0600`), prints `installed on <owner/repo>` as each appears, and ends with the
      `app_id = <id>` line to commit; exit 1 names a repo still missing the App
-   - **Set `app_id`** in `[agents]` through a PR, in each gated repo
+   - **Set `app_id`** in `[agents]` through a PR, in each gated repo: the printed id in
+     place of the placeholder
    - **A repo connected later, or in another account:** run `$CR app-install <owner/repo>`.
      It never installs or adds anything itself: for a repo the App doesn't cover it opens
      the App's **Install App** page and says what to click there (Install for a new account,
@@ -383,7 +389,8 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
    least 10 minutes left. Any failure exits 2 and starts no session; it never falls back
    to the user's login. The gate's own reads keep the host's `gh` login. A session that
    works on other repos (fleet mode) fails there, since the token is limited to this one.
-   Without `app_id`, sessions launch as before, as the host's `gh` login
+   A gate without `app_id` (one set up before D-19) still runs: its sessions launch as
+   before, as the host's `gh` login, and the two reports above flag it until it is set
 4. **Headless (optional).** On a machine nobody watches, a session that asks a question
    holds the repo until someone attaches. Ask whether anyone watches this one; if not,
    offer `mode = "headless"` in `[agents]` (spec 005, D-17), recommended with `app_id`.
@@ -415,7 +422,7 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
    - **Notifications:** with `app_id`, the question is `<slug>[bot]`'s, so its mention
      notifies the user on GitHub and the gate sends no desktop notification. Without it,
      the comment is the user's own and GitHub doesn't notify anyone of their own mention:
-     `setup_state.py` reads `AGENTS_NO_APP` (counted as done), a launch prints `no app_id:
+     `setup_state.py` reads `AGENTS_NO_APP` (an action, D-19), a launch prints `no app_id:
      needs-decision comments post as <login>, so GitHub won't notify you`, and with
      `notify = true` the gate sends a desktop notification, `#<n> waits on your decision:
      <url>`, at once and every `remind_hours` while the item waits. Either way it records
@@ -431,7 +438,9 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
    decision and changes nothing. With `app_id` set, a tick that would launch also checks
    the key, the installation, and the permissions, writes no helpers and no token cache,
    and prints `would launch as <slug>[bot]`: that line proves the App's setup. A tick
-   that would launch nothing checks no App
+   that would launch nothing checks no App; then `$CR app-install <owner/repo>` printing
+   `already installed on <owner/repo>` confirms at least the installation. Don't go on to
+   step 7 until `app_id` is set and one of the two has passed
 7. **Schedule it.** `$CR --repo tmp/shipmill-gate launchd <owner/repo> --every 15` writes
    `~/Library/LaunchAgents/dev.shipmill.gate.<owner>.<repo>.plist`, loads it, and runs
    it once now. Its log is under `~/Library/Logs/shipmill/`. `--remove` unloads it; on

@@ -90,6 +90,7 @@ ACTION = frozenset(
         "NEEDS_DECISION",
         "BRANCH_DELETE_OFF",
         "SHIPMILL_OUTDATED",
+        "GATE_NO_APP",
     }
 )
 REPO_ERROR = "REPO_ERROR"

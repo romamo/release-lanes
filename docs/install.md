@@ -208,8 +208,11 @@ the details.
    ```
 
    Without `app_id`, a session writes as your `gh` login, so its pull requests, merges,
-   and commits read as yours. Set it to have them made by a GitHub App's bot instead
-   (see [Give the sessions their own identity](#give-the-sessions-their-own-identity))
+   and commits read as yours. Set it before you schedule the gate, to have them made by a
+   GitHub App's bot instead (see
+   [Give the sessions their own identity](#give-the-sessions-their-own-identity)): until
+   then the setup checklist reads `AGENTS_NO_APP` and github-ship-watch `GATE_NO_APP`,
+   both an action for you (D-19)
 
 2. **Give it its own checkout.** A session branches and commits where it starts, so never
    your working copy. Inside the repo's trusted checkout:
@@ -242,10 +245,11 @@ the details.
 
 ### Give the sessions their own identity
 
-Optional. With a GitHub App, a session's pull requests, comments, reviews, merges, and
-commits are made by the App's bot, `<slug>[bot]`, not by you: you can approve its pull
-requests, and github-ship-watch's metrics count its merges as a bot's. The token it uses
-reaches this one repo only, never everything your login can.
+Part of setting up the gate (D-19); the gate still runs without one. With a GitHub App, a
+session's pull requests, comments, reviews, merges, and commits are made by the App's bot,
+`<slug>[bot]`, not by you: you can approve its pull requests, and github-ship-watch's
+metrics count its merges as a bot's. The token it uses reaches this one repo only, never
+everything your login can.
 
 The quick way is one command:
 
@@ -391,7 +395,7 @@ reopens it after it ends.
    - **With `app_id`** (recommended): the comment comes from `<slug>[bot]`, so its mention
      notifies you on GitHub like any other. The gate sends no desktop notification
    - **Without it:** the comment is your own, and GitHub doesn't notify you of your own
-     mention. The checklist reads `AGENTS_NO_APP` (counted as done), and each launch
+     mention. The checklist reads `AGENTS_NO_APP` (an action, D-19), and each launch
      prints `no app_id: needs-decision comments post as <login>, so GitHub won't notify
      you`. With `notify = true` the gate sends a desktop notification instead, `#<n>
      waits on your decision: <url>`, at once and every `remind_hours` while the item

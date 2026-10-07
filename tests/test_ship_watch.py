@@ -612,6 +612,7 @@ REPORT_ROWS = [
     "ISSUES_OPEN",
     "RUNS_ACTIVE",
     "BRANCH_DELETE_OFF",
+    "GATE_NO_APP",
     "SHIPMILL_VERSION",
     "SHIPMILL_OUTDATED",
     "POSTMORTEM_DUE",
@@ -791,6 +792,27 @@ def test_the_310_fallback_reads_the_agents_table_as_tomllib_does(ws: ModuleType)
     assert ws.agents_table_310('name = "demo"\n', policy) is None
     with pytest.raises(ws.Refused):
         ws.agents_table_310(AGENTS_CONFIG + "[agents.extra]\nx = 1\n", policy)
+
+
+@pytest.mark.parametrize("mode", ["", 'mode = "interactive"\n', 'mode = "headless"\n'])
+def test_a_gate_without_an_app_is_an_action_for_a_person(ws: ModuleType, mode: str) -> None:
+    # #204, D-19: a gate went live with no app_id, its sessions posting as the maintainer, and no row said so
+    policy = Path("shipmill.toml")
+    text = AGENTS_CONFIG + mode
+    for table in (ws.agents_table_310(text, policy), ws.agents_table_toml(tomllib.loads(text), policy)):
+        rows = ws.gate_app_rows(table)
+        assert [(r.state, r.subject) for r in rows] == [("GATE_NO_APP", "[agents]")]
+        assert rows[0].detail.startswith("no app connected: sessions write as the host's gh login")
+        assert "shipmill-setup's step 3" in rows[0].detail
+        assert rows[0].json()["agent"] is False
+    assert "GATE_NO_APP" in ws.ACTION and "GATE_NO_APP" not in ws.AGENT
+
+
+@pytest.mark.parametrize("text", ['name = "demo"\n', "[agents]\nprs = true\n", AGENTS_CONFIG + "app_id = 42\n"])
+def test_no_gate_no_app_row_without_a_prompt_or_with_an_app(ws: ModuleType, text: str) -> None:
+    policy = Path("shipmill.toml")
+    assert ws.gate_app_rows(ws.agents_table_310(text, policy)) == []
+    assert ws.gate_app_rows(ws.agents_table_toml(tomllib.loads(text), policy)) == []
 
 
 def test_no_agents_table_reads_no_gate(ws: ModuleType) -> None:

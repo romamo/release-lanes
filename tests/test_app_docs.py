@@ -47,7 +47,7 @@ def test_s004_14_the_docs_document_the_app() -> None:
         assert "chmod 600" in doc, name
         assert "readable by group or others" in doc, name
         # app_id, the dry run that proves the setup, launchd, and no App
-        assert "# app_id = 123456" in doc, name
+        assert "app_id = 123456" in doc, name
         assert "would launch as <slug>[bot]" in doc, name
         assert "launchd" in doc and "--app-key <path>" in doc, name
         assert "launch as before, as" in doc, name
@@ -60,8 +60,12 @@ def test_s004_14_the_docs_document_the_app() -> None:
     raw_setup = (ROOT / "skills" / "shipmill-setup" / "SKILL.md").read_text(encoding="utf-8")
     raw_install = (ROOT / "docs" / "install.md").read_text(encoding="utf-8")
     raw_modes = (ROOT / "docs" / "design" / "agent-modes.md").read_text(encoding="utf-8")
-    for raw in (raw_setup.split("\n## The gate\n", 1)[1], raw_install, raw_modes):
+    for raw in (raw_install, raw_modes):
         assert "app_id" not in agents_block(raw)  # shown, commented out, so a copy sets no App
+    # #204, D-19: the skill sets up every gate with an App, so its example sets app_id, a
+    # placeholder step 3 replaces
+    assert agents_block(raw_setup.split("\n## The gate\n", 1)[1])["app_id"] == 123456
+    assert "never merge `123456` itself" in gate
 
     # the design doc: the state files and what Claude Code provides
     state = modes.split("### State", 1)[1].split(" ## ", 1)[0]

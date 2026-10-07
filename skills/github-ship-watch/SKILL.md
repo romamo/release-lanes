@@ -54,6 +54,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | LOOP | The launchd job running `shipmill gate` for the repo on this Mac: its interval, state, last exit, and the gate's last decision, or "none". Add this session's own loops (CronList) and any `/schedule` routine the user named, which no script can read. Report only |
 | HOST_UNKNOWN | `claude` isn't on PATH, as in a cloud session, so the agent sessions weren't read: say so rather than "no agents". Report only |
 | BRANCH_DELETE_OFF | The repo's `delete_branch_on_merge` is off, so merged branches pile up and a stacked PR isn't retargeted. The watch never changes repo settings: recommend the command in the row (`gh repo edit <repo> --delete-branch-on-merge`), or shipmill-setup's `setup_state.py --fix`. An action (exit 1), never an agent's |
+| GATE_NO_APP | The config's `[agents]` has a prompt but no `app_id`, so the gate's sessions write as the host's `gh` login: their pull requests, comments, and commits read as the maintainer's, who can't approve them (D-19). Tell the user to connect an App with shipmill-setup's step 3 under The gate (`shipmill app-create`, then `app_id` in `[agents]` through a PR). The watch never creates an App or edits the config. An action (exit 1), never an agent's |
 | SHIPMILL_VERSION | The latest shipmill release, the `shipmill@shipmill` plugin installs that apply to the repo on this host (user scope, and local or project scope in the checkout or the gate's working directory, each read as the project Claude Code loads: a linked git worktree counts as its main checkout, so a leftover install keyed on the worktree itself is ignored), and a marketplace still on an old repo name. Report only |
 | SHIPMILL_OUTDATED | One of those installs is older than the latest release, so the skills it runs are stale: an install in the gate's working directory means the gate's sessions run them. Give the user the row's command (`claude plugin update shipmill@shipmill --scope <scope>`, in the folder it names; a restart applies it). The watch never updates a plugin. An action (exit 1), never an agent's |
 | PRS_OPEN, BOT_OK, BOT_NONE, NO_REGISTRY | Report only |
@@ -67,6 +68,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 | `true` | INCIDENT_OPEN | An agent works the incident: diagnosis, then a hotfix or a revert |
 | `false` | PROMOTION_DUE | Only a person approves; an agent would wake every retry window for nothing |
 | `false` | BRANCH_DELETE_OFF | A repo setting only a person changes |
+| `false` | GATE_NO_APP | Only a person creates the App and owns its key; as an agent's row, every tick on an app-less repo would start a session |
 | `false` | SHIPMILL_OUTDATED | A person updates the plugin and restarts the session |
 | `false` | UNHEALTHY | Operate owns it and rolls back after `rollback_after` failures; past that, the incident it opens reads INCIDENT_OPEN |
 | `false` | HOLD | Report only; the gate checks `shipmill-hold` itself before anything else (D-15) |
