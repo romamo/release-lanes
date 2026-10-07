@@ -51,16 +51,22 @@ Prerequisites, every step, and how to pause or remove it: [docs/install.md](docs
    Merge, run the Release workflow by hand with dry-run on, read the release commit in
    its summary, then set `mode = "release"`
 
-   From then on, `shipmill status` answers "is anything stuck?" from the checkout in a
-   short summary: the repo's link and a verdict (STUCK, WAITS ON YOU, WORKING, or IDLE),
+   From then on, `status` answers "is anything stuck?" from the checkout in a short
+   summary (the CLI isn't on your `PATH`; it runs through `uvx` each time):
+
+   ```bash
+   uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill status
+   ```
+
+   The summary gives the repo's link and a verdict (STUCK, WAITS ON YOU, WORKING, or IDLE),
    then one line per thing worth knowing, each reason for the verdict among them: the
    local `main` against GitHub's and its version, each issue or pull request that waits
    on you with its own link, the open issues and pull requests, the gate (`OK` or its
    problem), the mode, the GitHub App, and the shipmill version. It exits 1 when a row
    needs action, so a CI job can gate on it; `--rows` and `--json` print the raw rows
 
-3. **The agents' schedule** (optional): add an `[agents]` section to the config, then run
-   `shipmill gate` from its own checkout every 15 minutes:
+3. **The agents' schedule** (optional): add an `[agents]` section to the config, then have
+   launchd run the gate from its own checkout every 15 minutes:
 
    ```bash
    git worktree add --detach tmp/shipmill-gate origin/main
@@ -255,7 +261,7 @@ Environments → `<environment>` → Deployment branches and tags, or run
 
 #### Operate: health, bake, promotion, and rollback
 
-With `from` or `health` in use, run `shipmill init --operate`. It writes
+With `from` or `health` in use, run `uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill init --operate`. It writes
 `.github/workflows/operate.yml`, which runs `shipmill operate` every 10 minutes, one run at
 a time. The deploy workflow's `operate` job above also starts it once a deploy succeeds, so
 the first health check runs right after the deploy rather than at the next scheduled run;
@@ -295,8 +301,8 @@ approve=<environment> -f dry-run=false`: it deploys the proposed tag once and cl
 issue, under `propose` or `observe`, but not while a hold is open. A proposal also closes,
 with a comment, once the environment runs its tag (or a later one), whoever deployed it. The
 run summary lists
-each environment's tag, health, and what the run did; `shipmill operate --dry-run` shows the
-same and changes nothing.
+each environment's tag, health, and what the run did; `uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill operate --dry-run`
+shows the same and changes nothing.
 
 **Rollback and incidents.** An environment that fails `rollback_after` health checks in a
 row (3 by default: 10 to 20 minutes after the deploy when the deploy workflow starts

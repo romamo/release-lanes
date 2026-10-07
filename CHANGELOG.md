@@ -12,6 +12,16 @@ bot.
 - Spec 010: each stable and hotfix release publishes shipmill to PyPI through a new
   `publish.yml`, with trusted publishing and a smoke test of the built wheel (#216)
 
+### Fixed
+
+- The README, `docs/install.md`, and the github-ship-watch and github-pr-triage skills no
+  longer tell you to run a bare `shipmill <command>`, which nothing puts on `PATH`: they
+  use `$CR` or the full `uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill`
+  form. `docs/install.md` shows an alias for the short name that keeps tracking `@v0`,
+  and says why `uv tool install` drifts; the github-ship-watch description, always in an
+  agent's context, says how to run the CLI. A test fails on a bare command in the README,
+  the top-level docs, or a skill (#215)
+
 ## [0.29.0] - 2026-10-07
 
 ### Changed
