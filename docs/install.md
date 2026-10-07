@@ -401,7 +401,10 @@ gate's work, while the rest of the repo keeps moving. Reply on the item (as an o
 member, or collaborator) and a later tick takes it up again; the session removes the label.
 A headless session isn't listed in `claude agents`: follow it with `tail -f` on its log in
 `$(git rev-parse --git-common-dir)/shipmill/sessions/`, and `claude --resume <uuid>`
-reopens it after it ends.
+reopens it after it ends. The gate starts it with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0`
+in its environment, so Claude Code waits for its background subagents however long they
+run instead of stopping them 10 minutes after its last turn (#246); set the variable in
+the gate's own environment to choose another ceiling.
 
 1. **Create the label.** The setup checklist wants `needs-decision` whenever the config
    has an `[agents]` section, in either mode; `setup_state.py <owner/repo> --fix` creates it

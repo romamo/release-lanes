@@ -7,6 +7,14 @@ bot.
 
 ## [Unreleased]
 
+### Fixed
+
+- A headless gate session no longer loses its background subagents 10 minutes after its
+  last turn: the gate starts `claude -p` with `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0` in
+  its environment unless the gate's own environment sets the variable, and
+  github-issue-triage and github-pr-triage run their agents in the foreground when
+  headless (#246)
+
 ## [0.33.1] - 2026-10-07
 
 ### Fixed

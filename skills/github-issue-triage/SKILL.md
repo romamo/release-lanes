@@ -83,6 +83,8 @@ Use the templates in [references/comments.md](references/comments.md). Create th
 
 Fill in [references/implementer-brief.md](references/implementer-brief.md): one agent per group of issues that touch the same files, two issues per agent at most, each issue on its own branch and PR. Launch them all in one message (`isolation: "worktree"`, `subagent_type: general-purpose`). Name each issue's specific risks in the brief. A generic "fix it" gets a generic fix.
 
+Headless (the prompt carries the `Headless:` paragraph, or AskUserQuestion is unavailable), launch the implementers with `run_in_background: false`, still all in one message so they run in parallel, or wait for every notification before ending the turn. Claude Code can stop a `claude -p` session's background agents once its turn ends: 1 of 11 PRs landed that way (#246).
+
 A spec's build issues go in dependency order (spec-gate.md, Dispatch the build): dispatch the ones whose dependencies are closed, and stack a dependent on its dependency's open PR when that saves a wait. When the config has `[roadmap] wip = N` (#70 adds it to the config schema; until then the config refuses a `[roadmap]` table, so don't add one), run `triage_state.py --wip N` and start no more than the room it reports; without that setting there is no limit.
 
 ### 5. Vet each report
