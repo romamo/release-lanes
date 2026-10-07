@@ -7,6 +7,12 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- Decision D-21: every gate session, interactive or headless, asks its questions through
+  the needs-decision protocol, so a question nobody answers waits on GitHub instead of
+  holding the gate (#206)
+
 ## [0.28.0] - 2026-10-07
 
 ### Added

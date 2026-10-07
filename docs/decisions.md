@@ -167,3 +167,11 @@ entry that supersedes it, never by editing an old one.
 - Why: A setup that skipped the question installed an interactive gate on a machine nobody watches (romamo/treaty); the default keeps existing gates working, and the report makes the missing answer visible
 - Applies to: skills/shipmill-setup/SKILL.md, skills/shipmill-setup/scripts/setup_state.py, [agents] mode
 - Enforced by: the setup_state.py tests (with the implementing PR)
+
+## D-21: Every gate session asks through the needs-decision protocol
+
+- Decided: 2026-10-07, in shipmill/shipmill#206
+- Rule: A shipmill gate session, interactive or headless, posts each question as a needs-decision marker comment with the needs-decision label before anything else; an interactive session also asks in the session, and when the answer comes there it removes the label and goes on; setup creates the needs-decision label whenever the config has an [agents] section
+- Why: An interactive gate session nobody attached to improvised plain question comments without the marker or the label (romamo/treaty), so watch_state.py kept counting the items as work and the gate stuck in its UNCHANGED cooldown; a session can't tell whether anyone is attached, and posting first takes the item out of the gate's work at once. Switching to headless after a wait would need new gate behaviour to restart sessions
+- Applies to: skills/github-issue-triage/references/needs-decision.md, skills/github-issue-triage/SKILL.md, skills/github-issue-resolve/SKILL.md, skills/github-pr-triage/SKILL.md, skills/shipmill-setup/scripts/setup_state.py, src/shipmill/gate.py, needs-decision label
+- Enforced by: the setup_state.py and gate prompt tests (with the implementing PR)
