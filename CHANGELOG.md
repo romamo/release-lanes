@@ -7,6 +7,12 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- Spec 009: `shipmill status` prints a picture of the factory, a verdict (stuck, waits on
+  you, working, idle) with its reasons, then the repo, issues, pull requests, gate, and
+  shipmill blocks; `--rows` keeps the old table
+
 ### Changed
 
 - A gate without a GitHub App is unfinished setup (D-19): shipmill-setup makes the App step
