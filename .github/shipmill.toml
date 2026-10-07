@@ -22,10 +22,11 @@ blocker_lanes = ["stable"]
 [lanes.stable]
 quiet_minutes = 30
 github_release = true
-dispatch = ["move-major-tag.yml"]
+dispatch = ["move-major-tag.yml", "publish.yml"]  # publish.yml: PyPI (spec 010)
 
 [lanes.hotfix]
 github_release = true
+dispatch = ["publish.yml"]
 
 # The plugin's version follows the package's, so a plugin update ships with each release
 [[version_lines]]
