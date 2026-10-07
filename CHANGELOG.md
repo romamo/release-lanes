@@ -12,6 +12,9 @@ bot.
 - Spec 009: `shipmill status` prints a picture of the factory, a verdict (stuck, waits on
   you, working, idle) with its reasons, then the repo, issues, pull requests, gate, and
   shipmill blocks; `--rows` keeps the old table
+- Spec 009 after review: a hold and a Mac without the gate's job wait on you rather than
+  read as stuck, a sleeping Mac's missed ticks don't count, a failed tick's `shipmill:` line
+  is the gate's last line, and the reads pass the App bot's `--bot-login` as the gate does
 
 ### Changed
 
