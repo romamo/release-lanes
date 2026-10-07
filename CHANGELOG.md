@@ -7,6 +7,13 @@ bot.
 
 ## [Unreleased]
 
+### Fixed
+
+- `shipmill status` shows the open pull requests waiting to land: a `to land` line lists
+  each with its link, a `landing` line says whether the gate lands them (`[agents] prs`),
+  and when no gate does (`prs = false`, or no `[agents]`), the verdict is WAITS ON YOU,
+  naming the pull requests and the fix, instead of IDLE while the gate logs QUIET (#231)
+
 ## [0.32.0] - 2026-10-07
 
 ### Changed
