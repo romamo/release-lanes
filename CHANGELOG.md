@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-10-07
+
 ### Fixed
 
 - github-ship-watch no longer reads a version tag cut before the package's first PyPI upload
@@ -968,7 +970,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.31.1...HEAD
+[0.31.1]: https://github.com/shipmill/shipmill/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/shipmill/shipmill/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/shipmill/shipmill/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/shipmill/shipmill/compare/v0.28.0...v0.29.0
