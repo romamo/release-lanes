@@ -24,8 +24,8 @@ bot.
   comes off. An interactive launch now reads your login with `gh api user` and starts
   nothing when that fails. With `app_id` set, an interactive gate checks the App before it
   reads the state, as headless does, and reads it with `--bot-login <slug>[bot]`, so a
-  reply on GitHub to the bot's question wakes the item. `setup_state.py` wants the `needs-decision` label whenever
-  the config has an `[agents]` section (D-21) (#206)
+  reply on GitHub to the bot's question wakes the item. `setup_state.py` wants the
+  `needs-decision` label whenever the config has an `[agents]` section (D-21) (#206)
 
 ## [0.28.0] - 2026-10-07
 
