@@ -1,6 +1,6 @@
 # S-009: shipmill status says whether the factory works or is stuck
 
-status: draft
+status: approved
 
 ## Problem
 
@@ -19,44 +19,33 @@ or when it last ran.
 ### The report
 
 `shipmill status` (in `src/shipmill/cli.py`, the report built in `src/shipmill/status.py`)
-prints a picture instead of the rows. It starts with a verdict line and its reasons, then
-one block per area, each line a label and a value:
+prints a short summary instead of the rows: a heading with the verdict, then one line per
+thing worth knowing, each a label and a value. Items are links, not descriptions; the link
+carries the description (#212):
 
 ```
-shipmill/shipmill: WAITS ON YOU
-  - issue #206 waits on your decision
-  - the gate: WAITING: session 3890ede7 waits on you: claude attach 3890ede7
-
-repo
-  main         local b2d940f, github 7f3739d: 1 behind (git pull)
-  version      latest release v0.26.0 (12 h ago); local main at v0.25.0 +6 commits, github main at v0.26.0
-  releases     release.yml ok; v0.26.0 v0.25.0 v0.24.0 no registry
-issues       4 open
-  wait on you  #206  https://github.com/shipmill/shipmill/issues?q=is%3Aopen%20label%3Aneeds-decision
-  to triage    none
-  to build     none
-  in progress  #205 #204 #26
-  parked       none
-pull requests  4 open
-  wait on you  none
-  to triage    #210 #209 #208 #207
-  drafts       none
-gate
-  job          launchd every 15 min, idle, last run 11 min ago, exit 0
-  last         WAITING: session 3890ede7 waits on you: claude attach 3890ede7
-  mode         interactive (not set, the default)
-  app          shipmill-romamo (5209412), connected
-  sessions     2: gate waiting/blocked (3890ede7); interactive busy (74686)
-  runs         none active
-shipmill     cli 0.26.0, plugin user 0.26.0, local 0.26.0; latest v0.26.0, up to date
+shipmill/shipmill (https://github.com/shipmill/shipmill): WAITS ON YOU
+  repo           in sync at v0.28.0, release ok
+  needs decision #206 https://github.com/shipmill/shipmill/issues/206
+  parked         #26 https://github.com/shipmill/shipmill/issues/26
+  open issues    2 https://github.com/shipmill/shipmill/issues
+  pull requests  none
+  gate           OK, launchd every 15 min
+  mode           interactive
+  github app     active
+  shipmill       0.28.0, up to date
 ```
 
-An area with nothing to show prints `none`; a line that can't be read on this host (no
-launchd off a Mac, `claude` not on PATH) says so instead of being left out.
+The heading is `owner/name (<the repo's GitHub URL>): <VERDICT>`. There is no separate
+list of reasons: each reason the verdict has is a line of the summary, so a line that
+holds something is either a fact a person asked for (repo, open issues, pull requests,
+gate, mode, github app, shipmill) or a reason. A line whose label has nothing to report
+is dropped, except the always-shown lines named below.
 
 ### The verdict
 
-The verdict is the worst that applies, and every reason that applies is listed under it:
+The verdict is the worst that applies; each reason that applies shows as its line of the
+summary (Each line):
 
 - **STUCK**: the pipeline can't move without a repair. A release run failed or stalled
   (`BOT_FAILED`, `BOT_STALLED`, `WORK_BRANCH_STALE`), a release is missing from its
@@ -83,52 +72,61 @@ The verdict is the worst that applies, and every reason that applies is listed u
   `claude agents`, D-17), or a workflow run is active
 - **IDLE**: none of these
 
-Any other row github-ship-watch prints that the report doesn't place is listed under an
-`other` block as the script prints it, so a new state is never dropped.
+### Each line
 
-### Each area
+Always shown, in this order around the item lines:
 
-- **repo, main**: the local default branch's commit against GitHub's, after the fetch
+- **repo** (first): the local default branch against GitHub's, after the fetch
   `watch_state.py` makes: `in sync`, `N behind (git pull)`, `N ahead`, `diverged (N ahead,
-  M behind)`, or `no local <branch>`. The default branch is `gh repo view`'s
-- **repo, version**: GitHub's latest release (`gh release view`) and its age, and the
-  version each default branch is at, local and GitHub's: its newest version tag and the
-  commits since (`git describe --tags --long`); `no release yet` without a release
-- **repo, releases**: the release workflow's state and each checked tag's registry state,
-  from the `BOT_*`, `PUBLISHED`, `NOT_PUBLISHED`, `NO_REGISTRY`, and `UNANNOUNCED` rows
-- **issues**: the count of open issues and, by `triage_state.py --json`'s states: `wait on
-  you` (`NEEDS_DECISION`) with a link to GitHub's list of open issues labelled
-  `needs-decision`; `to triage` (`NEW`, `REVISIT`, `SPEC_REFUSED`, `UNFILLED`,
-  `DONE_NOT_CLOSED`); `to build` (`NEEDS_PR`, `UNBLOCKED`); `in progress` (`IN_PROGRESS`);
-  `parked` (`BLOCKED`, `POSTPONED`, `TRIAGED`); and `untrusted` and `suspect close` when
-  there are any
-- **pull requests**: the count of open pull requests (`gh pr list`) and: `wait on you`,
-  the `NEEDS_DECISION` row's numbers that are pull requests, with a link to GitHub's list
-  of open pull requests labelled `needs-decision`; `to triage`, the `PRS_OPEN` row's;
-  `drafts`, the drafts
-- **gate, job**: the launchd job for the repo (`src/shipmill/launchd.py`'s label): its
-  interval, whether `launchctl print` finds it loaded and running, its last exit code, and
-  the time since its last run, taken from its log file's modification time (a tick writes
-  to the log every run)
-- **gate, last**: the log's last decision line (`QUIET`, `LAUNCH`, `RUNNING`, `WAITING`,
-  `UNCHANGED`, `HELD`), or the failure that follows it: a failed tick leaves
-  `shipmill: <error>` (`cli.run`), `error: ...` (uvx), or a traceback as its last
-  unindented line
-- **gate, mode**: `[agents] mode`, or `interactive (not set, the default)` without the
-  key; `no [agents]: no gate runs for this repo` without the table
-- **gate, app**: with `[agents] app_id`, the gate's own App check (`app_check` in
-  `src/shipmill/app.py`: key, JWT, installation on the repo, bot account) with the key
-  the launchd job passes the gate (`--app-key` in its arguments), else the App's default
-  key; it prints the App's slug and id and `connected`, or `not connected:` and the check's
-  error. When that key isn't on this host, it prints `can't check here: no key at <path>`,
-  which is no reason for a verdict. Without an app_id, `none: sessions write as your gh
-  login`
-- **gate, sessions** and **runs**: the `AGENT_SESSION` and `RUNS_ACTIVE` rows, counted and
-  shortened
-- **shipmill**: one line: the installed CLI's version (the package metadata), the plugin
-  installs and shipmill's latest release from the `SHIPMILL_VERSION` row, and `up to date`
-  or `update available:` with the commands the `SHIPMILL_OUTDATED` rows name (and `uv tool
-  upgrade shipmill` when the CLI is older)
+  M behind)`, or `no local <branch>`; then `at <version>`, the newest version tag on
+  GitHub's default branch and `+N` for the commits since (`git describe --tags --long`),
+  or `no release yet`; then `release ok`, or in its place the release problem: the
+  `BOT_FAILED`, `BOT_STALLED`, `WORK_BRANCH_STALE`, `NOT_PUBLISHED`, or `UNANNOUNCED` state
+  with its tag or a link to the failed run. The default branch is `gh repo view`'s
+- **open issues**: the count of open issues and the link to GitHub's issue list
+  (`https://github.com/<owner>/<name>/issues`), or `none`
+- **pull requests**: the count of open pull requests (`gh pr list`) and the link to the
+  list (`.../pulls`), or `none`
+- **gate**: with `[agents]` in the config, `OK, launchd every N min` when the launchd job
+  (`src/shipmill/launchd.py`'s label) is loaded, ran within twice its interval (or since
+  the last wake), last exited 0, and the log's last line is no failed tick and no
+  `UNCHANGED` decision; otherwise the problem in place of `OK`, with the schedule after
+  it: `not loaded`, `stale: last run <age> ago`, `failed: exit <code>`, `failed: <the
+  error line>` (a failed tick's `shipmill:`, `error:`, or traceback line), `cooldown: same
+  findings, retry <when the line names>`, or `waiting on you: claude attach <id>` for a
+  `WAITING` decision. `HELD` reads `held by #N <link>`. Off a Mac it reads `can't check
+  here: no launchd`; on a Mac with no job for the repo, `no launchd job on this Mac`.
+  Without `[agents]`, `none: no [agents] in the config`
+- **mode**: `[agents] mode` as `interactive` or `headless`, or `interactive (not set)`
+  without the key; dropped without `[agents]`
+- **github app**: with `[agents] app_id`, the gate's own App check (`app_check` in
+  `src/shipmill/app.py`, with the key the launchd job passes the gate, else the App's
+  default key): `active` when it passes, or the problem in its place (`not connected:
+  <the check's error>`, or `can't check here: no key at <path>`, which is no reason for a
+  verdict). Without an app_id, `not active`
+- **shipmill** (last): the installed CLI's version, then `up to date`, or `update
+  available:` with the commands the `SHIPMILL_OUTDATED` rows name (and `uv tool upgrade
+  shipmill` when the CLI is older). The plugin's version shows only when it differs from
+  the CLI's
+
+Shown only when they hold something, between repo and open issues, one item per line with
+its direct link (`https://github.com/<owner>/<name>/issues/<n>` or `.../pull/<n>`), the
+label on the first line of each group:
+
+- **needs decision**: the issues and pull requests in the `NEEDS_DECISION` row, each with
+  its own link, never a label search
+- **hold** (`HOLD`), **incident** (`INCIDENT_OPEN`), **postmortem** (`POSTMORTEM_DUE`),
+  **promotion** (`PROMOTION_DUE`, with the run's link), **operate** (`OPERATE_FAILED`,
+  `UNHEALTHY`), **untrusted** (`UNTRUSTED`), **suspect close**, and **branches**
+  (`BRANCH_DELETE_OFF`: `merged branches kept`)
+- **to triage**, **to build**, **in progress**, and **parked**, by `triage_state.py
+  --json`'s states as before: to triage (`NEW`, `REVISIT`, `SPEC_REFUSED`, `UNFILLED`,
+  `DONE_NOT_CLOSED`), to build (`NEEDS_PR`, `UNBLOCKED`), in progress (`IN_PROGRESS`),
+  parked (`BLOCKED`, `POSTPONED`, `TRIAGED`); and **drafts**, the draft pull requests
+- **sessions** and **runs**: the gate's sessions (`AGENT_SESSION` rows whose detail starts
+  with `gate`) and active runs (`RUNS_ACTIVE`), counted, with the run links
+- **other**: any row github-ship-watch prints that the summary doesn't place, as the
+  script prints it, so a new state is never dropped
 
 ### Reads
 
@@ -155,8 +153,7 @@ leaves out `--trusted-only`, so a person sees every item (spec 008).
 
 ## Acceptance criteria
 
-- S-009-1: `shipmill status` prints the verdict line `owner/name: <VERDICT>` first, and
-  every reason that applies under it
+- S-009-1: dropped in #212, see S-009-16
 - S-009-2: the verdict is STUCK when a row is `BOT_FAILED`, `BOT_STALLED`,
   `WORK_BRANCH_STALE`, `NOT_PUBLISHED`, `OPERATE_FAILED`, `UNHEALTHY`, or `INCIDENT_OPEN`
 - S-009-3: the verdict is STUCK when the config has `[agents]` and, on a Mac, the launchd
@@ -174,27 +171,45 @@ leaves out `--trusted-only`, so a person sees every item (spec 008).
 - S-009-6: the verdict is WORKING when nothing above applies and a row is marked `agent`, a
   gate session runs, the gate's last decision is `RUNNING` or `LAUNCH`, or a run is
   active; an interactive session alone isn't; IDLE otherwise
-- S-009-7: the issues block counts the open issues and lists them as wait on you, to
-  triage, to build, in progress, and parked by `triage_state.py`'s states, with the link to
-  GitHub's open `needs-decision` issues on the wait on you line
-- S-009-8: the pull requests block counts the open pull requests and lists wait on you
-  (with its link), to triage, and drafts, telling a waiting pull request from a waiting
-  issue
-- S-009-9: the main line compares the local default branch with GitHub's: in sync, behind,
-  ahead, diverged, or missing
-- S-009-10: the version line names GitHub's latest release and its age, and the version
-  tag and commits since for the local and GitHub default branches, or `no release yet`
-- S-009-11: the gate block shows the job's interval, loaded state, last exit code, time
-  since the log was last written, the last decision line, the mode (`not set` without the
-  key), and the App line
-- S-009-12: the shipmill line shows the CLI's and the plugin's versions against the latest
-  release, and `update available:` with the commands when either is older
+- S-009-7: dropped in #212, see S-009-18, S-009-19
+- S-009-8: dropped in #212, see S-009-18, S-009-19
+- S-009-9: dropped in #212, see S-009-17
+- S-009-10: dropped in #212, see S-009-17
+- S-009-11: dropped in #212, see S-009-20, S-009-21
+- S-009-12: dropped in #212, see S-009-22
 - S-009-13: a row the report doesn't place is printed under `other` as the script prints it
 - S-009-14: `--rows` prints `watch_state.py`'s table unchanged, `--json` its JSON lines
   unchanged, and the exit code is spec 008's whatever the verdict
 - S-009-15: with a passing App check, the report's `watch_state.py` and `triage_state.py`
   reads pass `--bot-login <slug>[bot]` and never `--trusted-only`; `--rows` and `--json`
   read as spec 008 does
+- S-009-16: the report's first line is `owner/name (https://github.com/owner/name):
+  <VERDICT>`, with no list of reasons under it; each reason the verdict has is a line of
+  the summary
+- S-009-17: the repo line reads `<sync state> at <version>, release ok`: in sync, behind,
+  ahead, diverged, or missing; the newest version tag on GitHub's default branch with `+N`
+  commits since, or `no release yet`; and the release problem in place of `release ok`
+  when a release row is `BOT_FAILED`, `BOT_STALLED`, `WORK_BRANCH_STALE`, `NOT_PUBLISHED`,
+  or `UNANNOUNCED`
+- S-009-18: each issue or pull request waiting on a decision is on a `needs decision` line
+  with its own direct link (`.../issues/N` or `.../pull/N`), never a label search URL; the
+  same holds for every item line (to triage, to build, in progress, parked, drafts, hold,
+  incident, postmortem, untrusted, suspect close)
+- S-009-19: `open issues` and `pull requests` show the count and the link to the repo's
+  issue or pull request list, or `none` without a link
+- S-009-20: the gate line reads `OK, launchd every N min` when the job is healthy, and the
+  problem in place of `OK` when it is not loaded, stale, last exited non-zero, failed its
+  last tick, or sits in an `UNCHANGED` cooldown, or when its last decision is `WAITING`;
+  `none: no [agents] in the config` without `[agents]`
+- S-009-21: the mode line shows `interactive`, `headless`, or `interactive (not set)`, and
+  the github app line shows `active`, `not active` without an app_id, or the App check's
+  problem
+- S-009-22: the shipmill line shows the CLI's version and `up to date`, or `update
+  available:` with the commands; the plugin's version shows only when it differs
+- S-009-23: a label with nothing to report (needs decision, to triage, to build, in
+  progress, parked, drafts, sessions, runs, other, and the reason lines) is left out;
+  repo, open issues, pull requests, gate, and shipmill are always shown, mode and github
+  app whenever the config has `[agents]`
 
 ## Out of scope
 
