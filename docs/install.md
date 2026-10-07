@@ -123,7 +123,7 @@ $CR init --ci ci.yml
 This writes `.github/shipmill.toml` in `mode = "dry-run"` and
 `.github/workflows/release.yml`, which wires shipmill's reusable workflows to your CI.
 Then edit the policy: which lanes, when each releases, what each dispatches, and the
-gates. The keys are in the README, under [The policy](../README.md#the-policy). For a uv
+gates. The keys are in [The policy](release-lanes.md#the-policy). For a uv
 project, add `after_stamp = ["uv lock --check"]`.
 
 ### Check

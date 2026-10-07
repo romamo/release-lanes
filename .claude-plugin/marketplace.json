@@ -5,13 +5,13 @@
     "email": "pypi@romavm.dev"
   },
   "metadata": {
-    "description": "The shipmill plugin: GitHub issue triage, PR landing, and release lanes"
+    "description": "shipmill: the AI software factory for GitHub, from issue to release"
   },
   "plugins": [
     {
       "name": "shipmill",
       "source": "./",
-      "description": "Issue to release on GitHub: triage issues, review and land pull requests, and cut releases on lanes from a hand-written CHANGELOG"
+      "description": "The open-source AI software factory for GitHub: triage issues, land pull requests, and release, deploy, and roll back by policy"
     }
   ]
 }

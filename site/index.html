@@ -3,9 +3,77 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>shipmill</title>
+<title>shipmill: the AI software factory for GitHub</title>
+<meta name="description" content="Open-source AI software factory for GitHub: agents triage issues and land pull requests; release lanes publish, deploy, and roll back by a policy you write.">
+<meta property="og:title" content="shipmill">
+<meta property="og:description" content="Agents triage your issues and land the pull requests; release lanes publish, deploy, and roll back by a policy you write.">
+<meta property="og:url" content="https://shipmill.github.io/shipmill/">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f6fed'/%3E%3Cpath d='M7 20l9-11 9 11z' fill='white'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #ffffff; --fg: #16181d; --muted: #5b616e; --line: #e3e5ea;
+    --card: #f6f7f9; --accent: #2f6fed; --code: #f0f2f5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1115; --fg: #e8eaee; --muted: #9aa1ad; --line: #262a33;
+            --card: #171a20; --accent: #6d9bff; --code: #1d2129; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 860px; margin: 0 auto; padding: 56px 16px 72px; }
+  h1 { font-size: clamp(2rem, 6vw, 3rem); line-height: 1.1; margin: 0 0 16px; letter-spacing: -0.02em; }
+  h2 { font-size: 1.35rem; margin: 56px 0 16px; }
+  .lead { font-size: 1.2rem; color: var(--muted); margin: 0 0 28px; }
+  a { color: var(--accent); }
+  .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
+  .btn { display: inline-block; padding: 10px 18px; border-radius: 8px; text-decoration: none;
+         border: 1px solid var(--line); color: var(--fg); font-weight: 600; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; }
+  pre { background: var(--code); border: 1px solid var(--line); border-radius: 8px;
+        padding: 14px 16px; overflow-x: auto; white-space: pre; }
+  .flow { display: flex; flex-wrap: wrap; gap: 8px; margin: 32px 0 0; padding: 0; list-style: none; }
+  .flow li { background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+             padding: 4px 14px; font-size: 0.92rem; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+  .card h3 { margin: 0 0 6px; font-size: 1.02rem; }
+  .card p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+  footer { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--line);
+           color: var(--muted); font-size: 0.9rem; }
+</style>
 </head>
 <body>
-<p>shipmill releases, deploys, and rolls back repositories on GitHub: <a href="https://github.com/shipmill/shipmill">github.com/shipmill/shipmill</a></p>
+<main>
+  <h1>shipmill</h1>
+  <p class="lead">The open-source AI software factory for GitHub. Agents triage your issues, fix them, and land the pull requests; release lanes publish, deploy, and roll back by a policy you write.</p>
+  <div class="cta">
+    <a class="btn primary" href="https://github.com/shipmill/shipmill#quickstart">Get started</a>
+    <a class="btn" href="https://github.com/shipmill/shipmill">GitHub</a>
+    <a class="btn" href="https://pypi.org/project/shipmill/">PyPI</a>
+  </div>
+  <ul class="flow" aria-label="Pipeline">
+    <li>Issue</li><li>Triage</li><li>Fix</li><li>Review &amp; land</li><li>Release</li><li>Deploy</li><li>Watch</li>
+  </ul>
+
+  <h2>Why shipmill</h2>
+  <div class="grid">
+    <div class="card"><h3>Issue to release</h3><p>Not just a pull request: one pipeline from a new issue to a published, deployed, and announced release</p></div>
+    <div class="card"><h3>Policy decides what ships</h3><p>One file, <code>.github/shipmill.toml</code>, sets the lanes (dev, rc, stable, hotfix), their triggers, and the gates that hold them</p></div>
+    <div class="card"><h3>You stay in control</h3><p>Each stage runs at observe, propose, or act; one <code>shipmill-hold</code> issue stops everything, even from your phone</p></div>
+    <div class="card"><h3>GitHub is the database</h3><p>Issues, labels, pull requests, tags, and deployments hold all state; nothing lives outside your repository</p></div>
+    <div class="card"><h3>Releases you can trust</h3><p>CI runs on the exact release commit before it is tagged, and a stable release ships the code a pre-release already soaked</p></div>
+    <div class="card"><h3>Rollback built in</h3><p>Health checks, bake time, and promotion between environments; a failing deploy rolls back and opens an incident</p></div>
+  </div>
+
+  <h2>Quickstart</h2>
+  <p>From the root of a GitHub repository with a <code>CHANGELOG.md</code>, with <code>gh</code>, <code>uv</code>, and Claude Code installed:</p>
+  <pre><code>claude plugin marketplace add shipmill/shipmill &amp;&amp; claude plugin install shipmill@shipmill &amp;&amp; claude "/shipmill:shipmill-setup"</code></pre>
+  <p>The setup skill inspects the repository, asks which lanes to run, and opens a pull request that wires it all, in dry-run mode until you switch releases on. Prefer to set it up by hand? Read the <a href="https://github.com/shipmill/shipmill/blob/main/docs/install.md">install guide</a>.</p>
+
+  <footer>MIT licensed. shipmill releases itself with its own workflows. <a href="https://github.com/shipmill/shipmill/blob/main/CHANGELOG.md">Changelog</a></footer>
+</main>
 </body>
 </html>
