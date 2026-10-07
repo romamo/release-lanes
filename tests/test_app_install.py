@@ -243,6 +243,6 @@ def test_s007_10_the_docs_document_app_install() -> None:
     root = Path(__file__).resolve().parents[1]
     install = (root / "docs" / "install.md").read_text(encoding="utf-8")
     skill = (root / "skills" / "shipmill-setup" / "SKILL.md").read_text(encoding="utf-8")
-    assert "shipmill app-install" in install and "$CR app-install" in skill
+    assert "$CR app-install" in install and "$CR app-install" in skill
     for doc in (install, skill):
         assert "Install App" in doc and "click" in doc

@@ -35,6 +35,18 @@ The commands below use:
 CR="uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill"
 ```
 
+Nothing puts `shipmill` on your `PATH`, so a bare `shipmill status` says `command not
+found`. To type the short name, add an alias to your shell's profile; it still fetches
+`@v0`, so it follows each release:
+
+```bash
+alias shipmill='uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill'
+```
+
+Don't `uv tool install` it instead: that pins a copy which drifts from the `@v0` the gate
+and the skills fetch, and the gate's headless sessions allow `Bash(uvx *)` but not a bare
+`shipmill`. Agents keep the full `uvx` form.
+
 ## 1. Install the skills
 
 In Claude Code, run these one at a time. The first adds the marketplace, the second
@@ -126,8 +138,8 @@ $CR plan --lane stable --dry-run
 - A workflow for each `dispatch` entry that runs on `workflow_dispatch` with a `tag` input
 - For each environment, a workflow that runs on `workflow_dispatch` with `tag` and
   `environment` inputs, and a job that sets `environment:`
-- When an environment uses `from` or `health`, `.github/workflows/operate.yml` (from
-  `shipmill init --operate`) granting `deployments: write` and `actions: write`, and
+- When an environment uses `from` or `health`, `.github/workflows/operate.yml` (which
+  `init --operate` writes) granting `deployments: write` and `actions: write`, and
   `issues: write` once an environment has `health` (for incidents) or a stage proposes
 - An `[operate]` section with known keys only, `rollback_after` in 1..20 and a non-empty
   `incident_label`
@@ -254,8 +266,8 @@ everything your login can.
 The quick way is one command:
 
 ```bash
-shipmill app-create --dry-run   # print the plan; create nothing
-shipmill app-create             # create it: one click on GitHub, then pick the repos
+$CR app-create --dry-run   # print the plan; create nothing
+$CR app-create             # create it: one click on GitHub, then pick the repos
 ```
 
 It finds the accounts your `gh` login administers (it needs the `read:org` scope: `gh auth
@@ -281,8 +293,8 @@ prints the `app_id = <id>` line for step 4. Then go on at step 4.
 For a repo connected later, or in another account:
 
 ```bash
-shipmill app-install                 # the checkout's repo, with [agents] app_id
-shipmill app-install acme/web beta/x # or name them
+$CR app-install                 # the checkout's repo, with [agents] app_id
+$CR app-install acme/web beta/x # or name them
 ```
 
 shipmill never installs the App or adds a repo for you, since which accounts and repos get it

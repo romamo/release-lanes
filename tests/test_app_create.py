@@ -381,7 +381,7 @@ def test_s006_16_the_docs_document_app_create() -> None:
     root = Path(__file__).resolve().parents[1]
     install = (root / "docs" / "install.md").read_text(encoding="utf-8")
     skill = (root / "skills" / "shipmill-setup" / "SKILL.md").read_text(encoding="utf-8")
-    assert "shipmill app-create --dry-run" in install and "$CR app-create --dry-run" in skill
+    assert "$CR app-create --dry-run" in install and "$CR app-create --dry-run" in skill
     for doc in (install, skill):
         assert "read:org" in doc and "--public" in doc and "--private" in doc
     assert "| Permission | Access | Why |" in install  # the manual steps stay as the fallback
