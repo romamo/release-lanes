@@ -16,10 +16,13 @@ Releases (.github/shipmill.toml):
 Agents (the config's [agents] section, read by `shipmill gate`):
   AGENTS_MISSING   no [agents] section: the gate has no prompt. Fine when agents run
                    only on demand
-  AGENTS_NO_APP    a prompt and mode = "headless" but no app_id: needs-decision
-                   comments post as the host's gh login, so GitHub won't notify it;
-                   the gate's desktop notifications only. Counted as done
-  AGENTS_OK        a section with a prompt
+  AGENTS_NO_APP    a prompt but no app_id, in either mode: no App is connected, so
+                   sessions write as the host's gh login (their PRs, comments, and
+                   commits read as the user's, who can't approve them, and in
+                   headless mode GitHub won't notify them of a needs-decision
+                   mention). The gate still runs; shipmill-setup's step 3 under The
+                   gate connects one (D-19). --fix leaves it: it needs the user
+  AGENTS_OK        a section with a prompt and app_id
 
 Plugin (.claude/settings.json, so every session in the repo loads the skills):
   PLUGIN_MISSING   shipmill@shipmill is not enabled; --fix adds the marketplace and
@@ -39,9 +42,10 @@ on GitHub retargeting a stacked PR when the branch under it is deleted):
   BRANCH_DELETE_OFF  merged PR branches stay on GitHub; --fix turns the setting on
   BRANCH_DELETE_ON   GitHub deletes a PR's branch when it merges
 
-Exit 0 when every row is RELEASE_READY, AGENTS_OK, AGENTS_NO_APP, PLUGIN_OK, LABELS_OK,
-or BRANCH_DELETE_ON, 1 otherwise, 2 on bad input, a malformed settings.json, both config
-files, or a git or gh failure (a failed read of the repo setting never reads as off).
+Exit 0 when every row is RELEASE_READY, AGENTS_OK, PLUGIN_OK, LABELS_OK, or
+BRANCH_DELETE_ON, 1 otherwise (AGENTS_NO_APP included), 2 on bad input, a malformed
+settings.json, both config files, or a git or gh failure (a failed read of the repo
+setting never reads as off).
 Needs git and an authenticated gh. Python 3.10+, standard library only.
 """
 
@@ -73,7 +77,12 @@ BLOCKER = ("b60205", "Holds the release lanes the policy names until closed")
 # Wanted only with [agents] mode = "headless" (spec 005): a session's question waits under it
 NEEDS_DECISION = "needs-decision"
 NEEDS_DECISION_LABEL = ("d876e3", "A shipmill session asked a question here; waits for a reply")
-DONE = {"RELEASE_READY", "AGENTS_OK", "AGENTS_NO_APP", "PLUGIN_OK", "LABELS_OK", "BRANCH_DELETE_ON"}
+# D-19: the gate runs without an App, but setup isn't done until one is connected
+NO_APP = (
+    "no app connected: sessions write as the host's gh login, so you can't approve their PRs"
+    " and GitHub won't notify you of their mentions; run shipmill-setup's step 3 (app-create)"
+)
+DONE = {"RELEASE_READY", "AGENTS_OK", "PLUGIN_OK", "LABELS_OK", "BRANCH_DELETE_ON"}
 
 
 @dataclass(frozen=True)
@@ -163,18 +172,14 @@ def release_row(repo_dir: Path) -> Row:
 
 def agents_row(repo_dir: Path) -> Row:
     """Presence only; `shipmill gate` and the release config loader validate the section.
-    Headless without app_id is done too: it works, but GitHub won't notify the maintainer of
-    a question posted as their own login, so only the gate's desktop notification does"""
+    A prompt without app_id is unfinished setup in either mode (D-19): the gate runs, but its
+    sessions write as the host's gh login"""
     section = agents_section(repo_dir)
     if section is None or not re.search(r"^prompt\s*=", section, re.MULTILINE):
         return Row("AGENTS_MISSING", f"no [agents] prompt in {CONFIG}: needed only for `shipmill gate`")
-    if is_headless(repo_dir) and not re.search(r"^app_id\s*=", section, re.MULTILINE):
-        return Row(
-            "AGENTS_NO_APP",
-            "headless without app_id: needs-decision comments post as you, so GitHub won't notify you;"
-            " desktop notifications only",
-        )
-    return Row("AGENTS_OK", "[agents] has a prompt")
+    if not re.search(r"^app_id\s*=", section, re.MULTILINE):
+        return Row("AGENTS_NO_APP", NO_APP)
+    return Row("AGENTS_OK", "[agents] has a prompt and app_id")
 
 
 # -- plugin --------------------------------------------------------------------------------

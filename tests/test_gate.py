@@ -267,6 +267,23 @@ def test_the_gate_reads_the_rows_watch_state_prints() -> None:
     }
 
 
+@pytest.mark.parametrize("prs", [False, True])
+def test_a_gate_without_an_app_starts_no_session(prs: bool) -> None:
+    # #204, D-19: GATE_NO_APP is for a person; as work, every tick on an app-less repo would launch
+    script = skills_dir() / "github-ship-watch" / "scripts" / "watch_state.py"
+    spec = importlib.util.spec_from_file_location("watch_state_no_app", script)
+    assert spec is not None and spec.loader is not None
+    ws = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = ws  # dataclasses look their module up by name
+    spec.loader.exec_module(ws)
+    rows = ws.gate_app_rows({"prompt": '"/github-issue-triage {repo}"'})
+    text = "\n".join(json.dumps(r.json(), sort_keys=True) for r in rows)
+    findings = parse_findings(text)
+    assert [(f.state, f.agent) for f in findings] == [("GATE_NO_APP", False)]
+    decision = decide(findings, [], None, NOW, DAY, prs)
+    assert decision.action is Action.QUIET and decision.work == ()
+
+
 def test_the_watch_script_is_found() -> None:
     assert (skills_dir() / "github-ship-watch" / "scripts" / "watch_state.py").is_file()
 

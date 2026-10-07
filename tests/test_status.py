@@ -1,5 +1,6 @@
 """Spec 008: `shipmill status`, github-ship-watch's report from the CLI"""
 
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -82,6 +83,19 @@ def test_s008_5_the_scripts_answer_is_the_exit_code(tmp_path: Path) -> None:
     root = checkout(tmp_path / "repo")
     assert status(root, Script(code=1)) == 1
     assert status(root, Script(code=0)) == 0
+
+
+def test_a_gate_without_an_app_makes_status_exit_1(tmp_path: Path) -> None:
+    # #204, D-19: watch_state.py exits 1 on any ACTION row, GATE_NO_APP among them, and status passes it on
+    spec = importlib.util.spec_from_file_location("watch_state_status", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    ws = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = ws  # dataclasses look their module up by name
+    spec.loader.exec_module(ws)
+    assert "GATE_NO_APP" in ws.ACTION
+    (row,) = ws.gate_app_rows({"prompt": '"/github-issue-triage {repo}"'})
+    root = checkout(tmp_path / "repo")
+    assert status(root, Script(code=1, stdout=row.text() + "\n")) == 1
 
 
 @pytest.mark.parametrize(("code", "stdout"), [(2, ""), (2, TABLE), (3, ""), (1, ""), (1, "\n")])

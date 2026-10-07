@@ -119,7 +119,7 @@ def test_a_local_copy_of_shipmills_workflows_counts(ss: ModuleType, tmp_path: Pa
 
 
 def test_a_gate_only_config_has_no_release(ss: ModuleType, tmp_path: Path) -> None:
-    write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "/github-issue-triage {repo}"\n')
+    write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "/github-issue-triage {repo}"\napp_id = 1\n')
     assert bot(ss, tmp_path) == "RELEASE_MISSING"
     assert ss.agents_row(tmp_path).state == "AGENTS_OK"
 
@@ -208,8 +208,8 @@ def test_a_gh_api_failure_fails_loudly(ss: ModuleType) -> None:
 
 HEADLESS = '[agents]\nprompt = "/github-issue-triage {repo}"\nmode = "headless"\n'
 NO_APP = (
-    "headless without app_id: needs-decision comments post as you, so GitHub won't notify you;"
-    " desktop notifications only"
+    "no app connected: sessions write as the host's gh login, so you can't approve their PRs"
+    " and GitHub won't notify you of their mentions; run shipmill-setup's step 3 (app-create)"
 )
 BASE_LABELS = {"postponed", "blocked", "shipmill-hold", "release-blocker"}
 
@@ -235,11 +235,11 @@ def test_s005_16_interactive_or_no_agents_doesnt_want_the_label(ss: ModuleType, 
     wanted = ss.wanted_labels(tmp_path)
     assert set(wanted) == BASE_LABELS
     assert ss.labels_row([], wanted).detail == "postponed, blocked, shipmill-hold, and the blocker label exist"
-    assert ss.agents_row(tmp_path).state in {"AGENTS_MISSING", "AGENTS_OK"}
+    assert ss.agents_row(tmp_path).state in {"AGENTS_MISSING", "AGENTS_NO_APP"}
 
 
 def test_s005_16_a_headless_mode_outside_agents_doesnt_count(ss: ModuleType, tmp_path: Path) -> None:
-    write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "x"\n[lanes.dev]\nmode = "headless"\n')
+    write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "x"\napp_id = 1\n[lanes.dev]\nmode = "headless"\n')
     assert set(ss.wanted_labels(tmp_path)) == BASE_LABELS
     assert ss.agents_row(tmp_path).state == "AGENTS_OK"
 
@@ -259,11 +259,12 @@ def test_s005_16_fix_creates_the_label_only_when_wanted(ss: ModuleType, tmp_path
     assert [call[3] for call in gh.calls] == ["release-blocker"]
 
 
-def test_s005_16_headless_without_app_id_reads_agents_no_app_counted_done(ss: ModuleType, tmp_path: Path) -> None:
+def test_s005_16_headless_without_app_id_reads_agents_no_app(ss: ModuleType, tmp_path: Path) -> None:
+    # D-19 supersedes S-005-16's "leaves the exit code as AGENTS_OK would": it is an action now
     write(tmp_path, ".github/shipmill.toml", HEADLESS)
     row = ss.agents_row(tmp_path)
     assert (row.state, row.detail) == ("AGENTS_NO_APP", NO_APP)
-    assert {"AGENTS_NO_APP", "AGENTS_OK"} <= ss.DONE  # the exit code reads it as it reads AGENTS_OK
+    assert "AGENTS_NO_APP" not in ss.DONE and "AGENTS_OK" in ss.DONE
     write(tmp_path, ".github/shipmill.toml", HEADLESS + "app_id = 123   # the App\n")
     assert ss.agents_row(tmp_path).state == "AGENTS_OK"
     write(tmp_path, ".github/shipmill.toml", HEADLESS + "# app_id = 123\n")
@@ -276,3 +277,15 @@ def test_s005_16_the_agents_mode_never_reads_as_the_release_mode(ss: ModuleType,
     write(tmp_path, ".github/shipmill.toml", 'mode = "release"\n' + HEADLESS)
     write(tmp_path, ".github/workflows/release.yml", CALLER)
     assert bot(ss, tmp_path) == "RELEASE_READY"
+
+
+@pytest.mark.parametrize("mode", ["", 'mode = "interactive"\n', 'mode = "headless"\n'])
+def test_a_gate_without_an_app_is_unfinished_in_either_mode(ss: ModuleType, tmp_path: Path, mode: str) -> None:
+    # #204, D-19: an interactive gate with no app_id read AGENTS_OK and went live posting as the maintainer
+    agents = '[agents]\nprompt = "/github-issue-triage {repo}"\n' + mode
+    write(tmp_path, ".github/shipmill.toml", agents)
+    row = ss.agents_row(tmp_path)
+    assert (row.state, row.detail) == ("AGENTS_NO_APP", NO_APP)
+    assert row.state not in ss.DONE  # so setup_state.py exits 1 on it
+    write(tmp_path, ".github/shipmill.toml", agents + "app_id = 7\n")
+    assert ss.agents_row(tmp_path).state == "AGENTS_OK"
