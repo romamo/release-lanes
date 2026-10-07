@@ -281,6 +281,12 @@ def test_s009_13_a_row_the_report_doesnt_place_is_printed_under_other() -> None:
     assert text[text.index("other") + 1] == "  WORKTREE_STALE /w kept 9 days"
 
 
+def test_s009_13_a_row_the_sessions_line_shows_is_not_under_other_too() -> None:
+    text = lines(facts(Row("HOST_UNKNOWN", "claude", "not on PATH", False)))
+    assert "  sessions     not read: not on PATH" in text
+    assert "other" not in text
+
+
 VERSION_JSON = {"state": VERSION.state, "subject": VERSION.subject, "detail": VERSION.detail, "agent": False}
 
 

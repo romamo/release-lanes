@@ -61,6 +61,7 @@ PLACED = {
     "TRIAGE_MODE",
     "SHIPMILL_VERSION",
     "GATE_NO_APP",  # D-19's row; the app line says the same
+    "HOST_UNKNOWN",  # the sessions line says it
 }
 
 # triage_state.py's issue states by the line they're listed on (S-009-7)

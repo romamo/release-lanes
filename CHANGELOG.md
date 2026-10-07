@@ -9,17 +9,11 @@ bot.
 
 ### Added
 
-- Spec 009: `shipmill status` prints a picture of the factory, a verdict (stuck, waits on
-  you, working, idle) with its reasons, then the repo, issues, pull requests, gate, and
-  shipmill blocks; `--rows` keeps the old table
 - `shipmill status` says whether the factory works or is stuck: a verdict (STUCK, WAITS ON
   YOU, WORKING, IDLE) with its reasons, then the local `main` against GitHub's and the
   version each is at, the open issues and pull requests (waiting on you with a GitHub link,
   to triage, to build), the gate's job, last run, last decision, mode and App, and one
   shipmill line with the CLI and plugin versions; `--rows` prints the old table (spec 009)
-- Spec 009 after review: a hold and a Mac without the gate's job wait on you rather than
-  read as stuck, a sleeping Mac's missed ticks don't count, a failed tick's `shipmill:` line
-  is the gate's last line, and the reads pass the App bot's `--bot-login` as the gate does
 
 ## [0.27.0] - 2026-10-07
 
