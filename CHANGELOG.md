@@ -7,6 +7,19 @@ bot.
 
 ## [Unreleased]
 
+### Fixed
+
+- Gate sessions could run a working copy of a skill instead of the released plugin: every
+  prompt shipmill writes or recommends (its own `[agents] prompt`, shipmill-setup's, and
+  the docs' prompts and `/loop` commands) named the skills without the plugin's prefix, so
+  a link or copy in `~/.claude/skills` or `~/.agents/skills` answered them. They now call
+  `/shipmill:<skill>`. github-ship-watch (and so `shipmill status`) and the setup checklist
+  report each such link or copy of a shipmill skill as `SKILL_SHADOWED`, with its fix
+  (remove it, or call the skill with the prefix); a link into the plugin's cache isn't
+  one. It is an action for a person, never an agent's. The checklist also reads an
+  `[agents] prompt` that calls a shipmill skill without the prefix as `AGENTS_UNPREFIXED`,
+  and a home folder with neither as `SKILLS_OK` (#236)
+
 ## [0.33.0] - 2026-10-07
 
 ### Added

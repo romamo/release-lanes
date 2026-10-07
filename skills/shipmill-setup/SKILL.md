@@ -273,7 +273,12 @@ or the tags are wrong; fix those, not the version.
    `PLUGIN_OUTDATED` (not done; `--fix` leaves it): user scope, the repo's folder, and the
    gate's checkout are separate rows, each with the command to run in its folder. Give the
    user those commands; for the repo's folder it is a reinstall, because `claude plugin
-   update` there picks the gate checkout's nested install (a Claude Code bug)
+   update` there picks the gate checkout's nested install (a Claude Code bug). A link or
+   copy of a shipmill skill in `~/.claude/skills` or `~/.agents/skills` reads
+   `SKILL_SHADOWED`, one row each with its fix (not done; `--fix` leaves it): a prompt's
+   bare `/<skill>` loads it in place of the plugin's. Give the user the fix (remove it, or
+   call the skill as `/shipmill:<skill>`); never delete anything in their home folder
+   yourself. A link into the plugin's cache is the plugin's own and isn't reported
 
    The last row is landing: `LANDING_OFF` when the config's `[agents]` has `prs = false`
    (or no `prs` key, which the config reads as false) and open non-draft pull requests
@@ -297,7 +302,7 @@ or the tags are wrong; fix those, not the version.
    | Option | Runs | Stops when |
    |---|---|---|
    | On demand | in the user's session, when they invoke a skill | the task is done |
-   | `/loop 30m /github-ship-watch <owner/repo> — watch and triage` | in this session | the session closes |
+   | `/loop 30m /shipmill:github-ship-watch <owner/repo> — watch and triage` | in this session | the session closes |
    | The gate (`shipmill gate` on launchd) | a new background session on this machine, only when the repo needs one, with its memory and repos | the job is removed |
    | A `/schedule` routine | in the cloud, with the user's computer off | the user deletes it |
 
@@ -330,15 +335,18 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
 7 days as WORKTREE_STALE, for a person to finish or remove.
 
 1. **Scope.** Ask what the session may do; the prompt carries it. Recommend triage without
-   merges for the first week: `/github-issue-triage {repo} triage the new issues; do not
-   merge`. "merge when green" lets it land PRs; then also set `prs = true`, so open PRs
-   count as work
+   merges for the first week: `/shipmill:github-issue-triage {repo} triage the new issues;
+   do not merge`. "merge when green" lets it land PRs; then also set `prs = true`, so open
+   PRs count as work. Name every shipmill skill with the plugin's prefix
+   (`/shipmill:<skill>`): a skill of the same name in `~/.claude/skills` or
+   `~/.agents/skills`, such as a link to a working copy, answers a bare `/<skill>` in place
+   of the released plugin (#236). The checklist reads a bare one as `AGENTS_UNPREFIXED`
 2. **Config.** Add the section to `.github/shipmill.toml` in a PR, and merge it before the
    job starts:
 
    ```toml
    [agents]
-   prompt = "/github-issue-triage {repo} triage the new issues; do not merge"
+   prompt = "/shipmill:github-issue-triage {repo} triage the new issues; do not merge"
    prs = false        # true when the prompt lands PRs
    retry_hours = 24   # unchanged findings start a new session after this
    notify = true      # a desktop notification when a session waits on you

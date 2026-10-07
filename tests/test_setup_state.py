@@ -451,3 +451,98 @@ def test_shipmills_own_config_lands_its_prs(ss: ModuleType) -> None:
     gh = FakeGh(pulls((1, False)))
     assert ss.landing_row("shipmill/shipmill", SCRIPT.parents[3], gh).state == "LANDING_OK"
     assert gh.calls == []
+
+
+ROOT = SCRIPT.parents[3]
+SKILLS = ["github-issue-resolve", "github-issue-triage", "github-pr-triage", "github-ship-watch", "product-intake"]
+
+
+@pytest.mark.parametrize(
+    ("prompt", "found"),
+    [
+        ("/github-issue-triage {repo} triage; then /github-pr-triage", ["github-issue-triage", "github-pr-triage"]),
+        ("/github-ship-watch {repo}. Then /github-ship-watch again", ["github-ship-watch"]),
+        ("/shipmill:github-issue-triage {repo} merge when green", []),
+        ("run skills/github-issue-triage/scripts/triage_state.py, see /github-issue-triage/x", []),
+        ("/github-issue-triager {repo} or /my-skill or github-issue-triage", []),
+        ("/other:github-issue-triage {repo}", []),
+    ],
+)
+def test_a_prompt_calls_a_shipmill_skill_only_by_its_slash_name(ss: ModuleType, prompt: str, found: list[str]) -> None:
+    assert ss.unprefixed(prompt, SKILLS) == found
+
+
+@pytest.mark.parametrize("quote", ['"', "'"])
+def test_an_unprefixed_prompt_is_unfinished_with_the_prefixed_fix(ss: ModuleType, tmp_path: Path, quote: str) -> None:
+    # #236: every gate prompt named /github-issue-triage, so a link in ~/.claude/skills ran in place of the plugin
+    prompt = f"{quote}/github-issue-triage {{repo}} triage the new issues; merge when green{quote}"
+    write(tmp_path, ".github/shipmill.toml", f"[agents]\nprompt = {prompt}\napp_id = 1\nmode = 'headless'\n")
+    (row,) = ss.prompt_rows(tmp_path, ss.watch_module())
+    assert (row.state, row.detail) == (
+        "AGENTS_UNPREFIXED",
+        "[agents] prompt calls /github-issue-triage: a skill of that name in ~/.claude/skills or ~/.agents/skills"
+        " runs in place of the plugin's; write /shipmill:github-issue-triage",
+    )
+    assert row.state not in ss.DONE  # so setup_state.py exits 1 on it
+    assert ss.agents_row(tmp_path).state == "AGENTS_OK"  # its own row, beside the section's
+
+
+@pytest.mark.parametrize(
+    "text", ["", 'mode = "release"\n', "[agents]\nprs = true\n", '[agents]\nprompt = "/shipmill:github-pr-triage"\n']
+)
+def test_no_unprefixed_row_without_a_bare_call(ss: ModuleType, tmp_path: Path, text: str) -> None:
+    write(tmp_path, ".github/shipmill.toml", text)
+    assert ss.prompt_rows(tmp_path, ss.watch_module()) == []
+
+
+def test_a_malformed_config_fails_the_prompt_check(ss: ModuleType, tmp_path: Path) -> None:
+    write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "unclosed\n')
+    with pytest.raises(SystemExit) as exc:
+        ss.prompt_rows(tmp_path, ss.watch_module())
+    assert exc.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ".github/shipmill.toml",
+        "README.md",
+        "docs/install.md",
+        "docs/flow.md",
+        "docs/design/agent-modes.md",
+        "skills/shipmill-setup/SKILL.md",
+        "skills/github-ship-watch/SKILL.md",
+        "src/shipmill/init.py",
+    ],
+)
+def test_every_prompt_shipmill_writes_or_recommends_names_the_plugins_skills(ss: ModuleType, path: str) -> None:
+    # #236: the prompts in shipmill's config, setup, and docs call /shipmill:<skill>
+    text = (ROOT / path).read_text(encoding="utf-8")
+    assert ss.unprefixed(text, ss.watch_module().skill_names()) == []
+
+
+def test_shipmills_own_prompt_is_prefixed(ss: ModuleType) -> None:
+    assert ss.prompt_rows(ROOT, ss.watch_module()) == []
+
+
+def test_a_shadowing_link_in_the_home_folder_is_unfinished(ss: ModuleType, tmp_path: Path) -> None:
+    # #236: the checklist names each link with its fix, and never touches the real home folder
+    home, checkout = tmp_path / "home", tmp_path / "work" / "github-issue-triage"
+    checkout.mkdir(parents=True)
+    (checkout / "SKILL.md").write_text("---\nname: github-issue-triage\n---\n", encoding="utf-8")
+    (home / ".claude" / "skills").mkdir(parents=True)
+    link = home / ".claude" / "skills" / "github-issue-triage"
+    link.symlink_to(checkout)
+    (row,) = ss.skill_rows(home, ss.watch_module())
+    assert row.state == "SKILL_SHADOWED"
+    assert row.detail.startswith(f"github-issue-triage: {link} is a link to {checkout.resolve()}: ")
+    assert row.detail.endswith(f"remove it (rm {link}) or call the skill as /shipmill:github-issue-triage")
+    assert row.state not in ss.DONE
+    assert link.is_symlink()  # reported, never removed
+
+
+def test_a_home_folder_without_shadowing_skills_is_done(ss: ModuleType, tmp_path: Path) -> None:
+    (tmp_path / ".agents" / "skills" / "unrelated").mkdir(parents=True)
+    (row,) = ss.skill_rows(tmp_path, ss.watch_module())
+    assert row.state == "SKILLS_OK"
+    assert row.state in ss.DONE

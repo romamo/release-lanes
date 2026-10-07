@@ -30,7 +30,19 @@ Agents (the config's [agents] section, read by `shipmill gate`):
 
 The section reads as one row, the first that applies: AGENTS_MISSING, AGENTS_NO_APP,
 AGENTS_NO_MODE, then AGENTS_OK. Setup asks for the App and the mode together, so the
-one PR that sets app_id sets mode too.
+one PR that sets app_id sets mode too. One more row follows it when it applies:
+  AGENTS_UNPREFIXED  the prompt calls a shipmill skill as /<name>, not /shipmill:<name>: a
+                   skill of that name in ~/.claude/skills or ~/.agents/skills answers it in
+                   place of the plugin's (#236). The detail names the prefixed form to write.
+                   --fix leaves it: the config changes through a pull request
+
+Skills (the home folder's user skills, which shadow the plugin's by name):
+  SKILL_SHADOWED   a link or copy of a shipmill skill in ~/.claude/skills or ~/.agents/skills
+                   that doesn't resolve into the plugin's cache, one row each, as
+                   github-ship-watch's SKILL_SHADOWED reads it, with its fix: remove it, or
+                   call the skill as /shipmill:<name> (#236). --fix leaves it: it is the
+                   user's home folder
+  SKILLS_OK        none
 
 Plugin (.claude/settings.json, so every session in the repo loads the skills):
   PLUGIN_MISSING   shipmill@shipmill is not enabled; --fix adds the marketplace and
@@ -62,10 +74,11 @@ the config loader reads it, so a section without the key has prs = false):
                merges when green, or land them by hand. --fix leaves it: it needs the user
   LANDING_OK   prs = true, no [agents] section, or no pull request waits to land
 
-Exit 0 when every row is RELEASE_READY, AGENTS_OK, PLUGIN_OK, LABELS_OK,
+Exit 0 when every row is RELEASE_READY, AGENTS_OK, PLUGIN_OK, SKILLS_OK, LABELS_OK,
 BRANCH_DELETE_ON, or LANDING_OK, 1 otherwise (AGENTS_NO_APP, AGENTS_NO_MODE,
-PLUGIN_OUTDATED, and LANDING_OFF included), 2 on bad input, a malformed settings.json, an
-[agents] prs that isn't a TOML boolean, both config files, a git or gh failure (a failed
+AGENTS_UNPREFIXED, PLUGIN_OUTDATED, SKILL_SHADOWED, and LANDING_OFF included), 2 on bad
+input, a malformed settings.json or config (its [agents] read as github-ship-watch reads
+it), an [agents] prs that isn't a TOML boolean, both config files, a git or gh failure (a failed
 read of the repo setting never reads as off), or a malformed `claude plugin list --json`.
 Needs git and an authenticated gh; claude on PATH to read the plugin's installs. Python
 3.10+, standard library only.
@@ -113,7 +126,9 @@ NO_MODE = (
     'no mode in [agents]: the gate runs interactive by default, which nobody chose; set mode = "interactive"'
     ' or mode = "headless" (shipmill-setup\'s step 4)'
 )
-DONE = {"RELEASE_READY", "AGENTS_OK", "PLUGIN_OK", "LABELS_OK", "BRANCH_DELETE_ON", "LANDING_OK"}
+DONE = {"RELEASE_READY", "AGENTS_OK", "PLUGIN_OK", "SKILLS_OK", "LABELS_OK", "BRANCH_DELETE_ON", "LANDING_OK"}
+# the plugin's name: a prompt calls its skills as /shipmill:<name> (#236)
+PREFIX = PLUGIN.partition("@")[0]
 
 
 @dataclass(frozen=True)
@@ -210,6 +225,43 @@ def agents_row(repo_dir: Path) -> Row:
     return Row("AGENTS_OK", "[agents] has a prompt, app_id, and mode")
 
 
+def unprefixed(prompt: str, names: list[str]) -> list[str]:
+    """The skills in names the prompt calls as /<name>, in order, each once. /shipmill:<name>,
+    a path such as skills/<name>/, and a longer name that starts with one are no call"""
+    if not names:
+        return []
+    alternatives = "|".join(re.escape(name) for name in names)
+    found = re.findall(rf"(?<![\w/:.-])/({alternatives})(?![\w/-])", prompt)
+    return list(dict.fromkeys(found))
+
+
+def prompt_rows(repo_dir: Path, ws: ModuleType) -> list[Row]:
+    """AGENTS_UNPREFIXED when the [agents] prompt calls a shipmill skill without the plugin's
+    prefix (#236); the config's [agents] is read as watch_state.py reads it"""
+    config = config_file(repo_dir)
+    if config is None:
+        return []
+    try:
+        table = ws.agents_table(config.read_text(encoding="utf-8"), config)
+    except ws.Refused as refused:
+        fail(str(refused).removeprefix("error: "))
+    raw = (table or {}).get("prompt")
+    if raw is None or not raw.startswith('"'):  # no prompt, or not a string: the gate refuses it
+        return []
+    found = unprefixed(json.loads(raw), ws.skill_names())
+    if not found:
+        return []
+    calls = ", ".join(f"/{name}" for name in found)
+    fixed = ", ".join(f"/{PREFIX}:{name}" for name in found)
+    return [
+        Row(
+            "AGENTS_UNPREFIXED",
+            f"[agents] prompt calls {calls}: a skill of that name in ~/.claude/skills or ~/.agents/skills"
+            f" runs in place of the plugin's; write {fixed}",
+        )
+    ]
+
+
 # -- plugin --------------------------------------------------------------------------------
 
 
@@ -256,15 +308,22 @@ def watch_module() -> ModuleType:
     return module
 
 
-def outdated_installs(repo: str, repo_dir: Path) -> list[str]:
+def outdated_installs(repo: str, repo_dir: Path, ws: ModuleType) -> list[str]:
     """watch_state.py's SHIPMILL_OUTDATED rows, each as `<subject>: <detail>`: the installs that
     apply to the repo's folder and the gate's checkout, with the fix to run in each"""
-    ws = watch_module()
     try:
         rows = ws.shipmill_rows(repo, repo_dir)
     except ws.Refused as refused:
         fail(str(refused).removeprefix("error: "))
     return [f"{r.subject}: {r.detail}" for r in rows if r.state == "SHIPMILL_OUTDATED"]
+
+
+def skill_rows(home: Path, ws: ModuleType) -> list[Row]:
+    """watch_state.py's SKILL_SHADOWED rows for the home folder, each as `<name>: <detail>`,
+    or SKILLS_OK (#236)"""
+    rows = [Row(r.state, f"{r.subject}: {r.detail}") for r in ws.shadow_rows(home, ws.skill_names())]
+    none = "no link or copy in ~/.claude/skills or ~/.agents/skills shadows a shipmill skill"
+    return rows or [Row("SKILLS_OK", none)]
 
 
 def enable_plugin(settings: dict[str, Any]) -> dict[str, Any]:
@@ -431,10 +490,13 @@ def main() -> int:
         create_labels(args.repo, wanted, missing)
         missing = []
 
+    ws = watch_module()
     rows = [
         release_row(repo_dir),
         agents_row(repo_dir),
-        *plugin_rows(settings, lambda: outdated_installs(args.repo, repo_dir)),
+        *prompt_rows(repo_dir, ws),
+        *plugin_rows(settings, lambda: outdated_installs(args.repo, repo_dir, ws)),
+        *skill_rows(Path.home(), ws),
         labels_row(missing, wanted),
         branch_delete_row(args.repo, args.fix),
         landing_row(args.repo, repo_dir),

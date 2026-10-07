@@ -125,6 +125,13 @@ shipmill on this host (from `claude plugin list --json` and `claude plugin marke
                   `claude plugin update` picks the nested one (a Claude Code bug), so the
                   fix reinstalls the folder's own instead: an action for a person, never an
                   agent's
+  SKILL_SHADOWED  one row per link or copy of a shipmill skill (a folder name under skills/)
+                  in ~/.claude/skills or ~/.agents/skills, a folder with a SKILL.md (a broken
+                  link or a plain file loads as nothing), that doesn't resolve into the
+                  plugin's cache (~/.claude/plugins/cache/shipmill): a prompt's /<name> loads
+                  it, not the plugin's (#236). The fix, removing it or calling the skill as
+                  /shipmill:<name>, is a person's in their home folder: an action, never an
+                  agent's
 
 --incident-label names the label the repo's incidents carry, in place of the config's
 [operate] incident_label (fleet.py passes a fleet file's incident_label this way).
@@ -137,8 +144,8 @@ item is in no agent row, so it neither starts a session nor changes the gate's f
 Holds and incidents lead the report. Exit 0 when nothing needs action, 1 when any
 BOT_FAILED, BOT_STALLED, WORK_BRANCH_STALE, NOT_PUBLISHED, UNANNOUNCED, ISSUES,
 OPERATE_FAILED, UNHEALTHY, PROMOTION_DUE, INCIDENT_OPEN, POSTMORTEM_DUE, NEEDS_DECISION,
-BRANCH_DELETE_OFF, SHIPMILL_OUTDATED, or GATE_NO_APP row is present, 2 on bad input or a git,
-gh, or uvx failure (a failing `shipmill plan` or `shipmill worktrees`).
+BRANCH_DELETE_OFF, SHIPMILL_OUTDATED, GATE_NO_APP, or SKILL_SHADOWED row is present, 2 on bad
+input or a git, gh, or uvx failure (a failing `shipmill plan` or `shipmill worktrees`).
 Needs git, an authenticated gh, and uvx (for a shipmill bot's plan and worktrees; `shipmill
 worktrees` needs claude on PATH too, to see the live sessions). Python 3.10+,
 standard library only.
@@ -202,6 +209,10 @@ GATE_SESSION = "shipmill "  # shipmill gate names its sessions "shipmill <owner/
 LAUNCH_AGENTS = Path.home() / "Library" / "LaunchAgents"
 SHIPMILL_REPO = "shipmill/shipmill"  # where shipmill releases
 PLUGIN = "shipmill@shipmill"  # the Claude Code plugin, in its marketplace
+# the home folder's user skills: one named like a shipmill skill answers a prompt's /<name>
+# in place of the plugin's /shipmill:<name> (#236)
+USER_SKILLS = (Path(".claude/skills"), Path(".agents/skills"))
+PLUGIN_CACHE = Path(".claude/plugins/cache") / PLUGIN.partition("@")[2]  # the plugin's own copies, by version
 GATE_CHECKOUT = Path("tmp/shipmill-gate")  # where shipmill-setup puts the gate's checkout
 # the gate log's decision lines: QUIET, LAUNCH, RUNNING, WAITING, UNCHANGED, HELD, or an error
 GATE_DECISION = re.compile(r"^(?:[A-Z]+|error): ")
@@ -222,6 +233,7 @@ ACTION = {
     "BRANCH_DELETE_OFF",
     "SHIPMILL_OUTDATED",
     "GATE_NO_APP",
+    "SKILL_SHADOWED",
 }
 # the states whose row needs an agent: --json marks each row's "agent" from this, and
 # shipmill gate starts a session on those rows (SKILL.md's repair table says what it does)
@@ -1428,6 +1440,33 @@ def shipmill_rows(repo: str, repo_dir: Path) -> list[Row]:
     return plugin_rows(plugins, claude_json(claude, "plugin", "marketplace", "list"), latest, folders, gates)
 
 
+def skill_names() -> list[str]:
+    """shipmill's skills: the folders beside this skill's that hold a SKILL.md"""
+    return sorted(path.parent.name for path in SKILLS.glob("*/SKILL.md"))
+
+
+def shadow_rows(home: Path, names: list[str]) -> list[Row]:
+    """The links and copies of shipmill's skills, named in names, in the home folder's user
+    skills (~/.claude/skills, ~/.agents/skills): a prompt's /<name> loads one of them in place
+    of the plugin's (#236). A link into the plugin's cache is the plugin's own. A person's fix
+    in their home folder, never an agent's. Only a folder with a SKILL.md loads as a skill, so
+    a broken link or a plain file of that name shadows nothing"""
+    cache = (home / PLUGIN_CACHE).resolve()
+    rows = []
+    for folder in USER_SKILLS:
+        for name in names:
+            path = home / folder / name
+            if not (path / "SKILL.md").is_file():
+                continue
+            target = path.resolve()
+            if target == cache or cache in target.parents:
+                continue
+            what, remove = (f"a link to {target}", f"rm {path}") if path.is_symlink() else ("a copy", f"rm -r {path}")
+            fix = f"remove it ({remove}) or call the skill as /shipmill:{name}"
+            rows.append(Row("SKILL_SHADOWED", name, f"{path} is {what}: /{name} loads it, not the plugin's; {fix}"))
+    return rows
+
+
 # -- repository settings -------------------------------------------------------------------
 
 
@@ -1550,6 +1589,7 @@ def main() -> int:
     rows += active_rows(fetch_active(args.repo), now)
     rows += agent_rows(args.repo, repo_dir, now)
     rows += shipmill_rows(args.repo, repo_dir)
+    rows += shadow_rows(Path.home(), skill_names())
     for row in ordered(rows):
         print(json.dumps(row.json(), sort_keys=True) if args.json else row.text())
     return 1 if any(r.state in ACTION for r in rows) else 0

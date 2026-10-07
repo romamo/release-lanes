@@ -17,7 +17,7 @@ Start each one with its slash command or with plain wording. The words you use s
 ## Everything in one message
 
 ```
-/github-issue-triage <owner/repo> — triage the new issues, merge the PRs when they're green, then tag <X>
+/shipmill:github-issue-triage <owner/repo> — triage the new issues, merge the PRs when they're green, then tag <X>
 ```
 
 - **"triage"** runs github-issue-triage: verdicts, comments and labels, and a PR for each "implement"
@@ -28,18 +28,18 @@ Plain wording works the same, and the repo can be left out inside its checkout: 
 
 ## One stage at a time
 
-`$S` below is the `skills` folder of this repo (or `~/.agents/skills`, which links to it); run the scripts with `uv run --no-project python` or plain `python3` (3.10+).
+`$S` below is the `skills` folder of this repo; run the scripts with `uv run --no-project python` or plain `python3` (3.10+).
 
 | Stage | Say | Stops at |
 |---|---|---|
 | Status only | `python3 $S/github-issue-triage/scripts/triage_state.py <owner/repo>` | A list of each issue's state; nothing changes |
 | Feedback status | `python3 $S/product-intake/scripts/intake_state.py <owner/repo>` | Each opportunity's state and the requests no opportunity groups yet; nothing changes |
-| Group feedback | `/product-intake <owner/repo>` or "group the feature requests" | Opportunity issues opened or updated; the accept or decline is yours |
+| Group feedback | `/shipmill:product-intake <owner/repo>` or "group the feature requests" | Opportunity issues opened or updated; the accept or decline is yours |
 | Roadmap status | `python3 $S/product-intake/scripts/roadmap_state.py <owner/repo>` | Milestone progress, WIP against `[roadmap] wip`, accepted opportunities in no milestone, and the next milestone that fits; nothing changes |
-| Triage the backlog | `/github-issue-triage <owner/repo>` or "triage the new issues" | Comments, labels, and open PRs; nothing merged |
-| One issue | `/github-issue-resolve 57` or "fix #57" | One PR and the issue comment |
+| Triage the backlog | `/shipmill:github-issue-triage <owner/repo>` or "triage the new issues" | Comments, labels, and open PRs; nothing merged |
+| One issue | `/shipmill:github-issue-resolve 57` or "fix #57" | One PR and the issue comment |
 | Triage one issue only | "triage #57, don't fix" | The verdict comment |
-| Review PRs | `/github-pr-triage` or "review open PRs" | Verdicts and local fixes, no pushes |
+| Review PRs | `/shipmill:github-pr-triage` or "review open PRs" | Verdicts and local fixes, no pushes |
 | Merge | "merge #75" or "merge the PRs when they're green" | Merged on green CI |
 | Release | "tag <X>" | Readiness check, tag, publish, notices |
 | Tell reporters only | `python3 $S/github-pr-triage/scripts/shipped.py <owner/repo> <prev> <tag> --install '<install cmd>'` | Prints the plan; add `--post` to comment |
@@ -81,7 +81,7 @@ The bump, registry, and install commands per ecosystem (Python, Node, Rust, Go, 
 `github-ship-watch` is the routine: each pass checks the release runs, the newest releases, and the issue intake, finishes what the policy already decided (a stalled lane, a flaky release job, the shipped notices), and hands flagged issues to triage when asked.
 
 - `shipmill gate` on launchd: a new background session on this machine only when the repo needs one, with the prompt from the config's `[agents]` section; quiet ticks make no model call (shipmill-setup, The gate)
-- `/loop 30m /github-ship-watch <owner/repo> — watch and triage`: every 30 minutes in this session
+- `/loop 30m /shipmill:github-ship-watch <owner/repo> — watch and triage`: every 30 minutes in this session
 - `/schedule`: a cloud routine, with the prompt below that clones shipmill
 - Status only: `python3 $S/github-ship-watch/scripts/watch_state.py <owner/repo>` (exit 1 when anything needs action)
 

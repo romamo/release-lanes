@@ -658,6 +658,7 @@ REPORT_ROWS = [
     "GATE_NO_APP",
     "SHIPMILL_VERSION",
     "SHIPMILL_OUTDATED",
+    "SKILL_SHADOWED",
     "POSTMORTEM_DUE",
     "BOT_OK",
     "PUBLISHED",
@@ -940,6 +941,74 @@ def install(scope: str, version: str, where: str | None = None, plugin: str = "s
 
 def registry(*entries: dict[str, str]) -> list[dict[str, str]]:
     return [*entries, install("user", "0.1.0", plugin="other@x")]
+
+
+SHIPMILL_SKILLS = [
+    "github-issue-resolve",
+    "github-issue-triage",
+    "github-pr-triage",
+    "github-ship-watch",
+    "product-intake",
+    "shipmill-setup",
+]
+
+
+def test_shipmills_skills_are_the_folders_with_a_skill_md(ws: ModuleType) -> None:
+    assert ws.skill_names() == SHIPMILL_SKILLS
+
+
+def test_a_link_and_a_copy_in_the_users_skills_shadow_the_plugins(ws: ModuleType, tmp_path: Path) -> None:
+    # #236: gate sessions ran ~/.claude/skills/github-issue-triage, a link to a working copy, not the plugin
+    home, checkout = tmp_path / "home", tmp_path / "src" / "shipmill" / "skills" / "github-issue-triage"
+    checkout.mkdir(parents=True)
+    (checkout / "SKILL.md").write_text("---\nname: github-issue-triage\n---\n", encoding="utf-8")
+    (home / ".claude" / "skills").mkdir(parents=True)
+    (home / ".claude" / "skills" / "github-issue-triage").symlink_to(checkout)
+    copy = home / ".agents" / "skills" / "github-pr-triage"
+    copy.mkdir(parents=True)
+    (copy / "SKILL.md").write_text("---\nname: github-pr-triage\n---\n", encoding="utf-8")
+    rows = ws.shadow_rows(home, SHIPMILL_SKILLS)
+    link = home / ".claude" / "skills" / "github-issue-triage"
+    assert [(r.state, r.subject, r.detail) for r in rows] == [
+        (
+            "SKILL_SHADOWED",
+            "github-issue-triage",
+            f"{link} is a link to {checkout.resolve()}: /github-issue-triage loads it, not the plugin's;"
+            f" remove it (rm {link}) or call the skill as /shipmill:github-issue-triage",
+        ),
+        (
+            "SKILL_SHADOWED",
+            "github-pr-triage",
+            f"{copy} is a copy: /github-pr-triage loads it, not the plugin's;"
+            f" remove it (rm -r {copy}) or call the skill as /shipmill:github-pr-triage",
+        ),
+    ]
+    assert all(r.json()["agent"] is False for r in rows)
+    assert "SKILL_SHADOWED" in ws.ACTION and "SKILL_SHADOWED" not in ws.AGENT
+
+
+def test_a_link_into_the_plugins_cache_and_other_skills_shadow_nothing(ws: ModuleType, tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    cached = home / ".claude/plugins/cache/shipmill/shipmill/0.33.0/skills/github-ship-watch"
+    cached.mkdir(parents=True)
+    skills = home / ".claude" / "skills"
+    skills.mkdir(parents=True)
+    (skills / "github-ship-watch").symlink_to(cached)
+    (skills / "my-own-skill").mkdir()
+    (skills / "github-issue-triage-notes").mkdir()
+    assert ws.shadow_rows(home, SHIPMILL_SKILLS) == []
+    assert ws.shadow_rows(tmp_path / "empty-home", SHIPMILL_SKILLS) == []
+
+
+def test_a_broken_link_a_file_and_a_folder_without_skill_md_shadow_nothing(ws: ModuleType, tmp_path: Path) -> None:
+    # none of them loads as a skill, so a SKILL_SHADOWED row for one would hold status at exit 1 for nothing
+    home = tmp_path / "home"
+    skills = home / ".claude" / "skills"
+    skills.mkdir(parents=True)
+    (skills / "github-issue-triage").symlink_to(tmp_path / "gone")
+    (skills / "github-ship-watch").write_text("not a skill\n", encoding="utf-8")
+    (skills / "github-pr-triage").mkdir()
+    assert ws.shadow_rows(home, SHIPMILL_SKILLS) == []
 
 
 MARKETPLACE = [{"name": "shipmill", "source": "github", "repo": "shipmill/shipmill"}]

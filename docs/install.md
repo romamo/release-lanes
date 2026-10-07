@@ -93,6 +93,12 @@ For a checkout of shipmill you edit, or for Codex, link the skill folders instea
 for s in ~/src/shipmill/skills/*/; do ln -sfn "$s" ~/.agents/skills/; done
 ```
 
+A linked skill answers its name without the plugin's prefix on this machine in place of
+the plugin's, so a gate session whose prompt leaves the prefix out runs the checkout,
+behind or on a feature branch. Prompts call the plugin's as `/shipmill:<skill>`, and `shipmill status`
+and the setup checklist report each link or copy in `~/.claude/skills` or
+`~/.agents/skills` as `SKILL_SHADOWED`, with its fix.
+
 ## 2. Set up release lanes
 
 Work on a branch; everything below lands in one pull request.
@@ -200,7 +206,7 @@ you start them:
 | Option | Runs | Stops when |
 |---|---|---|
 | On demand | in your session, when you invoke a skill | the task is done |
-| `/loop 30m /github-ship-watch <owner/repo> — watch and triage` | in an open session | the session closes |
+| `/loop 30m /shipmill:github-ship-watch <owner/repo> — watch and triage` | in an open session | the session closes |
 | The gate | a new background session on your machine, only when the repo needs one | you remove the job |
 | A `/schedule` routine | in the cloud, with your machine off | you delete it |
 
@@ -224,7 +230,7 @@ the details.
 
    ```toml
    [agents]
-   prompt = "/github-issue-triage {repo} triage the new issues; do not merge"
+   prompt = "/shipmill:github-issue-triage {repo} triage the new issues; do not merge"
    prs = false        # true once the prompt says "merge when green"
    retry_hours = 24   # unchanged findings start a new session after this
    notify = true      # a desktop notification when a session waits on you
