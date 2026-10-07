@@ -1,6 +1,6 @@
 # S-010: Publish shipmill to PyPI on each stable and hotfix release
 
-status: approved
+status: built
 
 ## Problem
 
@@ -89,4 +89,16 @@ tool install` fetch it when needed, while `pip install` on an older interpreter 
 
 ## Issues
 
+- shipmill/shipmill#224: S-010-1, S-010-2, S-010-3, S-010-4, S-010-5
+
 ## Verification
+
+Checked on main plus #224's PR, locally, and by the tests `specs.py coverage --spec 010`
+lists (all passing). The upload itself, and the OIDC exchange with pypi.org, can't run
+before the maintainer sets up the trusted publisher and the `pypi` environment:
+
+- S-010-1: read `publish.yml`: `on:` holds only `workflow_dispatch` with a required `tag`, its one job sets `environment: pypi` and `permissions:` with `id-token: write` and `contents: read` and nothing at the workflow level, and the file names no `secrets`; actionlint passes on it; holds
+- S-010-2: ran the two check steps' scripts under bash: `v1.2`, `1.2.3`, `v1.2.3rc1`, and `main` each exited 1 printing `::error::<tag> is not a vX.Y.Z release tag`, `v12.0.3` passed; against a `pyproject.toml` at 0.29.0, `v0.30.0` exited 1 with `::error::pyproject.toml at v0.30.0 holds version 0.29.0, not 0.30.0` and `v0.29.0` passed; the tag check is the first step, before checkout; holds
+- S-010-3: the checkout step takes `ref: refs/tags/${{ inputs.tag }}`; `uv build` gave `shipmill-0.29.0.tar.gz` and `shipmill-0.29.0-py3-none-any.whl`, and the smoke step's script, run as written against that `dist/`, made a fresh venv, installed only the wheel, ran `shipmill --help` (exit 0), and found both state scripts under `site-packages/shipmill/skills`; the last step runs `uv publish --trusted-publishing always --check-url https://pypi.org/simple/`, which this uv (0.12.5) accepts; holds, the upload unverified
+- S-010-4: `uv run shipmill --repo . doctor` on the branch passed every line, including `publish.yml (stable)` and `publish.yml (hotfix) runs on workflow_dispatch with a 'tag' input` after `move-major-tag.yml (stable)`; `Policy.load` gives no dispatch to any other lane; holds
+- S-010-5: `docs/install.md` says shipmill is published to PyPI on each stable and hotfix release, that it needs Python 3.14, that `uvx` and `uv tool install` fetch that interpreter, and that `pip install` on an older Python fails; holds
