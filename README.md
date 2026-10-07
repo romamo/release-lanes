@@ -51,10 +51,12 @@ Prerequisites, every step, and how to pause or remove it: [docs/install.md](docs
    Merge, run the Release workflow by hand with dry-run on, read the release commit in
    its summary, then set `mode = "release"`
 
-   From then on, `shipmill status` answers "is anything stuck?" from the checkout. It starts
-   with a verdict (STUCK, WAITS ON YOU, WORKING, or IDLE) and its reasons, then shows the
-   local `main` against GitHub's, the issues and pull requests that wait on you (with a
-   link), the gate's last run and mode, and the shipmill version. It exits 1 when a row
+   From then on, `shipmill status` answers "is anything stuck?" from the checkout in a
+   short summary: the repo's link and a verdict (STUCK, WAITS ON YOU, WORKING, or IDLE),
+   then one line per thing worth knowing, each reason for the verdict among them: the
+   local `main` against GitHub's and its version, each issue or pull request that waits
+   on you with its own link, the open issues and pull requests, the gate (`OK` or its
+   problem), the mode, the GitHub App, and the shipmill version. It exits 1 when a row
    needs action, so a CI job can gate on it; `--rows` and `--json` print the raw rows
 
 3. **The agents' schedule** (optional): add an `[agents]` section to the config, then run

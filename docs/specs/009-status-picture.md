@@ -1,6 +1,6 @@
 # S-009: shipmill status says whether the factory works or is stuck
 
-status: approved
+status: built
 
 ## Problem
 
@@ -82,7 +82,9 @@ Always shown, in this order around the item lines:
   GitHub's default branch and `+N` for the commits since (`git describe --tags --long`),
   or `no release yet`; then `release ok`, or in its place the release problem: the
   `BOT_FAILED`, `BOT_STALLED`, `WORK_BRANCH_STALE`, `NOT_PUBLISHED`, or `UNANNOUNCED` state
-  with its tag or a link to the failed run. The default branch is `gh repo view`'s
+  with its tag or a link to the failed run. A repo with no release workflow or policy
+  (`BOT_NONE`) reads `no release workflow` in place of `release ok`, which is no reason
+  for a verdict. The default branch is `gh repo view`'s
 - **open issues**: the count of open issues and the link to GitHub's issue list
   (`https://github.com/<owner>/<name>/issues`), or `none`
 - **pull requests**: the count of open pull requests (`gh pr list`) and the link to the
@@ -131,9 +133,9 @@ label on the first line of each group:
 ### Reads
 
 Beyond `watch_state.py`, the report reads, all read-only: `triage_state.py <repo> --json`
-(the bundled script), `gh pr list`, `gh repo view`, `gh release view`, the checkout's git
-refs and tags, the launchd plist, `launchctl print`, `sysctl -n kern.waketime`, the gate's
-log, and, with an App, the App check's GitHub reads. It still writes nothing (spec 008).
+(the bundled script), `gh pr list`, `gh repo view`, the checkout's git refs and tags, the
+launchd plist, `launchctl print`, `sysctl -n kern.waketime`, the gate's log, and, with an
+App, the App check's GitHub reads. It still writes nothing (spec 008).
 
 The App check runs first: when it passes, both `watch_state.py` and `triage_state.py` read
 with `--bot-login <slug>[bot]`, as the gate does, so a needs-decision question the App's
@@ -234,4 +236,36 @@ leaves out `--trusted-only`, so a person sees every item (spec 008).
 
 ## Issues
 
+- shipmill/shipmill#211: S-009-1, S-009-2, S-009-3, S-009-4, S-009-5, S-009-6, S-009-7, S-009-8, S-009-9, S-009-10, S-009-11, S-009-12, S-009-13, S-009-14, S-009-15
+- shipmill/shipmill#212: S-009-16, S-009-17, S-009-18, S-009-19, S-009-20, S-009-21, S-009-22, S-009-23
+
 ## Verification
+
+Checked on main plus #212's PR with `tests/test_status_picture.py`, whose facts are built
+in the test (rows, issues, pull requests, the job, the App), and the CLI tests run against
+fakes of `watch_state.py`, `triage_state.py`, and `gh`. `shipmill status` was also run for
+real on this repo on 2026-10-07: WORKING, with the summary's lines as Each line names them.
+
+- S-009-1: dropped in #212
+- S-009-2: `test_s009_2_a_broken_pipeline_row_is_stuck`, passing
+- S-009-3: `test_s009_3_a_gate_that_isnt_ticking_is_stuck`, `test_s009_3_a_gate_after_sleep_or_before_its_first_run_isnt_stuck`, `test_s009_3_no_job_on_this_host_waits_on_you_rather_than_stuck`, `test_s009_3_the_log_failure_after_a_decision_is_its_last_line`, and `test_s009_3_a_traceback_shows_its_error_and_a_named_exit_code_is_still_a_number`, passing
+- S-009-4: `test_s009_4_a_failed_app_check_is_stuck_and_shown` and `test_s009_4_an_app_key_missing_on_this_host_is_not_a_failure`, passing
+- S-009-5: `test_s009_5_what_a_person_owes_waits_on_you`, passing
+- S-009-6: `test_s009_6_agent_work_or_a_gate_session_or_a_run_is_working`, passing
+- S-009-7: dropped in #212
+- S-009-8: dropped in #212
+- S-009-9: dropped in #212
+- S-009-10: dropped in #212
+- S-009-11: dropped in #212
+- S-009-12: dropped in #212
+- S-009-13: `test_s009_13_a_row_the_report_doesnt_place_is_printed_under_other` and `test_s009_13_a_row_the_sessions_line_shows_is_not_under_other_too`, passing
+- S-009-14: `test_s009_14_rows_json_and_the_exit_code_stay_spec_008s`, passing for exit 0 and 1
+- S-009-15: `test_s009_15_with_the_app_the_reads_pass_its_bot_login`, passing
+- S-009-16: `test_s009_16_the_heading_is_the_repo_its_link_and_the_verdict_with_no_reasons_list`, `test_s009_16_the_whole_summary_reads_as_the_spec_shows_it`, `test_s009_16_each_reason_is_a_line_of_the_summary`, and `test_s009_16_the_gate_reasons_are_lines_too`, passing
+- S-009-17: `test_s009_17_the_repo_line_compares_local_with_github`, `test_s009_17_the_repo_line_names_the_version_and_the_release_problem`, and `test_s009_17_a_repo_without_a_release_workflow_says_so_and_is_no_reason`, passing
+- S-009-18: `test_s009_18_each_item_has_its_own_link_never_a_search` and `test_s009_18_an_untrusted_pull_request_links_to_the_pull`, passing
+- S-009-19: `test_s009_19_open_issues_and_pull_requests_are_counted_with_the_list_link`, passing
+- S-009-20: `test_s009_20_the_gate_line_reads_ok_or_the_problem`, passing
+- S-009-21: `test_s009_21_the_mode_and_github_app_lines`, passing
+- S-009-22: `test_s009_22_the_shipmill_line_shows_the_version_and_the_updates`, passing
+- S-009-23: `test_s009_23_empty_lines_are_dropped_and_the_fixed_ones_always_shown` and `test_s009_23_gate_sessions_and_runs_are_counted_with_their_links`, passing
