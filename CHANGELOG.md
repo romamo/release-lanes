@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-07
+
 ### Changed
 
 - Decision D-21: every gate session, interactive or headless, asks its questions through
@@ -918,7 +920,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/shipmill/shipmill/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/shipmill/shipmill/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/shipmill/shipmill/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/shipmill/shipmill/compare/v0.25.0...v0.26.0
