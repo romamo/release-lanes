@@ -1,6 +1,6 @@
 # S-009: shipmill status says whether the factory works or is stuck
 
-status: approved
+status: built
 
 ## Problem
 
@@ -245,8 +245,6 @@ Checked on main plus #212's PR with `tests/test_status_picture.py`, whose facts 
 in the test (rows, issues, pull requests, the job, the App), and the CLI tests run against
 fakes of `watch_state.py`, `triage_state.py`, and `gh`. `shipmill status` was also run for
 real on this repo on 2026-10-07: WORKING, with the summary's lines as Each line names them.
-The status stays `approved`: `specs.py coverage` refuses a built spec while no test names
-the dropped criteria (S-009-1, S-009-7 to S-009-12).
 
 - S-009-1: dropped in #212
 - S-009-2: `test_s009_2_a_broken_pipeline_row_is_stuck`, passing
