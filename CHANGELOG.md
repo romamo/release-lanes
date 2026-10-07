@@ -7,6 +7,11 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- Spec 010: each stable and hotfix release publishes shipmill to PyPI through a new
+  `publish.yml`, with trusted publishing and a smoke test of the built wheel (#216)
+
 ## [0.29.0] - 2026-10-07
 
 ### Changed
