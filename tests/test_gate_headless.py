@@ -244,13 +244,32 @@ def test_s005_2_interactive_reads_the_state_without_the_trust_filter(checkout: G
     assert cmd == [sys.executable, str(script), REPO, "--repo-dir", str(checkout.root), "--json"]
 
 
-def test_s005_2_interactive_with_an_app_reads_the_state_without_a_bot_login(checkout: Git, tmp_path: Path) -> None:
+def test_s005_2_interactive_with_an_app_reads_the_state_with_its_bot_login(checkout: Git, tmp_path: Path) -> None:
+    # amended by D-21, #206: the App's needs-decision questions must read as questions, so a
+    # reply on GitHub wakes the item; --trusted-only stays headless's (D-16)
     reads = Reads(rows=[])
     api = FakeApi()
     check = app_check_for(tmp_path, api)
     decision, *_ = tick(checkout, interactive(APP_ID), FakeClaude(), reads, app=check)
     assert decision.action is Action.QUIET
-    assert reads.seen == [StateRead()] and api.calls == []  # no App check on a tick that launches nothing
+    assert reads.seen == [StateRead(bot_login=BOT)] and api.calls != []
+
+
+def test_d21_interactive_passes_bot_login_with_an_app_and_not_without(checkout: Git, tmp_path: Path) -> None:
+    with_app = Reads(rows=[])
+    tick(checkout, interactive(APP_ID), FakeClaude(), with_app, app=app_check_for(tmp_path, FakeApi()))
+    without = Reads(rows=[])
+    tick(checkout, interactive(), FakeClaude(), without)
+    assert with_app.seen == [StateRead(trusted_only=False, bot_login=BOT)]
+    assert without.seen == [StateRead(trusted_only=False, bot_login=None)]
+
+
+def test_d21_an_interactive_tick_whose_app_check_fails_reads_no_state(checkout: Git, tmp_path: Path) -> None:
+    reads = Reads()
+    claude = FakeClaude()
+    with pytest.raises(ReleaseError):
+        tick(checkout, interactive(APP_ID), claude, reads, app=app_check_for(tmp_path, FakeApi(installed=False)))
+    assert reads.seen == [] and claude.launched == []
 
 
 def test_s005_2_interactive_takes_the_flags_headless_refuses(checkout: Git) -> None:

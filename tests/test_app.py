@@ -365,17 +365,13 @@ def test_an_unknown_access_is_refused() -> None:
         installation(APP_ID, REPO, "t", FakeApi(permissions=dict(GRANTED, contents="owner")))
 
 
-# Only a launch checks the App, and only with app_id set
+# Only a tick that reads the state checks the App, and only with app_id set (D-21, #206)
 
 
-def test_with_app_id_set_a_tick_that_launches_nothing_checks_nothing(checkout: Git) -> None:
+def test_with_app_id_set_a_tick_that_reads_no_state_checks_nothing(checkout: Git) -> None:
     def unchecked(app_id: int, now: dt.datetime) -> Identity:
-        raise AssertionError("only a launch checks the App")
+        raise AssertionError("only a tick that reads the state checks the App")
 
-    decision, _, _, _ = gate(
-        checkout, REPO, app_cfg, FakeClaude(), lambda _: [], NOW, Hold, FakeNotifier(), NO_PRUNE, app=unchecked
-    )
-    assert decision.action is Action.QUIET
     busy = FakeClaude([bg("a", "busy", "working")])
     decision, _, _, _ = gate(
         checkout, REPO, app_cfg, busy, lambda _: [ISSUES], NOW, Hold, FakeNotifier(), NO_PRUNE, app=unchecked

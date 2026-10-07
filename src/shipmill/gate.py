@@ -863,8 +863,10 @@ def gate(
     session), and the rest of the tick is decided without the sessions the waiting step
     stopped. A prune error raises, so that tick starts no session. A hold, then a busy
     session, ends the run before the checkout moves or the state is read; of the two, only
-    a blocked session reads the config. On LAUNCH with [agents] app_id set, app checks the
-    App's key, installation, and bot account, dry run or not, and then, on a real run only,
+    a blocked session reads the config. With [agents] app_id set, app checks the App's key,
+    installation, and bot account before the state is read, in either mode and dry run or
+    not, so a failure reads no state, and the state read passes --bot-login <slug>[bot]
+    (D-21, #206). On LAUNCH, on a real run only,
     app_env writes the session's helpers and gives its `--settings` env; both happen before
     any session is stopped or started, so a failure stops none and starts none (D-14). The
     decision then names the bot as its identity. app_key_named (`--app-key`) without app_id
@@ -879,8 +881,7 @@ def gate(
     --claude-arg flags in HEADLESS_REFUSED. After the busy step, a last launch that was
     headless and whose process still runs (its pid with the recorded start time, as started
     reads it) reads RUNNING, whatever the mode is now. A headless state read passes
-    --trusted-only, and with app_id set first checks the App, so a failure reads no state,
-    and passes --bot-login <slug>[bot]. A headless LAUNCH, on a real run, starts `claude -p`
+    --trusted-only (D-16). A headless LAUNCH, on a real run, starts `claude -p`
     detached under a new_session id, its output in the state directory's sessions/<id>.log,
     and records its pid and start time. A headless
     tick that reads the state records the items of its NEEDS_DECISION row in
@@ -911,19 +912,16 @@ def gate(
     if app_key_named and agents.app_id is None:  # read after the refresh, so a stale checkout can't stall it
         raise ReleaseError(f"--app-key names an App's key, but [agents] in {CONFIG_PATH} sets no app_id")
     headless = agents.mode is Mode.HEADLESS
-    identity = None
-    read = StateRead()
-    if headless:  # the App first: a failure reads no state and launches nothing (D-14)
-        identity = None if agents.app_id is None else as_app(agents.app_id, now, app)
-        read = StateRead(trusted_only=True, bot_login=None if identity is None else identity.login)
+    # the App first, in either mode: a failure reads no state and launches nothing (D-14), and
+    # its bot's needs-decision questions read as questions (D-21, #206)
+    identity = None if agents.app_id is None else as_app(agents.app_id, now, app)
+    read = StateRead(trusted_only=headless, bot_login=None if identity is None else identity.login)
     retry = dt.timedelta(hours=agents.retry_hours)
     rows = findings(read)
     asked = ask(state / DECISIONS, repo, rows, agents, notifier, now, dry_run) if headless else ()
     decision = replace(decide(rows, sessions, last, now, retry, agents.prs), mode=agents.mode, decisions=asked)
     if decision.action is not Action.LAUNCH:
         return decision, None, waiting, pruned
-    if not headless:
-        identity = None if agents.app_id is None else as_app(agents.app_id, now, app)
     if identity is not None:
         decision = replace(decision, identity=identity.login)
     if login is None:

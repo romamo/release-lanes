@@ -143,7 +143,7 @@ and on pull requests whose head branch is in the repo, not a fork. Every other o
 goes to an `UNTRUSTED` row, `#N` only and `agent: false`: it starts no session and stays
 for an interactive one, and github-ship-watch reports it. An outsider's comment on a
 trusted issue still reaches the session, as data under the prompt's untrusted-text line.
-Mode 1 doesn't filter.
+Mode 1 doesn't filter, but with `app_id` set it checks the App before it reads the state and passes `--bot-login` too (D-21), so the bot's questions read as questions.
 
 **Waiting on GitHub.** A decision for you becomes the `needs-decision` protocol
 ([needs-decision.md](../../skills/github-issue-triage/references/needs-decision.md)): one
