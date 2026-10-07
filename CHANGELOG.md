@@ -7,6 +7,11 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- shipmill's own gate runs headless: `[agents] mode = "headless"`, so each gated session
+  is a detached `claude -p` that asks on GitHub and ends
+
 ## [0.30.0] - 2026-10-07
 
 ### Added
