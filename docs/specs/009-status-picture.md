@@ -131,9 +131,9 @@ label on the first line of each group:
 ### Reads
 
 Beyond `watch_state.py`, the report reads, all read-only: `triage_state.py <repo> --json`
-(the bundled script), `gh pr list`, `gh repo view`, `gh release view`, the checkout's git
-refs and tags, the launchd plist, `launchctl print`, `sysctl -n kern.waketime`, the gate's
-log, and, with an App, the App check's GitHub reads. It still writes nothing (spec 008).
+(the bundled script), `gh pr list`, `gh repo view`, the checkout's git refs and tags, the
+launchd plist, `launchctl print`, `sysctl -n kern.waketime`, the gate's log, and, with an
+App, the App check's GitHub reads. It still writes nothing (spec 008).
 
 The App check runs first: when it passes, both `watch_state.py` and `triage_state.py` read
 with `--bot-login <slug>[bot]`, as the gate does, so a needs-decision question the App's
