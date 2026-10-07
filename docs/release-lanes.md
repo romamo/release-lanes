@@ -190,7 +190,9 @@ Environments → `<environment>` → Deployment branches and tags, or run
 
 ### Operate: health, bake, promotion, and rollback
 
-With `from` or `health` in use, run `uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill init --operate`. It writes
+With `from` or `health` in use, run `shipmill init --operate` (the CLI from `uv tool install
+shipmill`, or `uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill` without it;
+see [install.md](install.md#before-you-start)). It writes
 `.github/workflows/operate.yml`, which runs `shipmill operate` every 10 minutes, one run at
 a time. The deploy workflow's `operate` job above also starts it once a deploy succeeds, so
 the first health check runs right after the deploy rather than at the next scheduled run;
@@ -230,8 +232,8 @@ approve=<environment> -f dry-run=false`: it deploys the proposed tag once and cl
 issue, under `propose` or `observe`, but not while a hold is open. A proposal also closes,
 with a comment, once the environment runs its tag (or a later one), whoever deployed it. The
 run summary lists
-each environment's tag, health, and what the run did; `uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill operate --dry-run`
-shows the same and changes nothing.
+each environment's tag, health, and what the run did; `shipmill operate --dry-run` shows the
+same and changes nothing.
 
 **Rollback and incidents.** An environment that fails `rollback_after` health checks in a
 row (3 by default: 10 to 20 minutes after the deploy when the deploy workflow starts

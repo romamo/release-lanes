@@ -25,31 +25,39 @@ page is what it does, for doing it by hand or checking its work.
 - A GitHub repository with a hand-written `CHANGELOG.md`, or one you're willing to start
 - [`gh`](https://cli.github.com/) signed in (`gh auth status`) as someone who can push,
   run workflows, and change the repo's settings
-- [`uv`](https://docs.astral.sh/uv/): the CLI runs through `uvx`, with nothing installed
-  globally. Python 3.10 or newer for the skills' scripts
+- [`uv`](https://docs.astral.sh/uv/), to install the CLI. Python 3.10 or newer for the
+  skills' scripts
 - [Claude Code](https://code.claude.com/) for parts 1 and 3
 
-The commands below use:
+Install the CLI from PyPI once, and upgrade it after a release:
+
+```bash
+uv tool install shipmill
+uv tool upgrade shipmill
+```
+
+That puts `shipmill` on your `PATH` (`uv tool update-shell` adds uv's tool folder if it
+isn't there yet). The commands below use:
+
+```bash
+CR=shipmill
+```
+
+Without the install, run the CLI from git instead. Each call resolves `@v0` again, which
+can take minutes, and leaves a build in uv's cache:
 
 ```bash
 CR="uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill"
 ```
 
-Nothing puts `shipmill` on your `PATH`, so a bare `shipmill status` says `command not
-found`. To type the short name, add an alias to your shell's profile; it still fetches
-`@v0`, so it follows each release:
+The skills run `shipmill` when it's on `PATH` and this uvx form when it isn't. A headless
+gate session always runs the uvx form: its allowlist has `Bash(uvx *)` and no bare
+`shipmill`.
 
-```bash
-alias shipmill='uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill'
-```
-
-Don't `uv tool install` it instead: that pins a copy which drifts from the `@v0` the gate
-and the skills fetch, and the gate's headless sessions allow `Bash(uvx *)` but not a bare
-`shipmill`. Agents keep the full `uvx` form.
-
-shipmill is also published to PyPI on each stable and hotfix release, as `shipmill`. It
-needs Python 3.14: `uvx` and `uv tool install` fetch that interpreter when you don't have
-it, while `pip install shipmill` on an older Python fails to find a version that fits.
+shipmill is published to PyPI on each stable and hotfix release, as `shipmill`, the same
+releases `@v0` follows. It needs Python 3.14: `uv tool install` and `uvx` fetch that
+interpreter when you don't have it, while `pip install shipmill` on an older Python fails
+to find a version that fits.
 
 ## 1. Install the skills
 
@@ -431,6 +439,22 @@ reopens it after it ends.
 | Stop releases | set `mode = "off"` in `.github/shipmill.toml` |
 | Stop the gate | `$CR --repo tmp/shipmill-gate launchd <owner/repo> --remove` |
 | Remove the skills | `/plugin uninstall shipmill@shipmill` |
+| Remove the CLI | `uv tool uninstall shipmill` |
 
 Everything shipmill knows lives in the repo and on GitHub, so removing it leaves your
 tags, releases, issues, and CHANGELOG as they are.
+
+## Clean up old builds
+
+Each uvx run from git can leave a build of shipmill in uv's cache, and each plugin update
+leaves the previous version on disk:
+
+- **uv's cache:** `uv cache prune` removes dangling entries and the environments uvx
+  cached; `uv cache dir` says where the cache is. A `uv tool install` lives outside the
+  cache, so pruning leaves the installed CLI alone
+- **The plugin's old versions:** Claude Code keeps each version of the plugin in
+  `~/.claude/plugins/cache/shipmill/shipmill/<version>/`. It has no command to prune them:
+  when a plugin updates or is uninstalled, it marks the previous version with an
+  `.orphaned_at` file and deletes it 14 days later. A version folder that holds
+  `.orphaned_at` is safe to delete by hand once no running session started before the
+  update; leave the version `~/.claude/plugins/installed_plugins.json` records

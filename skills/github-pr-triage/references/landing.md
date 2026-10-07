@@ -67,7 +67,7 @@ scripts/changelog_guard.py check --base origin/<default>
 scripts/changelog_guard.py move --base origin/<default>
 scripts/changelog_guard.py check --base origin/<default>
 git commit --amend --no-edit CHANGELOG.md  # the planner reads the committed CHANGELOG, not the working tree
-# then the release planner's dry run, where the repo has one (shipmill: `uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill plan --dry-run`)
+# then the release planner's dry run, where the repo has one (shipmill: `shipmill plan --dry-run`; when `shipmill` isn't on PATH, or in a headless gate session, `uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill plan --dry-run`)
 awk '/^## \[Unreleased\]/{p=1; print; next} /^## \[/{p=0} p' CHANGELOG.md
 ```
 

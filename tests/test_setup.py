@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from shipmill import CLI
+from shipmill import UVX, cli_command
 from shipmill.cli import main
 from shipmill.config import config_path
 from shipmill.doctor import doctor
@@ -427,10 +427,12 @@ def test_doctor_reports_the_roadmap_only_when_configured(repo: Repo) -> None:
     assert checks["policy"].status == "FAIL" and "[roadmap]: unknown keys ['team']" in checks["policy"].detail
 
 
-def test_init_hints_name_the_uvx_form_not_a_bare_shipmill(repo: Repo, capsys: pytest.CaptureFixture[str]) -> None:
-    """#223: a bare `shipmill` isn't on PATH when it runs through uvx"""
+def test_init_hints_name_the_installed_form_and_the_file_the_uvx_one(
+    repo: Repo, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """#223, #236: output names how this CLI runs; the committed file the form that runs anywhere"""
     assert main(["--repo", str(repo.root), "init", "--force"]) == 0
-    assert capsys.readouterr().out.splitlines()[-1] == f"next: review the policy, then run `{CLI} doctor`"
+    assert capsys.readouterr().out.splitlines()[-1] == f"next: review the policy, then run `{cli_command()} doctor`"
     assert main(["--repo", str(repo.root), "init", "--operate", "--force"]) == 0
-    assert capsys.readouterr().out.splitlines()[-1] == f"next: run `{CLI} doctor`"
-    assert f"run\n# `{CLI} init --operate`:" in config_path(repo.root).read_text(encoding="utf-8")
+    assert capsys.readouterr().out.splitlines()[-1] == f"next: run `{cli_command()} doctor`"
+    assert f"run\n# `{UVX} init --operate`:" in config_path(repo.root).read_text(encoding="utf-8")
