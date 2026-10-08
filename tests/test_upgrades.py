@@ -158,6 +158,15 @@ def test_s014_2_apply_keeps_crlf_and_a_missing_last_newline(tmp_path: Path) -> N
     assert path.read_bytes() == (text + "\r\nplugin_update = true\r\n").encode()
 
 
+@pytest.mark.parametrize("separator", [" ", " ", "\x85"])
+def test_s014_2_apply_splits_lines_only_on_toml_newlines(tmp_path: Path, separator: str) -> None:
+    # str.splitlines also breaks on these; TOML doesn't, so a comment holding one is one line
+    text = f'[changelog]\npath = "CHANGELOG.md"  # a{separator}# b\n'
+    path = write_config(tmp_path, text)
+    assert main(["--repo", str(tmp_path), "upgrade", "--apply", "changelog-fragments"]) == 0
+    assert path.read_text(encoding="utf-8") == text + 'fragments = "changelog.d"\n'
+
+
 def test_apply_reads_past_a_multiline_string_that_looks_like_a_table(tmp_path: Path) -> None:
     text = '[agents]\nprompt = """\ntriage\n[changelog]\n"""\n\n[changelog]\npath = "CHANGELOG.md"\n'
     path = write_config(tmp_path, text)

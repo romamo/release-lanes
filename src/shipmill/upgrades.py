@@ -23,6 +23,7 @@ _ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 _HEADER = re.compile(r"^\s*\[\s*([A-Za-z0-9_-]+)\s*\]\s*(?:#.*)?$")
 _ANY_HEADER = re.compile(r"^\s*\[")
+_LINE = re.compile(r"[^\n]*\n|[^\n]+\Z")
 
 
 @dataclass(frozen=True, slots=True)
@@ -217,7 +218,7 @@ def apply(root: Path, upgrade: Upgrade) -> Applied:
 def _insert(text: str, upgrade: Upgrade) -> str:
     """The text with the upgrade's line after the last line of its table's body (the header
     when the body is empty), in the file's own line ending"""
-    lines = text.splitlines(keepends=True)
+    lines = _LINE.findall(text)  # not splitlines: it also breaks on U+2028 and the like, TOML only on \n
     newline = "\r\n" if "\r\n" in text else "\n"
     outside = _outside_strings(lines)
     headers = [i for i, line in enumerate(lines) if outside[i] and _ANY_HEADER.match(line)]
@@ -233,7 +234,7 @@ def _insert(text: str, upgrade: Upgrade) -> str:
         stripped = lines[i].strip()
         if not outside[i] or (stripped and not stripped.startswith("#")):
             last = i
-    if not lines[last].endswith(("\n", "\r")):
+    if not lines[last].endswith("\n"):
         lines[last] += newline
     lines.insert(last + 1, upgrade.line + newline)
     return "".join(lines)
