@@ -19,6 +19,7 @@ import enum
 import http.client
 import json
 import os
+import re
 import secrets
 import shlex
 import shutil
@@ -230,6 +231,10 @@ def _permissions(raw: object, path: str) -> dict[str, Access]:
     return granted
 
 
+class NotInstalled(ReleaseError):
+    """The App has no installation on the repo; the message is spec 004's, S-004-5"""
+
+
 def installation(app_id: int, repo: str, token: str, api: Api) -> Installation:
     """Spec 004, At launch step 3: the App's slug, then its installation on repo, which must
     grant every permission in the table"""
@@ -240,7 +245,7 @@ def installation(app_id: int, repo: str, token: str, api: Api) -> Installation:
     path = f"/repos/{repo}/installation"
     answer = api.get(path, token)
     if answer.status == 404:
-        raise ReleaseError(f"app {slug} is not installed on {repo}")
+        raise NotInstalled(f"app {slug} is not installed on {repo}")
     found = _ok(answer, path, app_id)
     number = found.get("id")
     if not isinstance(number, int) or isinstance(number, bool):
@@ -320,6 +325,25 @@ def repo_name(repo: str) -> str:
     if not owner or not slash or not name or "/" in name:
         raise ReleaseError(f"the repo is owner/name, such as romamo/demo; got {repo!r}")
     return name
+
+
+_SEGMENT = re.compile(r"[A-Za-z0-9._-]+")  # the characters GitHub allows in an owner or a repo name
+
+
+def cache_outside(repo: str, environ: Mapping[str, str], home: Path) -> Path:
+    """Spec 012: the token cache with no git checkout, `$XDG_CACHE_HOME/shipmill/<owner>/<repo>/`
+    (`~/.cache` when XDG_CACHE_HOME is unset or empty). Each part of the repo is one plain
+    folder name, so the path never leaves the cache folder"""
+    name = repo_name(repo)
+    owner = repo.partition("/")[0]
+    for part in (owner, name):
+        if part in {".", ".."} or not _SEGMENT.fullmatch(part):
+            raise ReleaseError(f"the repo is owner/name of letters, digits, '.', '-', or '_'; got {repo!r}")
+    base = environ.get("XDG_CACHE_HOME", "")
+    folder = Path(base) if base else home / ".cache"
+    if not folder.is_absolute():
+        raise ReleaseError(f"XDG_CACHE_HOME must be an absolute path, got {base!r}")
+    return folder / "shipmill" / owner / name / CACHE
 
 
 @dataclass(frozen=True, slots=True)
