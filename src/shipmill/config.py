@@ -22,10 +22,15 @@ def config_path(root: Path) -> Path:
 
 def read(path: Path) -> Mapping[str, Any]:
     """The file's TOML; a syntax error names the file"""
+    return loads(path.read_text(encoding="utf-8"), str(path))
+
+
+def loads(text: str, where: str) -> Mapping[str, Any]:
+    """text's TOML; a syntax error names where it was read from"""
     try:
-        return tomllib.loads(path.read_text(encoding="utf-8"))
+        return tomllib.loads(text)
     except tomllib.TOMLDecodeError as exc:
-        raise ReleaseError(f"{path}: {exc}") from None
+        raise ReleaseError(f"{where}: {exc}") from None
 
 
 class Table:

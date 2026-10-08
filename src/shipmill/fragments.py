@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Protocol
 
 from shipmill.changelog import Entry, fragment_entries
+from shipmill.config import CONFIG_PATH, Table, loads
 from shipmill.errors import ReleaseError
 from shipmill.gitrepo import Git
 from shipmill.policy import Policy, Style
@@ -43,9 +44,13 @@ class AtRevision:
     git: Git
     rev: str
 
+    def has(self, folder: str) -> bool:
+        tree = f"{self.rev}:{folder}"
+        return self.git.ok("cat-file", "-e", tree) and self.git.run("cat-file", "-t", tree).strip() == "tree"
+
     def files(self, folder: str) -> list[str]:
         tree = f"{self.rev}:{folder}"
-        if not self.git.ok("cat-file", "-e", tree) or self.git.run("cat-file", "-t", tree).strip() != "tree":
+        if not self.has(folder):
             raise ReleaseError(f"[changelog] fragments names {folder}, which is not a folder at {self.rev[:12]}")
         found = []
         for line in self.git.run("ls-tree", "-r", "-z", tree).split("\0"):
@@ -126,8 +131,42 @@ def read(source: _Source, folder: str, style: Style) -> list[Fragment]:
 
 
 def at_revision(git: Git, policy: Policy, rev: str) -> list[Fragment]:
-    """The fragments at rev; none when the policy sets no fragments folder"""
-    return [] if policy.fragments is None else read(AtRevision(git, rev), policy.fragments, policy.style)
+    """The fragments at rev; none when the policy sets no fragments folder, or when rev
+    predates the folder (D-27)"""
+    if policy.fragments is None:
+        return []
+    source = AtRevision(git, rev)
+    # HEAD is the revision shipmill runs on: a missing folder there fails whatever its config says
+    if not source.has(policy.fragments) and git.sha(rev) != git.sha("HEAD") and not _sets_fragments(git, rev):
+        return []
+    return read(source, policy.fragments, policy.style)
+
+
+def in_stamped_checkout(git: Git, policy: Policy) -> list[Fragment]:
+    """The fragments a stable stamp releases, from the clean checkout at the release's base;
+    none when the policy sets no fragments folder, or when that commit predates the folder:
+    its tree has no folder and its own config doesn't set [changelog] fragments (D-27)"""
+    if policy.fragments is None:
+        return []
+    if not AtRevision(git, "HEAD").has(policy.fragments) and not _sets_fragments(git, "HEAD"):
+        return []
+    return in_checkout(git.root, policy)
+
+
+def _sets_fragments(git: Git, rev: str) -> bool:
+    """Whether rev's own config, read through git, sets [changelog] fragments. Only that key
+    is read: the rest of an older config may not pass today's schema, and needn't. A config
+    there that isn't TOML, or whose [changelog] or fragments has the wrong type, fails (D-27)"""
+    path = CONFIG_PATH.as_posix()
+    text = git.show(rev, path)
+    if text is None:
+        return False
+    where = f"{path} at {git.sha(rev)[:12]}"
+    changelog = Table(loads(text, where), where).table("changelog", optional=True)
+    if "fragments" not in changelog.raw:
+        return False
+    changelog.string("fragments")
+    return True
 
 
 def added_by(git: Git, policy: Policy, merge: str) -> list[Fragment]:
