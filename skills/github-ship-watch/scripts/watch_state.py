@@ -1518,15 +1518,18 @@ def gh_writer(repo_dir: Path) -> list[str]:
     app_id set in the checkout's config, `shipmill gh` run through uvx as the skills run it, so
     the write posts as the App; else plain gh, the host's login. A config this reader refuses
     raises Refused rather than reading as no App, and so does an app_id key the reader didn't
-    find in [agents] (Python 3.10's fallback skips a header it can't parse). Reads keep plain gh"""
-    path = repo_dir / POLICY
+    find in [agents] (Python 3.10's fallback skips a header it can't parse). Reads keep plain gh.
+    The config is the checkout's, found from a subfolder as `shipmill gh` finds it"""
+    here = repo_dir.resolve()
+    top = next((folder for folder in (here, *here.parents) if (folder / ".git").exists()), here)
+    path = top / POLICY
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
     table = agents_table(text, path) if text else None
     if table is None or "app_id" not in table:
         if APP_ID_KEY.search(text):
             raise Refused(f"error: {path}: app_id is set but not read from a plain [agents] table; fix the file")
         return ["gh"]
-    return ["uvx", "--from", SHIPMILL_SOURCE, "shipmill", "--repo", str(repo_dir.resolve()), "gh"]
+    return ["uvx", "--from", SHIPMILL_SOURCE, "shipmill", "--repo", str(top), "gh"]
 
 
 def session_rows(text: str, repo: str, repo_dir: Path, now: dt.datetime) -> list[Row]:

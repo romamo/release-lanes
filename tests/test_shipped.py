@@ -48,6 +48,14 @@ def test_290_with_app_id_the_notice_posts_through_shipmill_gh(sp: ModuleType, tm
     assert comment == [*write, "issue", "comment", "5", "-R", "me/demo", "--body", "Released in v1.2.0."]
 
 
+def test_290_run_from_a_subfolder_the_notice_still_posts_as_the_app(sp: ModuleType, tmp_path: Path) -> None:
+    # --repo-dir defaults to the cwd: a subfolder of the checkout must not read as "no App"
+    (tmp_path / ".git").mkdir()
+    (tmp_path / "docs").mkdir()
+    config(tmp_path, '[agents]\nprompt = "x"\napp_id = 7\n')
+    assert sp.writer(tmp_path / "docs", sp.watch_module()) == [*APP_GH, str(tmp_path.resolve()), "gh"]
+
+
 @pytest.mark.parametrize("text", [None, 'mode = "release"\n', '[agents]\nprompt = "x"\n'])
 def test_290_without_app_id_the_notice_posts_with_plain_gh(sp: ModuleType, tmp_path: Path, text: str | None) -> None:
     if text is not None:

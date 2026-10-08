@@ -15,7 +15,8 @@ bot.
   012 asks of every write, instead of as the person running them; without `app_id` they
   use plain `gh` as before. A `shipmill gh` exit 2 stops the script with nothing retried,
   and a config that can't be read, or an `app_id` outside a readable `[agents]` table,
-  exits 2 before anything is written. Reads stay on plain `gh` (#290)
+  exits 2 before anything is written. The config is the checkout's, so a run from a
+  subfolder still writes as the App. Reads stay on plain `gh` (#290)
 
 ## [0.37.0] - 2026-10-08
 
