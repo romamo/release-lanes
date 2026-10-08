@@ -1,6 +1,6 @@
 # S-011: every non-OK status row carries a fix
 
-status: approved
+status: built
 
 ## Problem
 
@@ -246,3 +246,30 @@ waiting it is unchanged.
 - shipmill/shipmill#261: S-011-11
 
 ## Verification
+
+Checked on main after #271, #270, #284, and #287 merged (0.37.0): `uv run pytest -q -k
+s011` passes all 131 selected tests, and the code each criterion names was read on main
+(`skills/github-ship-watch/scripts/watch_state.py`, `skills/github-ship-watch/scripts/fleet.py`,
+`src/shipmill/status.py`, `src/shipmill/gate.py`). `specs.py coverage --spec 011` lists a
+test for every criterion.
+
+- S-011-1: `test_s011_1_every_json_line_adds_a_fix_and_keeps_the_rest`, passing; `Row.json()` adds `fix` beside the four keys
+- S-011-2: `test_s011_2_every_action_state_is_fixed_and_a_fixed_row_needs_its_fix`, passing; `FIXED = ACTION | {"HOLD", "WORKTREE_STALE", "UNTRUSTED"}` and `Row.__post_init__` raises without a fix
+- S-011-3: `test_s011_3_each_fixed_state_carries_the_fix_behaviour_names`, passing
+- S-011-4: `test_s011_4_a_failed_runs_fix_reruns_the_run_its_detail_links`, passing; `rerun_fix` reads the id from the run URL
+- S-011-5: `test_s011_5_a_missing_releases_fix_reruns_a_failed_publish_or_says_where_to_look`, passing
+- S-011-6: `test_s011_6_a_stale_worktrees_fix_shows_its_work_and_how_to_remove_it`, passing
+- S-011-7: `test_s011_7_open_prs_carry_a_fix_only_while_no_gate_lands_them`, passing
+- S-011-8: `test_s011_8_every_fix_names_its_target_and_quotes_no_title` and `test_s011_8_a_proposals_fix_never_copies_a_shell_word_from_its_body`, passing
+- S-011-9: `test_s011_9_the_table_prints_a_fix_line_unless_the_detail_ends_with_it`, passing; `Row.text()` skips the line when the detail ends with the fix
+- S-011-10: `test_s011_10_fleet_reads_the_lines_watch_state_prints_with_their_fix` and `test_s011_10_a_fix_changes_neither_the_fingerprint_nor_the_prompt`, passing; `gate.fingerprint` hashes state, subject, and detail only
+- S-011-11: the seven `test_s011_11_*` tests in `tests/test_ship_watch.py` and the three in `tests/test_status_fix.py`, passing
+- S-011-12: the six `test_s011_12_*` tests in `tests/test_status_fix.py`, passing; `status.Reason` requires a non-empty `fix`
+- S-011-13: `test_s011_13_the_landing_line_carries_the_fix_only_when_no_gate_lands`, passing
+- S-011-14: `test_s011_14_each_gate_problem_has_its_fix` and `test_s011_14_a_job_without_a_log_points_at_launchd`, passing
+- S-011-15: `test_s011_15_an_outdated_cli_names_the_form_installed`, passing
+- S-011-16: `test_s011_16_the_repo_line_pulls_in_the_checkout_named` and `test_s011_16_the_repo_lines_fix_catches_up_off_the_default_branch_too`, passing; with another branch checked out the line reads `git -C <checkout> fetch origin <branch>:<branch>`, since a pull there would pull the wrong branch
+- S-011-17: `test_s011_17_a_pull_request_to_land_says_what_keeps_it` and `test_s011_17_the_pull_request_read_asks_for_the_merge_state`, passing
+- S-011-18: `test_s011_18_in_progress_names_its_pull_requests_and_parked_says_why` and `test_s011_18_no_title_reaches_the_summary`, passing
+- S-011-19: `test_s011_19_each_draft_names_the_command_that_readies_it`, passing
+- S-011-20: `test_s011_20_quiet_names_the_pull_requests_no_gate_lands` and `test_s011_20_quiet_with_no_pull_request_waiting_reads_as_before`, passing
