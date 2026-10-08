@@ -553,7 +553,9 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
   commits are history like any other; their CHANGELOG sections stay as written
 - Under the bot, rc releases do not write CHANGELOG sections; their entries stay under
   Unreleased until the stable release. Existing rc sections stay until the stable release
-  of their version, which folds their entries into its own section and removes them (D-25)
+  of their version, which folds their entries into its own section and removes them (D-25);
+  the prose before an rc section's first `### ` heading is dropped, and any other text
+  outside an entry fails the fold (D-26)
 - A project in an rc series (`1.0.0rc9`) continues it: the next rc is `1.0.0rc10`, and the
   stable lane promotes to `1.0.0`. If the user wants 1.0.0 to be a deliberate step, leave
   stable without triggers so it only runs by hand
