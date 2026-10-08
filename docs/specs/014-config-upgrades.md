@@ -216,4 +216,8 @@ upgrade is an offer, not a problem.
 
 ## Issues
 
+- shipmill/shipmill#279: S-014-1, S-014-2, S-014-3, S-014-4
+- shipmill/shipmill#280: S-014-5, S-014-6, S-014-7, S-014-8, S-014-9, S-014-15
+- shipmill/shipmill#281: S-014-10, S-014-11, S-014-12, S-014-13, S-014-14
+
 ## Verification
