@@ -18,7 +18,7 @@ PULL_LIMIT = 1000  # open pull requests read at once; gh's own default is 30
 MERGED_PER_BRANCH = 20  # merged pull requests read per head branch name, the newest
 HISTORY_LIMIT = 100  # a merged pull request's commits, and its force-pushes, read: the last ones
 _MERGED_FRAGMENT = (
-    "fragment merged on PullRequestConnection { nodes { number headRefName headRefOid "
+    "fragment merged on PullRequestConnection { nodes { number headRefName baseRefName headRefOid "
     f"commits(last: {HISTORY_LIMIT}) {{ nodes {{ commit {{ oid }} }} }} "
     f"timelineItems(itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT], last: {HISTORY_LIMIT}) "
     "{ nodes { ... on HeadRefForcePushedEvent { beforeCommit { oid } afterCommit { oid } } } } } }"
@@ -65,6 +65,7 @@ class MergedPull:
     number: int
     head: str  # the head branch's name
     heads: frozenset[str]  # full commit SHAs
+    base: str  # the branch it merged into: only a merge into the default branch landed
 
 
 class DeploymentState(StrEnum):
@@ -431,7 +432,9 @@ def parse_merged_pulls(found: Any, aliases: int) -> list[MergedPull]:
         for node in connection["nodes"]:
             pull = _merged_pull(node)
             if pull is None:
-                raise refuse("a pull request without a number, headRefName, headRefOid, commits, or timeline")
+                raise refuse(
+                    "a pull request without a number, headRefName, baseRefName, headRefOid, commits, or timeline"
+                )
             pulls[pull.number] = pull
     return [pulls[n] for n in sorted(pulls)]
 
@@ -452,10 +455,11 @@ def _merged_pull(node: Any) -> MergedPull | None:
     if not isinstance(node, dict):
         return None
     number, head, oid = node.get("number"), node.get("headRefName"), node.get("headRefOid")
-    commits, timeline = node.get("commits"), node.get("timelineItems")
+    base, commits, timeline = node.get("baseRefName"), node.get("commits"), node.get("timelineItems")
     if (
         not isinstance(number, int)
         or not isinstance(head, str)
+        or not isinstance(base, str)
         or not isinstance(oid, str)
         or not isinstance(commits, dict)
         or not isinstance(commits.get("nodes"), list)
@@ -476,4 +480,4 @@ def _merged_pull(node: Any) -> MergedPull | None:
             sha = _oid(event, key)
             if sha is not None:
                 heads.add(sha)
-    return MergedPull(number, head, frozenset(heads))
+    return MergedPull(number, head, frozenset(heads), base)

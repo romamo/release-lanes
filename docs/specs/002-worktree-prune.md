@@ -76,8 +76,9 @@ into one reads NOT LANDED there; this rule closes that gap without trusting the 
 When review force-pushed the pull request (a rebase, an amend, a part dropped) before it was
 squash-merged, none of those rules can see the worktree's commits, which are in no merged
 history. So a branch also landed when its tip is, or was before a force-push, the head of a
-merged pull request whose head branch is the worktree's branch name or its upstream branch
-on origin (added in #244). A merged pull request's heads are its head when merged, its
+pull request merged into the default branch whose head branch is the worktree's branch name
+or its upstream branch on origin (added in #244); one merged into another branch, such as a
+stacked pull request's parent, proves nothing. A merged pull request's heads are its head when merged, its
 commits, and the commit before and after each of its force-pushes
 (`HeadRefForcePushedEvent` in its timeline); they are matched by commit SHA, never by the
 branch name alone, so a merged pull request from an earlier use of the same name proves
@@ -179,7 +180,7 @@ a failing plan does.
 - S-002-17: `watch_state.py` reports one report-only `WORKTREE_STALE` row (agent false, not an action) per KEPT shipmill worktree older than 7 days, naming its path and reason, and none for the main checkout, the current checkout, or a worktree that is not a shipmill worktree
 - S-002-18: `skills/github-ship-watch/SKILL.md` documents the `WORKTREE_STALE` row, and `skills/shipmill-setup/SKILL.md`'s gate section documents the gate's prune and `shipmill worktrees`, and the github-issue-resolve, github-pr-triage, and github-issue-triage skills each say that the worktrees a session leaves behind once it exits are the gate's prune's to remove
 - S-002-19: a candidate worktree that holds another worktree of the repository inside it, even under an ignored path, is KEPT as `holds worktree <path>`, its path relative to the main checkout (added in #131)
-- S-002-20: a candidate worktree whose branch tip is, or was before a force-push, the head of a merged pull request whose head branch is its branch or that branch's upstream, matched by commit SHA, and that passes every other check, is REMOVABLE; one with commits after such a head is KEPT as `<N> commit(s) not landed`, counting only those commits; the merged pull requests are read in one request before judging, and a failing read exits 2 and removes nothing (added in #244)
+- S-002-20: a candidate worktree whose branch tip is, or was before a force-push, the head of a pull request merged into the default branch whose head branch is its branch or that branch's upstream, matched by commit SHA, and that passes every other check, is REMOVABLE; one with commits after such a head is KEPT as `<N> commit(s) not landed`, counting only those commits; the merged pull requests are read in one request before judging, and a failing read exits 2 and removes nothing (added in #244)
 
 ## Out of scope
 

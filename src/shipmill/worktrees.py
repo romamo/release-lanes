@@ -332,7 +332,8 @@ def _reason(ctx: _Context, tree: Worktree, path: Path, age: dt.timedelta | None)
     if Git(path).run("status", "--porcelain", "--untracked-files=all").strip():
         return "uncommitted changes"
     names = {tree.branch, ctx.upstream.get(tree.branch, tree.branch)}
-    merged_heads = frozenset[str]().union(*(pr.heads for pr in ctx.merged if pr.head in names))
+    landed = (pr for pr in ctx.merged if pr.head in names and pr.base == ctx.default)
+    merged_heads = frozenset[str]().union(*(pr.heads for pr in landed))
     unlanded = ctx.landing.unlanded(tree.branch, merged_heads)
     if unlanded:
         return f"{unlanded} commit(s) not landed"

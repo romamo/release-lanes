@@ -391,7 +391,7 @@ def test_s002_20_a_force_pushed_head_squash_merged_is_removable(repo: Checkout) 
     repo.commit(repo.root, {"audit.py": "AUDIT = False  # reviewed\n"}, "Audit off (#75)")
     repo.push_main()
     assert repo.reasons()[".claude/worktrees/audit"] == "1 commit(s) not landed"  # S-002-8 alone
-    repo.github.merged = [MergedPull(75, "feat/54-audit-false", frozenset({fake_sha(1), old}))]
+    repo.github.merged = [MergedPull(75, "feat/54-audit-false", frozenset({fake_sha(1), old}), "main")]
     judged = repo.judge()[".claude/worktrees/audit"]
     assert (judged.verdict, judged.reason) == (Verdict.REMOVABLE, None)
     assert repo.github.merged_reads[-1] == ("feat/54-audit-false",)
@@ -408,7 +408,7 @@ def test_s002_20_a_rebased_and_fixed_pr_squash_merged_is_removable(repo: Checkou
     repo.commit(repo.root, {"a.py": "A = 1\n", "b.py": "B = 2\n"}, "Feature (#9)")
     repo.push_main()
     rebased, fix = fake_sha(2), fake_sha(3)
-    repo.github.merged = [MergedPull(9, "feat/remote-name", frozenset({tip, rebased, fake_sha(4), fix}))]
+    repo.github.merged = [MergedPull(9, "feat/remote-name", frozenset({tip, rebased, fake_sha(4), fix}), "main")]
     assert repo.reasons()["tmp/wt-local"] is None
 
 
@@ -418,7 +418,7 @@ def test_s002_20_a_commit_after_the_merged_head_keeps_the_worktree(repo: Checkou
     repo.commit(feat, {"c.py": "C = 1\n"}, "After the merge")
     repo.commit(repo.root, {"a.py": "A = 2\n"}, "One, fixed in review (#5)")
     repo.push_main()
-    repo.github.merged = [MergedPull(5, "feat/more", frozenset({head, fake_sha(5)}))]
+    repo.github.merged = [MergedPull(5, "feat/more", frozenset({head, fake_sha(5)}), "main")]
     assert repo.reasons()["tmp/wt-more"] == "1 commit(s) not landed"
 
 
@@ -426,13 +426,21 @@ def test_s002_20_a_merged_pr_from_a_reused_branch_name_proves_nothing(repo: Chec
     """Matched by the commits that were its head, never by the branch name alone"""
     feat = repo.add("tmp/wt-reused", "-b", "feat/reused")
     repo.commit(feat, {"r.py": "R = 1\n"}, "New work on an old name")
-    repo.github.merged = [MergedPull(2, "feat/reused", frozenset({fake_sha(6), fake_sha(7)}))]
+    repo.github.merged = [MergedPull(2, "feat/reused", frozenset({fake_sha(6), fake_sha(7)}), "main")]
     other = repo.add("tmp/wt-other", "-b", "feat/other")
     sha = repo.commit(other, {"o.py": "O = 1\n"}, "Other")
-    repo.github.merged.append(MergedPull(3, "feat/unrelated", frozenset({sha})))  # another branch's PR
+    repo.github.merged.append(MergedPull(3, "feat/unrelated", frozenset({sha}), "main"))  # another branch's PR
     reasons = repo.reasons()
     assert reasons["tmp/wt-reused"] == "1 commit(s) not landed"
     assert reasons["tmp/wt-other"] == "1 commit(s) not landed"
+
+
+def test_s002_20_a_pr_merged_into_another_branch_proves_nothing(repo: Checkout) -> None:
+    """A stacked PR merged into its parent branch, which never reached main, didn't land"""
+    feat = repo.add("tmp/wt-child", "-b", "feat/child")
+    tip = repo.commit(feat, {"c.py": "C = 1\n"}, "Child")
+    repo.github.merged = [MergedPull(8, "feat/child", frozenset({tip}), "feat/parent")]
+    assert repo.reasons()["tmp/wt-child"] == "1 commit(s) not landed"
 
 
 def test_s002_20_merged_prs_are_read_once_for_the_branches_ahead_only(repo: Checkout) -> None:
@@ -468,6 +476,7 @@ GRAPHQL = {
                     {
                         "number": 75,
                         "headRefName": "feat/54",
+                        "baseRefName": "main",
                         "headRefOid": "c" * 40,
                         "commits": {"nodes": [{"commit": {"oid": "c" * 40}}]},
                         "timelineItems": {
@@ -492,7 +501,7 @@ def test_s002_20_gh_reads_each_merged_heads_history(tmp_path: Path) -> None:
     bin_dir = fake_tool(tmp_path, "gh", f'printf "%s\\n" "$@" > "{args}"\ncat "{out}"\n')
     gh = GhCli(tmp_path, str(bin_dir / "gh"))
     assert gh.merged_pull_requests(["feat/54", "feat/x", "feat/54"]) == [
-        MergedPull(75, "feat/54", frozenset({"a" * 40, "b" * 40, "c" * 40}))
+        MergedPull(75, "feat/54", frozenset({"a" * 40, "b" * 40, "c" * 40}), "main")
     ]
     sent = args.read_text(encoding="utf-8").splitlines()
     assert sent[:2] == ["api", "graphql"]
