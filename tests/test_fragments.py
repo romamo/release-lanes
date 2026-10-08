@@ -427,3 +427,32 @@ def test_a_stable_sync_deletes_the_released_fragments_on_a_moved_main(repo: Repo
     assert folder_files(repo, synced) == ["changelog.d/2-b.md", "changelog.d/README.md"]
     on_main = Changelog(repo.main_text("CHANGELOG.md"), Style.KEEP_A_CHANGELOG)
     assert on_main.section(Version.parse("1.1.0")) == "### Added\n\n- Feature A (#1)\n"
+
+
+def test_s013_10_a_hotfix_ships_no_fragment_its_merge_only_renamed(repo: Repo) -> None:
+    """A merge that renames another PR's fragment adds none of its entries: the hotfix ships
+    only the merge's own fragment, and the renamed one stays pending on main"""
+    use_fragments(repo)
+    merge_fragment(repo, 1, "1-a.md", "### Added\n\n- Feature A, not ready (#1)\n", "src/a.py", "A = 1\n")
+    repo.git.run("mv", f"{FOLDER}/1-a.md", f"{FOLDER}/1-feature-a.md")
+    repo.write(f"{FOLDER}/2-b.md", "### Fixed\n\n- Fix B (#2)\n")
+    repo.github.merges[2] = commit_on_main(repo, "Rename 1-a.md, add 2-b.md")
+    sha, _ = hotfix_of(repo, 2)
+    assert released_section(repo, sha, "1.0.1") == "### Fixed\n\n- Fix B (#2)\n"
+    assert repo.main_text(f"{FOLDER}/1-feature-a.md")
+
+
+def test_s013_10_a_hotfix_ships_the_entry_its_merge_added_to_another_fragment(repo: Repo) -> None:
+    """A merge that adds an entry to an existing fragment ships that entry alone; the
+    fragment, partly released, stays on main with its other entry pending"""
+    use_fragments(repo)
+    merge_fragment(repo, 1, "1-a.md", "### Added\n\n- Feature A, not ready (#1)\n", "src/a.py", "A = 1\n")
+    repo.write(f"{FOLDER}/1-a.md", "### Added\n\n- Feature A, not ready (#1)\n\n### Fixed\n\n- Fix B (#2)\n")
+    repo.write("src/app.py", "VALUE = 2\n")
+    repo.github.merges[2] = commit_on_main(repo, "Fix B in 1-a.md")
+    sha, _ = hotfix_of(repo, 2)
+    assert released_section(repo, sha, "1.0.1") == "### Fixed\n\n- Fix B (#2)\n"
+    on_main = Changelog(repo.main_text("CHANGELOG.md"), Style.KEEP_A_CHANGELOG)
+    left = fragments.at_revision(repo.git, repo.policy, repo.git.sha("origin/main"))
+    assert [f.path for f in left] == [f"{FOLDER}/1-a.md"]
+    assert [e.text for e in on_main.pending(fragments.entries(left))] == ["- Feature A, not ready (#1)"]

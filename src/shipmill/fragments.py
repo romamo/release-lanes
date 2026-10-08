@@ -66,13 +66,16 @@ class AtRevision:
 
 
 @dataclass(frozen=True, slots=True)
-class AddedBy:
-    """The files a commit added under the folder, against its first parent: a hotfix's
-    merge ships the fragments it added (spec 013). Reading only the diff never needs the
-    folder at the first parent."""
+class ChangedBy:
+    """The files a commit changed under the folder against its first parent, on one side of
+    the diff: after it, the ones it added or modified; before it, the ones it deleted or
+    modified. A hotfix's merge ships the entries the first holds and the second lacks (spec
+    013), so a renamed or edited fragment ships only what the merge added. Reading only the
+    diff never needs the folder at the first parent."""
 
     git: Git
     rev: str
+    before: bool
 
     def files(self, folder: str) -> list[str]:
         out = self.git.run(
@@ -80,7 +83,7 @@ class AddedBy:
             "--name-only",
             "-z",
             "--no-renames",
-            "--diff-filter=A",
+            f"--diff-filter={'DM' if self.before else 'AM'}",
             f"{self.rev}^1",
             self.rev,
             "--",
@@ -89,7 +92,7 @@ class AddedBy:
         return [p[len(folder) + 1 :] for p in out.split("\0") if p]
 
     def text(self, path: str) -> str:
-        return AtRevision(self.git, self.rev).text(path)
+        return AtRevision(self.git, f"{self.rev}^1" if self.before else self.rev).text(path)
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,9 +131,15 @@ def at_revision(git: Git, policy: Policy, rev: str) -> list[Fragment]:
 
 
 def added_by(git: Git, policy: Policy, merge: str) -> list[Fragment]:
-    """The fragments merge added against its first parent; none when the policy sets no
-    fragments folder"""
-    return [] if policy.fragments is None else read(AddedBy(git, merge), policy.fragments, policy.style)
+    """The fragments merge added or modified against its first parent, as merge has them;
+    none when the policy sets no fragments folder"""
+    return [] if policy.fragments is None else read(ChangedBy(git, merge, False), policy.fragments, policy.style)
+
+
+def removed_by(git: Git, policy: Policy, merge: str) -> list[Fragment]:
+    """The fragments merge deleted or modified against its first parent, as the parent has
+    them; none when the policy sets no fragments folder"""
+    return [] if policy.fragments is None else read(ChangedBy(git, merge, True), policy.fragments, policy.style)
 
 
 def in_checkout(root: Path, policy: Policy) -> list[Fragment]:

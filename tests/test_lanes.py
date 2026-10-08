@@ -283,7 +283,7 @@ def test_hotfix_refuses_a_pr_without_an_entry(repo: Repo) -> None:
     repo.git.run("push", "-q", "origin", "main")
     repo.github.merges[5] = repo.git.sha()
     decision = plan(repo, at_day(1), event=Event.MANUAL, lane=Lane.HOTFIX, hotfix=Hotfix((5,)))
-    with pytest.raises(ReleaseError, match="adds no CHANGELOG entry"):
+    with pytest.raises(ReleaseError, match="adds no CHANGELOG entry: a hotfix ships"):
         prepare(
             repo.git,
             repo.policy,

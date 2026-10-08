@@ -83,12 +83,13 @@ def run_after_stamp(root: Path, policy: Policy) -> None:
 
 
 def hotfix_entries(git: Git, policy: Policy, merges: Sequence[str]) -> list[Entry]:
-    """The entries each merge added under main's Unreleased, then those of the fragments it
-    added (spec 013)"""
+    """The entries each merge added under main's Unreleased, then those it added to the
+    fragments it changed (spec 013): a fragment it only renamed adds nothing"""
     entries: list[Entry] = []
     for merge in merges:
         after = _changelog(git, policy, merge).pending(fragments.entries(fragments.added_by(git, policy, merge)))
-        before = set(_changelog(git, policy, f"{merge}^1").pending())
+        gone = fragments.entries(fragments.removed_by(git, policy, merge))
+        before = set(_changelog(git, policy, f"{merge}^1").pending(gone))
         added = [e for e in after if e not in before]
         if not added:
             also = "" if policy.fragments is None else f" or fragment in {policy.fragments}"
