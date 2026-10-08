@@ -23,6 +23,19 @@ bot.
   token cache, and that the App's identity covers the sessions a person starts. Spec 012
   is built (#263)
 
+### Added
+
+- Changelog fragments, the core of spec 013: `[changelog] fragments = "<folder>"` in
+  `.github/shipmill.toml` makes each `<folder>/<name>.md` pending alongside Unreleased.
+  `shipmill plan` reads them at the planned revision through git and bumps by their
+  headings; `propose`, `notes`, and a pre-release's GitHub release list them; a stable
+  `prepare` writes Unreleased, then the fragments in file-name order, then the version's rc
+  sections into one section and deletes the released fragments in the release commit,
+  keeping `README.md`; dev and rc releases leave the folder alone. A missing folder or a
+  malformed fragment exits 2 naming it, and `shipmill doctor` counts fragments and names
+  one a released section already holds, with the `git rm` that removes it. Without the
+  key nothing changes (#272)
+
 ## [0.36.0] - 2026-10-08
 
 ### Added

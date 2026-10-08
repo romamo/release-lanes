@@ -62,6 +62,7 @@ after_stamp = ["uv lock --check"] # run after the version is written; a failure 
 
 [changelog]
 style = "keep-a-changelog"        # "## [1.2.0] - date" + compare links; or "dash": "## 1.2.0 — date"
+fragments = "changelog.d"         # optional: one <name>.md per PR, pending with Unreleased (spec 013)
 
 [bump]                            # how far the next version moves from the last stable one
 from = "headings"                 # the pending entries' ### headings...

@@ -78,10 +78,17 @@ class Changelog:
                 found.update(_entries(segment.lines, self.style, strict=False, where=str(segment.version)))
         return found
 
-    def pending(self) -> list[Entry]:
-        """Unreleased entries that no release section already holds"""
+    def pending(self, fragments: Sequence[Entry] = ()) -> list[Entry]:
+        """Unreleased entries that no release section already holds, then the fragments'
+        entries (spec 013) that neither a release section nor Unreleased holds"""
         released = self.released()
-        return [e for e in self.unreleased() if e not in released]
+        found = [e for e in self.unreleased() if e not in released]
+        seen = set(found)
+        for entry in fragments:
+            if entry not in released and entry not in seen:
+                found.append(entry)
+                seen.add(entry)
+        return found
 
     def versions(self) -> list[Version]:
         return [s.version for s in self._segments if s.version is not None]
@@ -102,10 +109,11 @@ class Changelog:
             reverse=True,
         )
 
-    def promoted(self, version: Version) -> list[Entry]:
+    def promoted(self, version: Version, fragments: Sequence[Entry] = ()) -> list[Entry]:
         """What a stable release of version holds: the pending Unreleased entries, then the
-        entries of its rc sections, newest section first, each entry once (D-25)"""
-        return list(dict.fromkeys([*self.pending(), *self._folded(version)]))
+        pending fragments' entries, then the entries of its rc sections, newest section first,
+        each entry once (D-25)"""
+        return list(dict.fromkeys([*self.pending(fragments), *self._folded(version)]))
 
     def _folded(self, version: Version) -> list[Entry]:
         """The entries of version's rc sections, newest section first. Folding removes the
@@ -141,12 +149,21 @@ class Changelog:
             parts.append(body if heading is None else f"### {heading}\n\n{body}")
         return "\n\n".join(parts)
 
-    def release(self, version: Version, date: dt.date, entries: Sequence[Entry], *, from_unreleased: bool) -> str:
+    def release(
+        self,
+        version: Version,
+        date: dt.date,
+        entries: Sequence[Entry],
+        *,
+        from_unreleased: bool,
+        fragments: Sequence[Entry] = (),
+    ) -> str:
         """The CHANGELOG text with entries moved out of Unreleased into a section for version.
-        With from_unreleased, every entry must be under Unreleased; otherwise (a hotfix's
-        entries on its release branch) the ones that are get removed. The rc sections of
-        version are folded in: entries must hold every one of their entries, which may come
-        from them as well as from Unreleased, and the sections are removed (D-25)."""
+        With from_unreleased, every entry must be under Unreleased or in fragments (the
+        fragments' entries, spec 013); otherwise (a hotfix's entries on its release branch)
+        the ones that are get removed. The rc sections of version are folded in: entries must
+        hold every one of their entries, which may come from them as well as from Unreleased,
+        and the sections are removed (D-25)."""
         if not version.is_stable:
             raise ReleaseError(f"only a stable release gets a CHANGELOG section, not {version}")
         if not entries:
@@ -158,8 +175,14 @@ class Changelog:
         held = self._folded(version)
         current = self.unreleased()
         moved = set(entries)
-        if from_unreleased and (missing := [e for e in entries if e not in current and e not in held]):
-            where = f"Unreleased or an rc section of {version}" if folded else "Unreleased"
+        sources = set(current) | set(held) | set(fragments)
+        if from_unreleased and (missing := [e for e in entries if e not in sources]):
+            places = [
+                "Unreleased",
+                *(["a fragment"] if fragments else []),
+                *([f"an rc section of {version}"] if folded else []),
+            ]
+            where = " or ".join(places) if len(places) < 3 else f"{places[0]}, {places[1]}, or {places[2]}"
             raise ReleaseError(
                 f"{len(missing)} released entr{'y is' if len(missing) == 1 else 'ies are'} no longer under "
                 f"{where} as released (edited after the release was cut?): {missing[0].text.splitlines()[0]!r}"
@@ -261,7 +284,25 @@ def _segment(heading: str, lines: tuple[str, ...], unreleased: str, release: re.
     return _Segment(heading, Version.parse(m["version"]), False, lines)
 
 
-def _entries(lines: Iterable[str], style: Style, *, strict: bool, where: str) -> list[Entry]:
+def fragment_entries(text: str, style: Style, path: str) -> list[Entry]:
+    """A changelog fragment's entries (spec 013), read as strictly as Unreleased; errors name
+    the file and line"""
+    lines = text.splitlines()
+    if not any(line.strip() for line in lines):
+        raise ReleaseError(f"{path}: an empty fragment; it holds the entries a PR adds, as under Unreleased")
+    for n, line in enumerate(lines, 1):
+        if line.startswith("## "):
+            raise ReleaseError(
+                f"{path}:{n}: a '## ' heading; a fragment holds only what goes under Unreleased: {line!r}"
+            )
+    found = _entries(lines, style, strict=True, where=path, numbered=True)
+    if not found:
+        raise ReleaseError(f"{path}: the fragment holds no entry")
+    return found
+
+
+def _entries(lines: Iterable[str], style: Style, *, strict: bool, where: str, numbered: bool = False) -> list[Entry]:
+    """numbered: errors name the line's number after where, as in 'path:3'"""
     entries: list[Entry] = []
     heading: str | None = None
     current: list[str] = []
@@ -273,7 +314,8 @@ def _entries(lines: Iterable[str], style: Style, *, strict: bool, where: str) ->
             current.clear()
         blanks.clear()
 
-    for line in lines:
+    for n, line in enumerate(lines, 1):
+        at = f"{where}:{n}" if numbered else where
         if style is Style.DASH:
             if line.startswith("### "):
                 flush()
@@ -286,7 +328,7 @@ def _entries(lines: Iterable[str], style: Style, *, strict: bool, where: str) ->
                 else:
                     blanks.append(line)
             elif line.strip() and strict:
-                raise ReleaseError(f"{where}: text outside a '### ' entry: {line!r}")
+                raise ReleaseError(f"{at}: text outside a '### ' entry: {line!r}")
             continue
         if line.startswith("### "):
             flush()
@@ -294,7 +336,7 @@ def _entries(lines: Iterable[str], style: Style, *, strict: bool, where: str) ->
         elif line.startswith(("- ", "* ")):
             flush()
             if heading is None and strict:
-                raise ReleaseError(f"{where}: an entry has no '### ' category heading: {line!r}")
+                raise ReleaseError(f"{at}: an entry has no '### ' category heading: {line!r}")
             current.append(line)
         elif not line.strip():
             if current:
@@ -306,6 +348,6 @@ def _entries(lines: Iterable[str], style: Style, *, strict: bool, where: str) ->
         else:
             flush()
             if strict:
-                raise ReleaseError(f"{where}: text outside a '- ' entry: {line!r}")
+                raise ReleaseError(f"{at}: text outside a '- ' entry: {line!r}")
     flush()
     return entries

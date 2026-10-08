@@ -7,6 +7,7 @@ import time
 from dataclasses import dataclass
 from enum import StrEnum
 
+from shipmill import fragments
 from shipmill.environments import deployed_from
 from shipmill.errors import ReleaseError
 from shipmill.github import Forbidden, GitHub
@@ -202,7 +203,8 @@ def land(
     published = []
     if rule.github_release:
         title = policy.release_title.format(name=policy.name, version=version)
-        github.create_release(version.tag, title, notes(policy, released, version, since), lane.is_pre)
+        pending = fragments.entries(fragments.at_revision(git, policy, sha)) if not version.is_stable else []
+        github.create_release(version.tag, title, notes(policy, released, version, since, pending), lane.is_pre)
         published.append("github-release")
     for workflow in rule.dispatch:
         github.dispatch(workflow, policy.branch, version.tag)

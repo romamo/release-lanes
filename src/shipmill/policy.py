@@ -7,7 +7,7 @@ import shlex
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from shipmill import environments
@@ -95,6 +95,7 @@ class Policy:
     autonomy: AutonomyPolicy = AutonomyPolicy()
     agents: AgentsConfig | None = None  # the gate's [agents] section; validated here, read by the gate
     roadmap: RoadmapConfig | None = None  # the [roadmap] section; validated here, read by product-intake
+    fragments: str | None = None  # [changelog] fragments: the changelog fragments folder, or None (spec 013)
 
     @property
     def incident_label(self) -> str | None:
@@ -133,7 +134,8 @@ class Policy:
             "roadmap",
         )
         changelog = top.table("changelog")
-        changelog.allow("path", "style")
+        changelog.allow("path", "style", "fragments")
+        fragments = _fragments(changelog) if "fragments" in changelog.raw else None
         bump = top.table("bump")
         bump_from = bump.enum("from", BumpFrom)
         headings: dict[str, Part] = {}
@@ -198,6 +200,7 @@ class Policy:
             agents=agents,
             operate=operate,
             roadmap=roadmap,
+            fragments=fragments,
         )
 
     def rule(self, lane: Lane) -> LaneRule:
@@ -243,6 +246,17 @@ def _lane(lane: Lane, t: Table) -> LaneRule:
         github_release=t.boolean("github_release", default=False),
         dispatch=dispatch,
     )
+
+
+def _fragments(t: Table) -> str:
+    """[changelog] fragments: a folder relative to the repo root, as git names it"""
+    text = t.string("fragments")
+    path = PurePosixPath(text)
+    if not text or text == "." or path.is_absolute() or ".." in path.parts or path.as_posix() != text:
+        raise ReleaseError(
+            f"{t.where}: fragments is a folder relative to the repo root, such as 'changelog.d'; got {text!r}"
+        )
+    return text
 
 
 def _version_line(i: int, t: Table) -> VersionLine:

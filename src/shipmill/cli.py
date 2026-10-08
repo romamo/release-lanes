@@ -49,7 +49,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TextIO
 
-from shipmill import agent_as_person, cli_command, status
+from shipmill import agent_as_person, cli_command, fragments, status
 from shipmill.agents import AgentsConfig, app_id_of
 from shipmill.app import (
     CACHE,
@@ -522,7 +522,9 @@ def main(
         if text is None:
             raise ReleaseError(f"no {policy.changelog} at {args.version.tag}")
         stable = [t.version for t in git.tags() if t.version.is_stable and t.version < args.version]
-        sys.stdout.write(notes(policy, text, args.version, max(stable) if stable else None))
+        pending = [] if args.version.is_stable else fragments.at_revision(git, policy, args.version.tag)
+        since = max(stable) if stable else None
+        sys.stdout.write(notes(policy, text, args.version, since, fragments.entries(pending)))
     return 0
 
 

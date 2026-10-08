@@ -567,3 +567,78 @@ def test_cli_reports_a_replaced_work_branch(repo: Repo, tmp_path: Path, capsys: 
     assert sha is not None and sha != left and f"sha={sha}\n" in output
     assert "::notice title=Orphaned work branch replaced::" in capsys.readouterr().out
     assert "no other run of release.yml is queued or in progress" in summary
+
+
+STABLE_1_1_0 = """\
+# Changelog
+
+## [Unreleased]
+
+## [1.1.0] - 2026-10-09
+
+### Fixed
+
+- Fix B (#2)
+
+### Added
+
+- Feature A (#1)
+
+## [1.0.0] - 2026-09-01
+
+### Added
+
+- The first release
+
+[Unreleased]: https://github.com/o/demo/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/o/demo/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/o/demo/releases/tag/v1.0.0
+"""
+
+
+def test_s013_1_without_fragments_plan_stamp_and_notes_are_unchanged(
+    repo: Repo, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The planner and stamp fixtures with no [changelog] fragments, pinned whole as they were
+    before spec 013: the plan's outputs, the stamped files and CHANGELOG, and the notes"""
+    assert repo.policy.fragments is None
+    skipped = plan(repo, at_day(1))
+    assert skipped.outputs()["reason"] == (
+        "stable: no rc after 1.0.0 to promote; rc: nothing pending under Unreleased; "
+        "dev: v1.0.0 already holds main's head"
+    )
+    repo.merge(1, "Added", "Feature A", "src/a.py", "A = 1\n")
+    repo.merge(2, "Fixed", "Fix B")
+    rc = plan(repo, at_day(1))
+    assert rc.outputs() == {
+        "mode": "release",
+        "action": "release",
+        "reason": "rc 1.1.0rc1: 2 pending entries; window 'daily 07:00 UTC' opened at 2026-10-06 07:00 UTC",
+        "lane": "rc",
+        "version": "1.1.0rc1",
+        "base": rc.base,
+        "merges": "",
+        "prs": "",
+        "proposals": "",
+    }
+    rc_sha = release(repo, rc)
+    assert repo.git.run("diff", "--name-only", rc.base, rc_sha).split() == ["README.md", "pyproject.toml", "uv.lock"]
+    notes = "Changes since v1.0.0:\n\n### Fixed\n\n- Fix B (#2)\n\n### Added\n\n- Feature A (#1)\n"
+    assert repo.github.releases[-1][2] == notes
+    assert main(["--repo", str(repo.root), "notes", "--version", "1.1.0rc1"], repo.github) == 0
+    assert capsys.readouterr().out == notes
+
+    stable = plan(repo, at_day(4), event=Event.MANUAL, lane=Lane.STABLE)
+    assert stable.reason == "stable 1.1.0: promotes v1.1.0rc1, soaked 3 day(s); started by hand"
+    assert stable.version is not None
+    prepared = prepare(
+        repo.git, repo.policy, Lane.STABLE, stable.version, stable.base, at_day(4).date(), commit=True, push=True
+    )
+    assert prepared.changed == ("CHANGELOG.md", "pyproject.toml", "uv.lock", "README.md")
+    assert repo.git.show(prepared.sha, "CHANGELOG.md") == STABLE_1_1_0
+    assert repo.git.run("diff", "--name-only", stable.base, prepared.sha).split() == [
+        "CHANGELOG.md",
+        "README.md",
+        "pyproject.toml",
+        "uv.lock",
+    ]

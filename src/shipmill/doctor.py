@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from shipmill import cli_command
+from shipmill import cli_command, fragments
 from shipmill.agent_as_person import NAME as AGENT_AS_PERSON
 from shipmill.agent_as_person import Flagged
 from shipmill.autonomy import HOLD_LABEL, Autonomy, Hold
@@ -143,22 +143,41 @@ def doctor(
         add(False, "bump", "bump from = 'paths' diffs against the last stable tag; tag one first")
 
     path = root / policy.changelog
+    if policy.fragments is not None and not (root / policy.fragments).is_dir():
+        # S-013-2: a policy naming a folder that isn't there is broken, not a check to report
+        raise ReleaseError(f"[changelog] fragments names {policy.fragments}, which is not a folder in {root}")
     if not path.is_file():
         add(False, "changelog", f"no {policy.changelog}")
     else:
         try:
             changelog = Changelog(path.read_text(encoding="utf-8"), policy.style)
-            pending = changelog.pending()
+            pieces = fragments.in_checkout(root, policy)
+            pending = changelog.pending(fragments.entries(pieces))
             unknown = (
                 sorted({str(e.heading) for e in pending if e.heading not in policy.bump_headings})
                 if policy.bump_from is BumpFrom.HEADINGS
                 else []
             )
+            held = (
+                ""
+                if policy.fragments is None
+                else f" (Unreleased and {len(pieces)} fragment{'' if len(pieces) == 1 else 's'} in {policy.fragments})"
+            )
             add(
                 not unknown,
                 "changelog",
-                f"{len(pending)} pending entries" + (f"; headings missing from [bump]: {unknown}" if unknown else ""),
+                f"{len(pending)} pending entries{held}"
+                + (f"; headings missing from [bump]: {unknown}" if unknown else ""),
             )
+            released = changelog.released()
+            for fragment in pieces:
+                if all(e in released for e in fragment.entries):
+                    add(
+                        False,
+                        "fragments",
+                        f"{fragment.path}: a released section holds every entry; delete it: git rm {fragment.path}",
+                        warn=True,
+                    )
         except ReleaseError as exc:
             add(False, "changelog", str(exc))
 
