@@ -107,7 +107,10 @@ A lane releases when one of its **triggers** is due (quiet time, a schedule wind
 opened after its last release, a finished milestone) and no **gate** holds it. Any lane can
 also be started by hand from the Release workflow, which skips the triggers but not the
 gates. One run releases one lane, in the order hotfix, stable, rc, dev; GitHub's cron only
-starts a run, and the policy decides whether a window is open.
+starts a run, and the policy decides whether a window is open. When the stable lane can't
+work out what it would promote (an rc section it can't fold, say), the run goes on to rc and
+dev and names the stable lane's error in its reason; it fails with that error only when no
+other lane releases or proposes.
 
 ### Environments
 
