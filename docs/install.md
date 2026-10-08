@@ -476,7 +476,9 @@ the gate's own environment to choose another ceiling.
    (`item`, `since`, `waited_hours`, `notified`, `error`). `mode` is null on a HELD,
    WAITING, or RUNNING tick, which reads no config. `plugin` is the daily plugin check of
    a launch with `plugin_update = true` (`latest`, `installs`, each with `scope`,
-   `installed`, and `updated`, and `error`), null when none ran
+   `installed`, and `updated`, and `error`), null when none ran; releases up to 0.40.0
+   reported it as `installed`, `latest`, `updated`, and `error`, for the project-scope
+   install alone
 
 ## Pause or remove it
 
