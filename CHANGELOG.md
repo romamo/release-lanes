@@ -11,6 +11,7 @@ bot.
 
 - The package metadata names its author as Roman Medvedev with a contact email,
   instead of the handle Romamo
+- The LICENSE names the copyright holder as Roman Medvedev instead of the handle Romamo
 
 ## [0.40.0] - 2026-10-08
 
