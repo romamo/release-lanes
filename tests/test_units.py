@@ -264,6 +264,9 @@ class TestChangelog:
             "The intro.\n\n- Fix C (#3)\n\n### Fixed\n\n- Fix D (#4)\n",
             "The intro.\n\n#### Internals\n\n### Fixed\n\n- Fix D (#4)\n",
             "The intro.\n\n1. Fix C (#3)\n\n### Fixed\n\n- Fix D (#4)\n",
+            "The intro.\n\n+ Fix C (#3)\n\n### Fixed\n\n- Fix D (#4)\n",
+            "The intro:\n  - Fix C (#3)\n\n### Fixed\n\n- Fix D (#4)\n",
+            "The intro:\n   2) Fix C (#3)\n\n### Fixed\n\n- Fix D (#4)\n",
         ],
     )
     def test_folding_refuses_an_rc_section_with_text_that_is_not_an_entry(self, body: str) -> None:  # #243, #283

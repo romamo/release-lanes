@@ -30,8 +30,9 @@ _HEADINGS = {
 _RELEASE_LIKE = re.compile(r"^## (\[|\d)")  # a heading that must parse as a release
 _LINK = re.compile(r"^\[(?P<name>[^\]]+)\]: (?P<url>\S+)\s*$")
 _COMPARE = re.compile(r"^(?P<base>\S+)/compare/(?P<range>\S+)$")
-# where an rc section's intro prose ends: its first heading, or a list item before one
-_NOT_PROSE = re.compile(r"^(#|[-*] |\d+[.)] )")
+# where an rc section's intro prose ends: its first heading, or a list item (of any marker,
+# indented or not) before one
+_NOT_PROSE = re.compile(r"^(#|\s*([-*+]|\d+[.)])\s)")
 
 
 @dataclass(frozen=True, slots=True)
