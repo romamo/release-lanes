@@ -13,6 +13,7 @@ from typing import Any, Protocol
 from shipmill.errors import ReleaseError
 
 PROPOSAL_LABEL = "shipmill-proposal"  # on every issue proposing a release or a deploy
+UPGRADE_LABEL = "shipmill-upgrade"  # on every issue proposing a config upgrade (spec 014)
 OPEN_LIMIT = 100  # open issues read per label: proposals are one per lane and per environment
 PULL_LIMIT = 1000  # open pull requests read at once; gh's own default is 30
 MERGED_PER_BRANCH = 20  # merged pull requests read per head branch name, the newest
@@ -23,7 +24,10 @@ _MERGED_FRAGMENT = (
     f"timelineItems(itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT], last: {HISTORY_LIMIT}) "
     "{ nodes { ... on HeadRefForcePushedEvent { beforeCommit { oid } afterCommit { oid } } } } } }"
 )
-_LABEL_DESCRIPTIONS = {PROPOSAL_LABEL: "Opened by shipmill: a release or deploy waiting for a person"}
+_LABEL_DESCRIPTIONS = {
+    PROPOSAL_LABEL: "Opened by shipmill: a release or deploy waiting for a person",
+    UPGRADE_LABEL: "Opened by shipmill: a config upgrade waiting for the maintainer's decision",
+}
 # the statuses of a run not finished yet, each listed with its own query: GitHub filters runs
 # by one status at a time
 ACTIVE_STATUSES = ("queued", "in_progress", "waiting", "pending", "requested")
@@ -189,6 +193,22 @@ def _time(text: str) -> dt.datetime:
     return when
 
 
+def labelled_command(label: str) -> tuple[str, ...]:
+    """gh's arguments that list the issues with the label, open and closed, the newest 100"""
+    fields = "number,title,body,state,closedAt"
+    return ("issue", "list", "--label", label, "--state", "all", "--json", fields, "--limit", "100")
+
+
+def parse_labelled(text: str) -> list[Issue]:
+    """labelled_command's output, newest first"""
+    found = json.loads(text)
+    issues = [
+        Issue(int(i["number"]), i["title"], i["body"], None if i["state"] == "OPEN" else _time(i["closedAt"]))
+        for i in found
+    ]
+    return sorted(issues, key=lambda i: i.number, reverse=True)
+
+
 class GhCli:
     """GitHub through the gh CLI, authenticated by GH_TOKEN in Actions"""
 
@@ -295,17 +315,7 @@ class GhCli:
         self._gh("issue", "comment", str(number), "--body", body)
 
     def labelled_issues(self, label: str) -> list[Issue]:
-        found = json.loads(
-            self._gh(
-                "issue", "list", "--label", label, "--state", "all", "--json", "number,title,body,state,closedAt",
-                "--limit", "100",
-            )
-        )  # fmt: skip
-        issues = [
-            Issue(int(i["number"]), i["title"], i["body"], None if i["state"] == "OPEN" else _time(i["closedAt"]))
-            for i in found
-        ]
-        return sorted(issues, key=lambda i: i.number, reverse=True)
+        return parse_labelled(self._gh(*labelled_command(label)))
 
     def open_labelled_issues(self, label: str) -> list[Issue]:
         found = json.loads(

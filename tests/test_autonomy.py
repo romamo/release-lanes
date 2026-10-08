@@ -373,12 +373,13 @@ jobs:
 def test_doctor_warns_on_a_caller_that_cannot_open_the_proposal_only_when_needed(repo: Repo) -> None:
     caller = ".github/workflows/release.yml"
     repo.write(caller, CALLER_TEXT.format(prepare="read", other="write"))
+    set_autonomy(repo, 'upgrade = "observe"\n')  # spec 014's own warning stays out of this test
     assert "permissions" not in checks(repo, repo.github)  # no propose, no hold: nothing opens an issue
-    set_autonomy(repo, 'rollback = "propose"\n')
+    set_autonomy(repo, 'rollback = "propose"\nupgrade = "observe"\n')
     status, detail = checks(repo, repo.github)["permissions"]
     assert status == "WARN" and detail.startswith("the config sets a stage to propose")
     assert detail.endswith("change its `issues: read` to `issues: write`")  # another job's write doesn't count
-    set_autonomy(repo, "")
+    set_autonomy(repo, 'upgrade = "observe"\n')
     repo.github.holds = ["#7 Investigating"]
     assert checks(repo, repo.github)["permissions"][1].startswith(f"held by {HOLD_LABEL} #7")
     repo.write(caller, CALLER_TEXT.format(prepare="write", other="read"))
@@ -491,8 +492,9 @@ def test_doctor_warns_on_a_land_job_that_cannot_close_the_proposal_only_under_pr
         found = doctor(repo.root, repo.github)
         return [c.detail for c in found if c.name == "permissions" and "land job" in c.detail]
 
+    set_autonomy(repo, 'upgrade = "observe"\n')  # spec 014's own land warning stays out of this test
     assert land_warnings() == []
-    set_autonomy(repo, 'release = "propose"\n')
+    set_autonomy(repo, 'release = "propose"\nupgrade = "observe"\n')
     [detail] = land_warnings()
     assert detail.startswith("release autonomy is propose") and detail.endswith("grants no `issues: write`: add it")
     repo.write(".github/workflows/release.yml", LAND_CALLER.format(issues="      issues: write\n"))

@@ -309,7 +309,18 @@ upgrade = "propose"               # observe | propose | act: config upgrades
   (writing the key by hand, with any value, decides it), and `shipmill upgrade --apply <id>`
   adds the upgrade's line at the end of its table, keeping the rest of the file byte for
   byte, creates the files it owns, and commits nothing. An open hold turns `act` into
-  `propose`
+  `propose`. After a release lands, `upgrade`, its own job in shipmill's `land.yml`, runs
+  `shipmill upgrade --propose` with the `issues: write` the caller's land job already
+  grants, so no caller workflow changes: one issue per
+  pending upgrade, labelled `shipmill-upgrade` with the marker `<!-- shipmill-upgrade: <id>
+  <version> -->` on its first line, opened once and kept up to date, none under
+  `observe`. Closing that issue while the config lacks the key declines the upgrade: it is
+  never proposed again, nor listed. A config that sets the key closes its open issue as
+  completed on the next run. A failure there fails that job only, naming the upgrade, never
+  the release. `shipmill doctor` and `shipmill status` list each pending upgrade with its
+  issue's link, or the `--apply` command, as its fix; doctor warns about a land job
+  without `issues: write` only under `propose` or `act` with an upgrade pending, and a
+  pending upgrade never fails it
 - **The stop switch**: any open issue labelled `shipmill-hold` turns every `act` into
   `propose` for the repository. One label, no commit, so it works from a phone. While it is
   open no release happens by itself, the run summary names the hold, and a lane started by

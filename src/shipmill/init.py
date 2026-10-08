@@ -224,7 +224,7 @@ jobs:
     permissions:
       contents: write # main, release branches, tags, and releases
       actions: write # starts the lane's dispatch workflows
-      issues: write # closes the issue release = "propose" opens, once the lane released
+      issues: write # closes the issue release = "propose" opens, and proposes config upgrades
 """
 
 

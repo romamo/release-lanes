@@ -5,7 +5,8 @@ name: shipmill land
 # alone (a pre-release, or a stable release promoted while main moved on, which then gets a
 # sync commit on main). It tags, publishes, and starts the lane's dispatch workflows.
 # Whatever happened, the work branch is deleted: a failed release is planned again. Under
-# release = "propose" it then closes the lane's proposal issue.
+# release = "propose" it then closes the lane's proposal issue, and it proposes the config
+# upgrades the repo hasn't decided (spec 014).
 
 on:
   workflow_call:
@@ -29,8 +30,9 @@ on:
         type: string
         default: "git+https://github.com/shipmill/shipmill@v0"
 
-# No workflow-level permissions: each job sets its own, except close-proposal, which takes
-# the caller's grant, so a caller that grants no `issues: write` still starts this workflow
+# No workflow-level permissions: each job sets its own, except close-proposal and upgrade,
+# which take the caller's grant, so a caller that grants no `issues: write` still starts this
+# workflow
 
 jobs:
   land:
@@ -105,3 +107,29 @@ jobs:
           TOOL: ${{ inputs.tool }}
           VERSION: ${{ inputs.version }}
         run: uvx --from "$TOOL" shipmill cleanup --version "$VERSION"
+
+  # Spec 014: after a release landed, one shipmill-upgrade issue per config upgrade this repo
+  # hasn't decided ([autonomy] upgrade; none under observe), and the issue of each upgrade the
+  # config now sets closed. It sets no permissions, so it runs with the caller's land grant,
+  # whose `issues: write` also closes the proposal issue; no job needs it, so a failure here
+  # fails this job only, naming the upgrade, after the release landed
+  upgrade:
+    needs: land
+    concurrency:
+      group: shipmill-upgrade
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - uses: astral-sh/setup-uv@v10.2.0
+
+      - name: Propose the pending config upgrades
+        shell: bash # -eo pipefail: a failed propose fails the step, though its output goes through tee
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TOOL: ${{ inputs.tool }}
+        run: |
+          uvx --from "$TOOL" shipmill upgrade --propose | tee -a "$GITHUB_STEP_SUMMARY"

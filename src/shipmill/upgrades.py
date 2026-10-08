@@ -4,19 +4,28 @@ repo's .github/shipmill.toml, which shipmill never turns on by itself (D-10, D-2
 An upgrade is decided once the config holds its key, whatever the value: `plugin_update =
 false` written by hand ends the proposal as surely as accepting it. Applying one edits the
 config's text, adding its line at the end of its table and keeping every other byte (comments
-included), and creates the files it owns; it commits nothing."""
+included), and creates the files it owns; it commits nothing.
+
+Proposing one opens an issue labelled shipmill-upgrade whose first line is the upgrade's
+marker, kept up to date on later runs. Closing that issue while the config lacks the key is a
+decline: the upgrade is never proposed again, nor listed as pending."""
 
 import copy
 import json
 import re
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from shipmill import UVX
+from shipmill.autonomy import Autonomy
 from shipmill.config import CONFIG_PATH
 from shipmill.errors import ReleaseError
+from shipmill.github import UPGRADE_LABEL, GitHub, Issue
 from shipmill.version import Version
 
 _ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
@@ -24,6 +33,7 @@ _KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 _HEADER = re.compile(r"^\s*\[\s*([A-Za-z0-9_-]+)\s*\]\s*(?:#.*)?$")
 _ANY_HEADER = re.compile(r"^\s*\[")
 _LINE = re.compile(r"[^\n]*\n|[^\n]+\Z")
+_MARKER = re.compile(r"^<!-- shipmill-upgrade: (\S+) (\S+) -->\s*$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +171,155 @@ def find(upgrade_id: UpgradeId) -> Upgrade:
 def pending(raw: Mapping[str, Any]) -> tuple[Upgrade, ...]:
     """The upgrades that apply to the config and that it hasn't decided"""
     return tuple(u for u in CATALOGUE if u.applies(raw) and not u.decided(raw))
+
+
+# -- proposal issues -------------------------------------------------------------------------
+
+
+def marker(upgrade: Upgrade) -> str:
+    """The first line of the upgrade's issue: its id, and the release that last changed it"""
+    return f"<!-- shipmill-upgrade: {upgrade.id} {upgrade.version} -->"
+
+
+def marked(issue: Issue) -> UpgradeId | None:
+    """The upgrade an issue proposes, from the marker on its body's first line; None for an
+    issue without one, or whose marker names no well-formed id"""
+    first = issue.body.replace("\r\n", "\n").split("\n", 1)[0]
+    found = _MARKER.match(first)
+    return UpgradeId(found[1]) if found and _ID.match(found[1]) else None
+
+
+@dataclass(frozen=True, slots=True)
+class Offer:
+    """A pending upgrade with no declined proposal, and its open issue when it has one"""
+
+    upgrade: Upgrade
+    issue: int | None
+
+
+def _issues(issues: Sequence[Issue], upgrade: Upgrade) -> tuple[list[Issue], list[Issue]]:
+    """The upgrade's open issues and its closed ones, each by number"""
+    mine = sorted((i for i in issues if marked(i) == upgrade.id), key=lambda i: i.number)
+    return [i for i in mine if not i.closed], [i for i in mine if i.closed]
+
+
+def offers(raw: Mapping[str, Any], issues: Sequence[Issue]) -> tuple[Offer, ...]:
+    """The pending upgrades, less those declined: an upgrade whose issue was closed, and has
+    no open one, while the config lacks its key. issues are the shipmill-upgrade issues, open
+    and closed (GitHub.labelled_issues)"""
+    found = []
+    for upgrade in pending(raw):
+        opened, closed = _issues(issues, upgrade)
+        if opened:
+            found.append(Offer(upgrade, opened[0].number))
+        elif not closed:
+            found.append(Offer(upgrade, None))
+    return tuple(found)
+
+
+def title(upgrade: Upgrade) -> str:
+    return f"shipmill upgrade: turn on {upgrade.id}"
+
+
+def body(upgrade: Upgrade) -> str:
+    created = "".join(f" and creates `{f.path.as_posix()}`" for f in upgrade.files)
+    lines = [
+        marker(upgrade),
+        f"shipmill {upgrade.version} offers **{upgrade.id}**, which needs an opt-in in `{CONFIG_PATH.as_posix()}`."
+        " shipmill never turns it on by itself.",
+        "",
+        f"- What it changes: {upgrade.changes}",
+        f"- Why: {upgrade.why}",
+        f"- To turn it off later: {upgrade.off}",
+        "",
+        f"It adds this line under `[{upgrade.table}]` in `{CONFIG_PATH.as_posix()}`{created}:",
+        "",
+        "```toml",
+        f"[{upgrade.table}]",
+        upgrade.line,
+        "```",
+        "",
+        "### Accept",
+        "",
+        "- Answer the question shipmill's agent asks on this issue, or",
+        "- Make the change yourself and open a pull request with it:",
+        "",
+        "```",
+        f"{UVX} upgrade --apply {upgrade.id}",
+        "```",
+        "",
+        "### Decline",
+        "",
+        f"Say so here, or close this issue: shipmill won't propose {upgrade.id} again.",
+        "",
+        f"Each release shipmill cuts updates this issue while the upgrade is pending, and closes it once"
+        f" `[{upgrade.table}]` sets `{upgrade.key}`, to any value.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+class Outcome(StrEnum):
+    OPENED = "opened"
+    UPDATED = "updated"
+    UNCHANGED = "unchanged"
+    CLOSED = "closed"  # the config holds the key: closed as completed
+
+
+@dataclass(frozen=True, slots=True)
+class Proposed:
+    upgrade: Upgrade
+    issue: int
+    outcome: Outcome
+
+
+def propose(raw: Mapping[str, Any], level: Autonomy, github: GitHub, fix: str) -> list[Proposed]:
+    """Close as completed the open issue of each upgrade the config decided; then, unless the
+    upgrade autonomy is observe, open or update one issue per offer. A failure names the
+    upgrade, and fix says how to grant `issues: write` when GitHub refused it"""
+    waiting = pending(raw)  # first: a malformed config fails before GitHub is asked
+    try:
+        issues = github.labelled_issues(UPGRADE_LABEL)
+    except ReleaseError as exc:
+        named = ", ".join(str(u.id) for u in waiting) or "no pending upgrade"
+        raise ReleaseError(f"can't read the {UPGRADE_LABEL} issues ({named}): {exc}") from exc
+    done: list[Proposed] = []
+    for upgrade in CATALOGUE:
+        if not upgrade.decided(raw):
+            continue
+        for issue in _issues(issues, upgrade)[0]:
+            text = (
+                f"`[{upgrade.table}]` in `{CONFIG_PATH.as_posix()}` sets `{upgrade.key}`: {upgrade.id} is decided,"
+                " so this issue is done."
+            )
+            with _named(upgrade, fix):
+                github.close_issue(issue.number, text)
+            done.append(Proposed(upgrade, issue.number, Outcome.CLOSED))
+    if level is Autonomy.OBSERVE:
+        return done
+    for offer in offers(raw, issues):
+        upgrade = offer.upgrade
+        wanted_title, wanted = title(upgrade), body(upgrade)
+        with _named(upgrade, fix):
+            if offer.issue is None:
+                number = github.create_issue(wanted_title, wanted, (UPGRADE_LABEL,))
+                done.append(Proposed(upgrade, number, Outcome.OPENED))
+                continue
+            issue = next(i for i in issues if i.number == offer.issue)
+            if (issue.title, issue.body.replace("\r\n", "\n").strip()) == (wanted_title, wanted.strip()):
+                done.append(Proposed(upgrade, issue.number, Outcome.UNCHANGED))
+                continue
+            github.update_issue(issue.number, wanted_title, wanted)
+            done.append(Proposed(upgrade, issue.number, Outcome.UPDATED))
+    return done
+
+
+@contextmanager
+def _named(upgrade: Upgrade, fix: str) -> Iterator[None]:
+    """Re-raise a GitHub failure naming the upgrade, with the fix for a refused write"""
+    try:
+        yield
+    except ReleaseError as exc:
+        raise ReleaseError(f"upgrade {upgrade.id}: {exc}; if GitHub refused it (403): {fix}") from exc
 
 
 @dataclass(frozen=True, slots=True)
