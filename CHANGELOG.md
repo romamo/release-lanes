@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-10-08
+
 ### Changed
 
 - `shipmill gate --json`'s `plugin` changes shape: it was `installed`, `latest`, `updated`,
@@ -39,6 +41,12 @@ bot.
   write` only when `upgrade` is propose or act and an upgrade is pending (D-9); `shipmill
   status` lists each pending upgrade with its
   issue's link or the `--apply` command as its fix (spec 014) (#280)
+- Changelog fragments are on by default: `shipmill init` sets `[changelog] fragments =
+  "changelog.d"` and writes `changelog.d/README.md`, and `shipmill init --no-fragments`
+  writes neither; in a repo with fragments, `changelog_guard.py check` fails a pull request
+  that adds a line under Unreleased, naming the fragment to write, or a fragment that
+  doesn't read; the skills add a fragment instead of editing `CHANGELOG.md`, and shipmill's
+  own pull requests do too (spec 013) (#274)
 
 ## [0.40.0] - 2026-10-08
 
@@ -1316,7 +1324,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.40.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.41.0...HEAD
+[0.41.0]: https://github.com/shipmill/shipmill/compare/v0.40.0...v0.41.0
 [0.40.0]: https://github.com/shipmill/shipmill/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/shipmill/shipmill/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/shipmill/shipmill/compare/v0.37.0...v0.38.0
