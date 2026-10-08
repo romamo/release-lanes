@@ -68,7 +68,15 @@ def command(repo: str, since: dt.datetime) -> list[str]:
 
 
 def _refuse(what: object) -> ReleaseError:
-    return ReleaseError(f"gh api graphql printed {str(what)[:300]} for the {NAME} check")
+    """Names the answer's shape and URL or errors, never a body or title (untrusted text)"""
+    if isinstance(what, dict) and what.get("errors"):
+        shown = f"errors {str(what['errors'])[:300]}"
+    elif isinstance(what, dict):
+        url = what.get("url")
+        shown = f"an object with keys {sorted(map(str, what))}" + (f" at {url}" if isinstance(url, str) else "")
+    else:
+        shown = type(what).__name__
+    return ReleaseError(f"gh api graphql printed {shown} for the {NAME} check")
 
 
 def _get(holder: Any, key: str) -> Any:
