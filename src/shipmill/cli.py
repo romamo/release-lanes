@@ -49,7 +49,7 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TextIO
 
-from shipmill import cli_command, status
+from shipmill import agent_as_person, cli_command, status
 from shipmill.agents import AgentsConfig, app_id_of
 from shipmill.app import (
     CACHE,
@@ -387,8 +387,8 @@ def main(
 ) -> int:
     """github stands in for gh, http for the health checks, sessions for `claude agents`, api
     for GitHub's REST API, signer for openssl, stdin for git's credential request, state for
-    watch_state.py, environ for this process's env, home for the user's home, and gh_runner
-    for running `shipmill gh`'s gh, as tests pass fakes"""
+    watch_state.py (and doctor's AGENT_AS_PERSON read), environ for this process's env, home
+    for the user's home, and gh_runner for running `shipmill gh`'s gh, as tests pass fakes"""
     head, passed = _split_gh(argv)
     args = _parser().parse_args(head)
     root: Path = args.repo.resolve()
@@ -421,7 +421,10 @@ def main(
     if args.command == "doctor":
         slug = _doctor_repo(root)
         plugins = None if slug is None else (lambda: read_plugin_rows(slug, root))
-        checks = doctor(root, github or (GhCli(root) if shutil.which("gh") else None), plugins)
+        people = (
+            None if slug is None else (lambda: agent_as_person.read(slug, state or run_state, dt.datetime.now(dt.UTC)))
+        )
+        checks = doctor(root, github or (GhCli(root) if shutil.which("gh") else None), plugins, people)
         for check in checks:
             print(f"{check.status} {check.name}: {check.detail}")
         return 1 if any(c.status == "FAIL" for c in checks) else 0
@@ -805,6 +808,8 @@ def _status(
     if gate is None:
         sys.stdout.write(proc.stdout)
         return proc.returncode
+    # S-012-7, S-012-8: read only when agents write as an App
+    people = agent_as_person.read(slug, run, when) if gate.agents is not None and gate.agents.app_id else None
     git = Git(top)
     main = status.read_main(git, status.read_branch(slug, run))
     facts = status.Facts(
@@ -819,6 +824,7 @@ def _status(
         now=when,
         checkout=top,
         command=cli_command(),
+        agent_as_person=people,
     )
     sys.stdout.write(status.report(facts).text(slug))
     return proc.returncode  # S-009-14: spec 008's code, whatever the verdict

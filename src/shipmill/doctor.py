@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from shipmill import cli_command
+from shipmill.agent_as_person import NAME as AGENT_AS_PERSON
+from shipmill.agent_as_person import Flagged
 from shipmill.autonomy import HOLD_LABEL, Autonomy, Hold
 from shipmill.changelog import Changelog
 from shipmill.config import config_path
@@ -44,6 +46,7 @@ class PluginRow:
 
 
 PluginRows = Callable[[], list[PluginRow]]  # the rows, or ReleaseError when they can't be read
+PeopleReader = Callable[[], Flagged]  # spec 012's flagged items, or ReleaseError when they can't be read
 
 
 def read_plugin_rows(repo: str, root: Path) -> list[PluginRow]:
@@ -84,9 +87,27 @@ def plugin_checks(read: PluginRows) -> list[Check]:
     return checks
 
 
-def doctor(root: Path, github: GitHub | None = None, plugins: PluginRows | None = None) -> list[Check]:
+def agent_as_person_check(read: PeopleReader) -> Check:
+    """S-012-7: a WARN naming the agent-marked items a person wrote, with the fix; a failed
+    read is a WARN that says so, never a crash or a silent PASS"""
+    try:
+        found = read()
+    except ReleaseError as exc:
+        return Check("WARN", AGENT_AS_PERSON, f"can't read the last 7 days' issues, pull requests, and comments: {exc}")
+    if found.urls:
+        return Check("WARN", AGENT_AS_PERSON, found.detail())
+    return Check("PASS", AGENT_AS_PERSON, "no agent-marked item of the last 7 days was written by a person")
+
+
+def doctor(
+    root: Path,
+    github: GitHub | None = None,
+    plugins: PluginRows | None = None,
+    people: PeopleReader | None = None,
+) -> list[Check]:
     """github reads the open hold; None (no gh) reports that it can't. plugins reads the
-    shipmill plugin's installs on this host; None checks none"""
+    shipmill plugin's installs on this host; None checks none. people reads spec 012's
+    AGENT_AS_PERSON items, only when [agents] app_id is set; None checks none"""
     checks: list[Check] = []
 
     def add(ok: bool, name: str, detail: str, warn: bool = False) -> None:
@@ -197,6 +218,8 @@ def doctor(root: Path, github: GitHub | None = None, plugins: PluginRows | None 
         checks.append(_deploy(root / ".github" / "workflows" / env.workflow, env.name, operate_caller, watched))
     if plugins is not None:
         checks.extend(plugin_checks(plugins))
+    if people is not None and policy.agents is not None and policy.agents.app_id is not None:
+        checks.append(agent_as_person_check(people))
     return checks
 
 
