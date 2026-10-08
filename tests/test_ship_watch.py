@@ -112,11 +112,6 @@ def test_a_failing_plan_is_a_bot_row_and_the_watch_goes_on(ws: ModuleType, tmp_p
     assert rows[0].json()["agent"] is False and "BOT_PLAN_FAILED" in ws.ACTION
 
 
-def test_a_plan_that_fails_silently_names_its_exit(ws: ModuleType, tmp_path: Path) -> None:
-    _, rows = ws.bot_plan(REPO, plan_checkout(tmp_path), ws.POLICY, "main", "t", "release.yml", Spawned((2, "", "")))
-    assert rows[0].detail == "shipmill plan failed: exit 2"
-
-
 def test_a_plan_that_passes_reads_its_release(ws: ModuleType, tmp_path: Path) -> None:
     decision = json.dumps({"action": "release", "reason": "stable 1.0.0: main quiet", "lane": "stable"})
     spawned = Spawned((0, decision, ""))
@@ -130,13 +125,16 @@ def test_a_plan_that_passes_reads_its_release(ws: ModuleType, tmp_path: Path) ->
         (Spawned((2, "", "x"), add=128), SystemExit),
         (Spawned((2, "", "x"), remove=1), SystemExit),
         (Spawned((0, "not json", "")), json.JSONDecodeError),
+        (Spawned((2, "", "error: Failed to fetch: `https://x:tok@h/s.git`\n  Caused by: refused\n")), SystemExit),
+        (Spawned((2, "", "")), SystemExit),
     ],
-    ids=["worktree add", "worktree remove", "no JSON"],
+    ids=["worktree add", "worktree remove", "no JSON", "uvx resolve", "silent"],
 )
 def test_only_the_plan_itself_failing_is_the_row(
     ws: ModuleType, tmp_path: Path, spawned: Spawned, stop: type[BaseException]
 ) -> None:
-    # #276: a failed worktree add or remove, or output that isn't JSON, still stops the watch
+    # #276: a failed worktree add or remove, output that isn't JSON, or a failure that isn't the
+    # planner's own `shipmill: ` error (uvx unable to fetch the tool, say) still stops the watch
     with pytest.raises(stop):
         ws.bot_plan(REPO, plan_checkout(tmp_path), ws.POLICY, "main", "t", "release.yml", spawned)
 

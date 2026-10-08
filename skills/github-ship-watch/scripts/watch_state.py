@@ -12,7 +12,8 @@ Release bot (a repo with .github/shipmill.toml):
   BOT_STALLED     a shipmill bot in release mode has a release due now, no run of
                   its workflow is queued or running, and none started in --grace minutes
   BOT_PLAN_FAILED a shipmill bot's `shipmill plan --event schedule --dry-run` on the default
-                  branch exited non-zero (a CHANGELOG it refuses, say): its error line, and the
+                  branch failed with its own `shipmill: ` error (a CHANGELOG it refuses, say;
+                  any other failure, such as uvx's, still exits 2): that error line, and the
                   plan to run in the checkout to see it. The watch reads the plan as no release
                   due and reads the rest; the release workflow's own plan stops at the same error
   BOT_OK          none of these; BOT_NONE when the repo has no bot (it releases by "tag X")
@@ -157,7 +158,7 @@ BOT_FAILED, BOT_STALLED, BOT_PLAN_FAILED, WORK_BRANCH_STALE, NOT_PUBLISHED, UNAN
 ISSUES, OPERATE_FAILED, UNHEALTHY, PROMOTION_DUE, INCIDENT_OPEN, POSTMORTEM_DUE,
 NEEDS_DECISION, BRANCH_DELETE_OFF, SHIPMILL_OUTDATED, GATE_NO_APP, or SKILL_SHADOWED row is
 present, 2 on bad input or a git, gh, or uvx failure (a failing `shipmill worktrees`; a
-failing `shipmill plan` is the BOT_PLAN_FAILED row instead).
+`shipmill plan` failing with its own `shipmill: ` error is the BOT_PLAN_FAILED row instead).
 Needs git, an authenticated gh, and uvx (for a shipmill bot's plan and worktrees; `shipmill
 worktrees` needs claude on PATH too, to see the live sessions). Python 3.10+,
 standard library only.
@@ -519,7 +520,8 @@ def fetch_unfinished(
 
 
 class PlanFailed(Exception):
-    """`shipmill plan` itself exited non-zero: its last stderr line, or its exit code"""
+    """`shipmill plan` itself refused the default branch: its last stderr line, its `shipmill: `
+    error"""
 
 
 Spawn = Callable[[list[str], Path | None, dict[str, str] | None], subprocess.CompletedProcess[str]]
@@ -529,8 +531,9 @@ def planned_release(
     repo: str, repo_dir: Path, policy: Path, branch: str, tool: str, execute: Spawn = spawn
 ) -> Due | None:
     """What the shipmill planner would release now on the default branch, or None. The plan's
-    own failure raises PlanFailed (#276); a failed worktree add or remove, or a plan that
-    prints no JSON, stops the watch as any failed command does"""
+    own failure (its `shipmill: ` error line) raises PlanFailed (#276); a failed worktree add
+    or remove, any other failure (uvx unable to fetch the tool, say), or a plan that prints no
+    JSON stops the watch as any failed command does"""
     work = repo_dir / "tmp" / f"ship-watch-{os.getpid()}"
     add = ["git", "worktree", "add", "-q", "--detach", str(work), f"origin/{branch}"]
     checked(add, execute(add, repo_dir, None))
@@ -542,8 +545,9 @@ def planned_release(
         checked(remove, execute(remove, repo_dir, None))
     if proc.returncode != 0:
         lines = [line.strip() for line in proc.stderr.splitlines() if line.strip()]
-        raise PlanFailed(lines[-1] if lines else f"exit {proc.returncode}")
-    out = proc.stdout
+        if lines and lines[-1].startswith("shipmill: "):  # the planner's own error, not uvx's
+            raise PlanFailed(lines[-1])
+    out = checked(["uvx", "--from", tool], proc)
     decision = json.loads(out)
     policy_mode = re.search(r'^mode\s*=\s*"(\w[\w-]*)"', (repo_dir / policy).read_text(), re.MULTILINE)
     if decision["action"] != "release" or policy_mode is None or policy_mode.group(1) != "release":
