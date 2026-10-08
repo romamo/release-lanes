@@ -185,4 +185,8 @@ fragment instead.
 
 ## Issues
 
+- shipmill/shipmill#272: S-013-1, S-013-2, S-013-3, S-013-4, S-013-5, S-013-6, S-013-7, S-013-8, S-013-9, S-013-12
+- shipmill/shipmill#273: S-013-10, S-013-11
+- shipmill/shipmill#274: S-013-13, S-013-14, S-013-15, S-013-16
+
 ## Verification
