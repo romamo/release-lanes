@@ -1,6 +1,7 @@
 """Spec 014: `shipmill upgrade --propose`, land.yml's upgrade job, doctor's
 permission warning, and the pending upgrades in `shipmill status`"""
 
+import dataclasses
 import json
 import re
 import subprocess
@@ -13,11 +14,12 @@ from shipmill.cli import main
 from shipmill.config import CONFIG_PATH
 from shipmill.doctor import CALLER, Check, doctor
 from shipmill.errors import ReleaseError
-from shipmill.github import UPGRADE_LABEL, Forbidden, Issue
+from shipmill.github import UPGRADE_LABEL, UPGRADE_LATER_LABEL, Forbidden, Issue, parse_labelled
 from shipmill.init import Detected, caller_text
 from shipmill.policy import Style, VersionFiles
 from shipmill.status import read_upgrades
-from shipmill.upgrades import Offer, UpgradeId, body, find, marker
+from shipmill.upgrades import Offer, UpgradeId, asked, body, find, marker, renewed
+from shipmill.version import Version
 
 from .conftest import POLICY, FakeGitHub, Repo
 from .test_status_picture import REPO, facts, lines
@@ -163,6 +165,71 @@ def test_s014_7_a_config_that_holds_the_key_closes_its_open_issue_as_completed(
     assert repo.github.issues == {} and number in repo.github.closed_issues
     assert "sets `fragments`" in repo.github.closed[number]  # closed with gh's default reason: completed
     assert not any(line.startswith("closed") for line in propose(repo.root, repo.github, capsys))
+
+
+# -- "not now" (S-014-14) ---------------------------------------------------------------------
+
+
+def later(repo: Repo, capsys: pytest.CaptureFixture[str], recorded: str) -> int:
+    """The fragments issue, answered "not now" while its marker recorded the version given"""
+    propose(repo.root, repo.github, capsys)
+    (number,) = repo.github.issues
+    issue = repo.github.issues[number]
+    stale = issue.body.replace(" 0.37.0 -->", f" {recorded} -->", 1)
+    repo.github.issues[number] = Issue(number, issue.title, stale)
+    repo.github.labels[number] = (UPGRADE_LABEL, UPGRADE_LATER_LABEL)
+    return number
+
+
+@pytest.mark.parametrize("recorded", ["0.37.0", "0.100.0", "0.37.1", "1.0.0rc1"])
+def test_s014_14_propose_keeps_the_later_label_while_the_upgrade_is_not_newer(
+    repo: Repo, capsys: pytest.CaptureFixture[str], recorded: str
+) -> None:
+    # 0.100.0 sorts before 0.37.0 as text and after it as a version: the order is the version's
+    number = later(repo, capsys, recorded)
+    outcome = "unchanged" if recorded == "0.37.0" else "updated"
+    assert propose(repo.root, repo.github, capsys) == [f"{outcome} #{number}: changelog-fragments"]
+    assert repo.github.labels[number] == (UPGRADE_LABEL, UPGRADE_LATER_LABEL)
+    # the update recorded the installed version; the label holds on the next run too
+    assert propose(repo.root, repo.github, capsys) == [f"unchanged #{number}: changelog-fragments"]
+    assert repo.github.labels[number] == (UPGRADE_LABEL, UPGRADE_LATER_LABEL)
+
+
+@pytest.mark.parametrize("recorded", ["0.36.0", "0.9.0", "0.37.0rc2", "0.37.0.dev1"])
+def test_s014_14_propose_takes_the_later_label_off_once_the_upgrade_is_newer(
+    repo: Repo, capsys: pytest.CaptureFixture[str], recorded: str
+) -> None:
+    # 0.9.0 sorts after 0.37.0 as text and before it as a version
+    number = later(repo, capsys, recorded)
+    assert propose(repo.root, repo.github, capsys) == [f"renewed #{number}: changelog-fragments"]
+    assert repo.github.labels[number] == (UPGRADE_LABEL,)
+    assert repo.github.issues[number].body == body(FRAGMENTS)  # the marker now records 0.37.0
+    assert propose(repo.root, repo.github, capsys) == [f"unchanged #{number}: changelog-fragments"]
+
+
+def test_s014_14_an_unreadable_recorded_version_keeps_the_label(repo: Repo, capsys: pytest.CaptureFixture[str]) -> None:
+    number = later(repo, capsys, "someday")
+    assert propose(repo.root, repo.github, capsys) == [f"updated #{number}: changelog-fragments"]
+    assert repo.github.labels[number] == (UPGRADE_LABEL, UPGRADE_LATER_LABEL)
+
+
+def test_s014_14_only_an_issue_with_the_label_renews(repo: Repo, capsys: pytest.CaptureFixture[str]) -> None:
+    number = later(repo, capsys, "0.36.0")
+    repo.github.labels[number] = (UPGRADE_LABEL,)  # never answered "not now": no label to take off
+    assert propose(repo.root, repo.github, capsys) == [f"updated #{number}: changelog-fragments"]
+    newer = dataclasses.replace(FRAGMENTS, version=Version.parse("0.38.0"))
+    waiting = Issue(number, "t", f"{marker(FRAGMENTS)}\n", labels=(UPGRADE_LABEL, UPGRADE_LATER_LABEL))
+    assert asked(waiting) == Version.parse("0.37.0")
+    assert renewed(newer, waiting)
+    assert not renewed(FRAGMENTS, waiting)
+    assert not renewed(newer, dataclasses.replace(waiting, labels=(UPGRADE_LABEL,)))
+
+
+def test_s014_14_the_labels_are_read_with_the_issues() -> None:
+    labels = [{"name": UPGRADE_LABEL}, {"name": UPGRADE_LATER_LABEL}]
+    found = [{"number": 7, "title": "t", "body": "b", "state": "OPEN", "closedAt": None, "labels": labels}]
+    (issue,) = parse_labelled(json.dumps(found))
+    assert issue.labels == (UPGRADE_LABEL, UPGRADE_LATER_LABEL)
 
 
 # -- the release workflow (S-014-8) ----------------------------------------------------------
@@ -329,9 +396,10 @@ class Gh:
 
 def test_s014_15_status_reads_the_issues_and_leaves_out_a_declined_upgrade(tmp_path: Path) -> None:
     write_config(tmp_path, POLICY + AGENTS)
-    closed = {"number": 3, "title": "t", "body": f"{marker(FRAGMENTS)}\n", "state": "CLOSED"}
+    closed = {"number": 3, "title": "t", "body": f"{marker(FRAGMENTS)}\n", "state": "CLOSED", "labels": []}
     closed["closedAt"] = "2026-10-01T00:00:00Z"
     opened = {"number": 5, "title": "t", "body": f"{marker(PLUGIN)}\n", "state": "OPEN", "closedAt": None}
+    opened["labels"] = [{"name": UPGRADE_LABEL}]
     gh = Gh([closed, opened])
     assert read_upgrades(REPO, tmp_path, gh) == (Offer(PLUGIN, 5),)
     (cmd,) = gh.seen

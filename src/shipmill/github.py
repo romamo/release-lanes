@@ -14,6 +14,9 @@ from shipmill.errors import ReleaseError
 
 PROPOSAL_LABEL = "shipmill-proposal"  # on every issue proposing a release or a deploy
 UPGRADE_LABEL = "shipmill-upgrade"  # on every issue proposing a config upgrade (spec 014)
+# on an upgrade issue whose maintainer answered "not now": asked again only once a newer
+# shipmill release changes the upgrade (S-014-14)
+UPGRADE_LATER_LABEL = "shipmill-upgrade-later"
 OPEN_LIMIT = 100  # open issues read per label: proposals are one per lane and per environment
 PULL_LIMIT = 1000  # open pull requests read at once; gh's own default is 30
 MERGED_PER_BRANCH = 20  # merged pull requests read per head branch name, the newest
@@ -49,6 +52,7 @@ class Issue:
     title: str
     body: str
     closed_at: dt.datetime | None = None  # None while open
+    labels: tuple[str, ...] = ()  # read by labelled_issues; empty where a call doesn't read them
 
     @property
     def closed(self) -> bool:
@@ -154,6 +158,10 @@ class GitHub(Protocol):
 
     def close_issue(self, number: int, comment: str) -> None: ...
 
+    def remove_label(self, number: int, label: str) -> None:
+        """Take the label off the issue"""
+        ...
+
     def deployments(self, environment: str) -> list[Deployment]:
         """The environment's deployments, newest first (the newest 100)"""
         ...
@@ -195,7 +203,7 @@ def _time(text: str) -> dt.datetime:
 
 def labelled_command(label: str) -> tuple[str, ...]:
     """gh's arguments that list the issues with the label, open and closed, the newest 100"""
-    fields = "number,title,body,state,closedAt"
+    fields = "number,title,body,state,closedAt,labels"
     return ("issue", "list", "--label", label, "--state", "all", "--json", fields, "--limit", "100")
 
 
@@ -203,7 +211,13 @@ def parse_labelled(text: str) -> list[Issue]:
     """labelled_command's output, newest first"""
     found = json.loads(text)
     issues = [
-        Issue(int(i["number"]), i["title"], i["body"], None if i["state"] == "OPEN" else _time(i["closedAt"]))
+        Issue(
+            int(i["number"]),
+            i["title"],
+            i["body"],
+            None if i["state"] == "OPEN" else _time(i["closedAt"]),
+            tuple(str(label["name"]) for label in i["labels"]),
+        )
         for i in found
     ]
     return sorted(issues, key=lambda i: i.number, reverse=True)
@@ -313,6 +327,9 @@ class GhCli:
 
     def comment_issue(self, number: int, body: str) -> None:
         self._gh("issue", "comment", str(number), "--body", body)
+
+    def remove_label(self, number: int, label: str) -> None:
+        self._gh("issue", "edit", str(number), "--remove-label", label)
 
     def labelled_issues(self, label: str) -> list[Issue]:
         return parse_labelled(self._gh(*labelled_command(label)))

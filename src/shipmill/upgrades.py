@@ -8,7 +8,9 @@ included), and creates the files it owns; it commits nothing.
 
 Proposing one opens an issue labelled shipmill-upgrade whose first line is the upgrade's
 marker, kept up to date on later runs. Closing that issue while the config lacks the key is a
-decline: the upgrade is never proposed again, nor listed as pending."""
+decline: the upgrade is never proposed again, nor listed as pending. An issue the maintainer
+answered "not now" carries shipmill-upgrade-later, which a run takes off only once the upgrade's
+version is newer than the one the issue's marker records (S-014-14)."""
 
 import copy
 import json
@@ -25,7 +27,7 @@ from shipmill import UVX
 from shipmill.autonomy import Autonomy
 from shipmill.config import CONFIG_PATH
 from shipmill.errors import ReleaseError
-from shipmill.github import UPGRADE_LABEL, GitHub, Issue
+from shipmill.github import UPGRADE_LABEL, UPGRADE_LATER_LABEL, GitHub, Issue
 from shipmill.policy import Style
 from shipmill.version import Version
 
@@ -218,6 +220,29 @@ def marked(issue: Issue) -> UpgradeId | None:
     return UpgradeId(found[1]) if found and _ID.match(found[1]) else None
 
 
+def asked(issue: Issue) -> Version | None:
+    """The upgrade's version the issue was last asked about, which its marker records; None for
+    a marker without a version shipmill reads"""
+    first = issue.body.replace("\r\n", "\n").split("\n", 1)[0]
+    found = _MARKER.match(first)
+    if found is None:
+        return None
+    try:
+        return Version.parse(found[2])
+    except ReleaseError:
+        return None
+
+
+def renewed(upgrade: Upgrade, issue: Issue) -> bool:
+    """Whether the issue's "not now" lapses: it carries shipmill-upgrade-later, and the upgrade
+    is newer, in version order, than the version its marker records. An unreadable version
+    keeps the label: the question waits for the next release that changes the upgrade"""
+    if UPGRADE_LATER_LABEL not in issue.labels:
+        return False
+    version = asked(issue)
+    return version is not None and upgrade.version > version
+
+
 @dataclass(frozen=True, slots=True)
 class Offer:
     """A pending upgrade with no declined proposal, and its open issue when it has one"""
@@ -291,6 +316,7 @@ class Outcome(StrEnum):
     OPENED = "opened"
     UPDATED = "updated"
     UNCHANGED = "unchanged"
+    RENEWED = "renewed"  # updated, and shipmill-upgrade-later taken off: the question is asked again
     CLOSED = "closed"  # the config holds the key: closed as completed
 
 
@@ -303,8 +329,10 @@ class Proposed:
 
 def propose(raw: Mapping[str, Any], level: Autonomy, github: GitHub, fix: str) -> list[Proposed]:
     """Close as completed the open issue of each upgrade the config decided; then, unless the
-    upgrade autonomy is observe, open or update one issue per offer. A failure names the
-    upgrade, and fix says how to grant `issues: write` when GitHub refused it"""
+    upgrade autonomy is observe, open or update one issue per offer, taking shipmill-upgrade-later
+    off an issue whose upgrade is newer than the version its marker records (before the update
+    rewrites the marker). A failure names the upgrade, and fix says how to grant `issues: write`
+    when GitHub refused it"""
     waiting = pending(raw)  # first: a malformed config fails before GitHub is asked
     try:
         issues = github.labelled_issues(UPGRADE_LABEL)
@@ -334,11 +362,14 @@ def propose(raw: Mapping[str, Any], level: Autonomy, github: GitHub, fix: str) -
                 done.append(Proposed(upgrade, number, Outcome.OPENED))
                 continue
             issue = next(i for i in issues if i.number == offer.issue)
-            if (issue.title, issue.body.replace("\r\n", "\n").strip()) == (wanted_title, wanted.strip()):
-                done.append(Proposed(upgrade, issue.number, Outcome.UNCHANGED))
-                continue
-            github.update_issue(issue.number, wanted_title, wanted)
-            done.append(Proposed(upgrade, issue.number, Outcome.UPDATED))
+            renew = renewed(upgrade, issue)
+            if renew:  # first: a failed update after it leaves the old marker to compare again
+                github.remove_label(issue.number, UPGRADE_LATER_LABEL)
+            same = (issue.title, issue.body.replace("\r\n", "\n").strip()) == (wanted_title, wanted.strip())
+            if not same:
+                github.update_issue(issue.number, wanted_title, wanted)
+            outcome = Outcome.RENEWED if renew else Outcome.UNCHANGED if same else Outcome.UPDATED
+            done.append(Proposed(upgrade, issue.number, outcome))
     return done
 
 

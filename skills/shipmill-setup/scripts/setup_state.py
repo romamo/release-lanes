@@ -57,7 +57,8 @@ Plugin (.claude/settings.json, so every session in the repo loads the skills):
 Labels (the triage skills and shipmill read them):
   LABELS_MISSING   some of postponed, blocked, shipmill-hold, the config's
                    blocker_label (default release-blocker), and, with an [agents]
-                   section in either mode, needs-decision don't exist; --fix creates
+                   section in either mode, needs-decision and shipmill-upgrade-later
+                   (a config upgrade's "not now", spec 014) don't exist; --fix creates
                    them on GitHub, as the App through `uvx --from
                    git+https://github.com/shipmill/shipmill@v0 shipmill gh` when [agents]
                    sets app_id (spec 012), else with plain gh; a `shipmill gh` exit 2
@@ -121,6 +122,9 @@ BLOCKER = ("b60205", "Holds the release lanes the policy names until closed")
 # Wanted only with [agents] mode = "headless" (spec 005): a session's question waits under it
 NEEDS_DECISION = "needs-decision"
 NEEDS_DECISION_LABEL = ("d876e3", "A shipmill session asked a question here; waits for a reply")
+# Wanted with an [agents] section too (spec 014): a session marks a config upgrade's "not now" with it
+UPGRADE_LATER = "shipmill-upgrade-later"
+UPGRADE_LATER_LABEL = ("ededed", "A config upgrade the maintainer put off until shipmill changes it")
 # D-19: the gate runs without an App, but setup isn't done until one is connected
 NO_APP = (
     "no app connected: sessions write as the host's gh login, so you can't approve their PRs"
@@ -350,13 +354,14 @@ def wanted_labels(repo_dir: Path) -> dict[str, tuple[str, str]]:
     wanted[blocker or "release-blocker"] = BLOCKER
     if agents_section(repo_dir) is not None:  # every gate session asks this way, in either mode (D-21)
         wanted[NEEDS_DECISION] = NEEDS_DECISION_LABEL
+        wanted[UPGRADE_LATER] = UPGRADE_LATER_LABEL  # a config upgrade's "not now" (spec 014)
     return wanted
 
 
 def labels_row(missing: list[str], wanted: dict[str, tuple[str, str]]) -> Row:
     if missing:
         return Row("LABELS_MISSING", ", ".join(missing))
-    extra = f" {NEEDS_DECISION}," if NEEDS_DECISION in wanted else ""
+    extra = "".join(f" {label}," for label in (NEEDS_DECISION, UPGRADE_LATER) if label in wanted)
     return Row("LABELS_OK", f"postponed, blocked, shipmill-hold,{extra} and the blocker label exist")
 
 

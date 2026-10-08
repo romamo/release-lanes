@@ -851,6 +851,7 @@ AGENT_ROWS = [
     "ISSUES",
     "OPERATE_FAILED",
     "INCIDENT_OPEN",
+    "UPGRADE_PENDING",
 ]
 REPORT_ROWS = [
     "PROMOTION_DUE",
@@ -1389,6 +1390,14 @@ def pull(number: int, fork: bool = False) -> dict[str, object]:
     return {"number": number, "isDraft": False, "isCrossRepository": fork, "labels": []}
 
 
+def upgrade_issue(
+    ws: ModuleType, number: int, title: str = "shipmill upgrade", labels: tuple[str, ...] = (), **kw: object
+) -> object:
+    """An open shipmill-upgrade issue as shipmill's upgrade --propose opens it"""
+    body = "<!-- shipmill-upgrade: changelog-fragments 0.37.0 -->\nshipmill 0.37.0 offers ...\n"
+    return issue(ws, number, ("shipmill-upgrade", *labels), body=body, title=title, **kw)
+
+
 def shadowed_copy(home: Path) -> Path:
     copy = home / ".agents" / "skills" / "github-pr-triage"
     copy.mkdir(parents=True)
@@ -1434,6 +1443,7 @@ def fixed_rows(ws: ModuleType, home: Path) -> dict[str, list[Any]]:
         *ws.shadow_rows(home, SHIPMILL_SKILLS),
         *ws.hold_rows([issue(ws, 7, ("shipmill-hold",), title=TITLE)], NOW, REPO),
         *ws.stale_rows(stale, CHECKOUT, "main"),
+        *ws.upgrade_rows([upgrade_issue(ws, 11, TITLE)], "propose", False, lambda n: [], lambda name: [], REPO).rows,
     ]
     found: dict[str, list[Any]] = {}
     for row in rows:
@@ -1477,6 +1487,7 @@ FIXES = {
         "review them in an interactive session: /shipmill:github-issue-triage o/r for issues,"
         " /shipmill:github-pr-triage o/r for pull requests"
     ],
+    "UPGRADE_PENDING": ["/shipmill:github-ship-watch o/r"],
 }
 
 
@@ -1645,3 +1656,173 @@ def test_s011_9_the_table_prints_a_fix_line_unless_the_detail_ends_with_it(ws: M
         (row,) = found[state]
         assert row.detail.endswith(row.fix) and "\n" not in row.text(), state  # printed once, in the detail
     assert ws.Row("BOT_OK", "release.yml", "").text() == "BOT_OK         release.yml      "
+
+
+# -- config upgrades (spec 014) --------------------------------------------------------------
+
+QUESTION = "<!-- shipmill:needs-decision -->\n@alice Decision needed: turn on changelog-fragments?"
+BOT = "shipmill-app[bot]"
+Comment = tuple[str, str, str]
+
+
+class Upgrades:
+    """watch_state's upgrade_rows on the issues given, recording the branches it read"""
+
+    def __init__(
+        self,
+        ws: ModuleType,
+        issues: list[object],
+        level: str = "propose",
+        held: bool = False,
+        comments: dict[int, list[Comment]] | None = None,
+        declined: list[int] | None = None,
+    ) -> None:
+        self.asked: list[str] = []
+        self.declined = declined or []
+        self.found = ws.upgrade_rows(issues, level, held, (comments or {}).__getitem__, self.declined_of, "o/r", BOT)
+
+    def declined_of(self, name: str) -> list[int]:
+        self.asked.append(name)
+        return list(self.declined)
+
+    @property
+    def pending(self) -> list[tuple[str, str]]:
+        return [(r.subject, r.detail) for r in self.found.rows if r.state == "UPGRADE_PENDING"]
+
+
+def test_s014_10_an_open_upgrade_issue_with_nothing_on_it_is_an_action_row(ws: ModuleType) -> None:
+    found = Upgrades(ws, [upgrade_issue(ws, 12)]).found
+    (row,) = found.rows
+    assert (row.state, row.subject) == ("UPGRADE_PENDING", "#12")
+    assert row.detail == "changelog-fragments: ask the maintainer (upgrade = propose)"
+    assert row.fix == "/shipmill:github-ship-watch o/r"
+    assert row.json()["agent"] is True and "UPGRADE_PENDING" in ws.ACTION
+    assert found.waiting == [] and found.owned == {12}
+
+
+@pytest.mark.parametrize(
+    ("level", "held", "detail"),
+    [
+        ("act", False, "changelog-fragments: open the pull request (upgrade = act)"),
+        ("act", True, "changelog-fragments: ask the maintainer (upgrade = act, held by shipmill-hold)"),
+        ("propose", True, "changelog-fragments: ask the maintainer (upgrade = propose)"),
+    ],
+)
+def test_s014_10_the_detail_says_what_the_session_does_under_the_autonomy(
+    ws: ModuleType, level: str, held: bool, detail: str
+) -> None:
+    assert Upgrades(ws, [upgrade_issue(ws, 12)], level, held).pending == [("#12", detail)]
+
+
+def test_s014_10_observe_takes_up_no_upgrade_issue(ws: ModuleType) -> None:
+    found = Upgrades(ws, [upgrade_issue(ws, 12)], "observe").found
+    assert found.rows == [] and found.waiting == [] and found.owned == {12}
+
+
+@pytest.mark.parametrize(
+    "kw", [{"labels": ("shipmill-upgrade-later",)}, {"closing_prs": (31,)}], ids=["not-now", "open-pr"]
+)
+def test_s014_10_not_now_or_an_open_pull_request_closing_it_waits(ws: ModuleType, kw: dict[str, Any]) -> None:
+    upgrades = Upgrades(ws, [upgrade_issue(ws, 12, **kw)])
+    assert upgrades.found.rows == [] and upgrades.found.waiting == [] and upgrades.found.owned == {12}
+    assert upgrades.asked == []  # its branch isn't read either
+
+
+def test_s014_10_needs_decision_waits_until_a_trusted_reply_then_reads_pending_again(ws: ModuleType) -> None:
+    labelled = [upgrade_issue(ws, 12, labels=("needs-decision",))]
+    asked: list[Comment] = [(BOT, "NONE", QUESTION)]
+    found = Upgrades(ws, labelled, comments={12: asked}).found
+    assert found.rows == [] and found.waiting == [12]
+    # a reply by anyone but an OWNER, MEMBER, or COLLABORATOR, or the bot's own, wakes nothing
+    for reply in [("mallory", "CONTRIBUTOR", "1"), ("mallory", "NONE", "1"), (BOT, "NONE", "1")]:
+        assert Upgrades(ws, labelled, comments={12: [*asked, reply]}).found.waiting == [12], reply
+    for association in ("OWNER", "MEMBER", "COLLABORATOR"):
+        upgrades = Upgrades(ws, labelled, comments={12: [*asked, ("alice", association, "1")]})
+        assert upgrades.found.waiting == [], association
+        assert upgrades.pending == [("#12", "changelog-fragments: answered; take up the answer")]
+    # labelled with no question at all: a person parked it, so it waits
+    assert Upgrades(ws, labelled, comments={12: []}).found.waiting == [12]
+
+
+def test_s014_10_needs_decision_joins_its_row_and_upgrade_issues_leave_the_issue_rows(ws: ModuleType) -> None:
+    issues = [upgrade_issue(ws, 12, labels=("needs-decision",)), upgrade_issue(ws, 13)]
+    upgrades = Upgrades(ws, issues, comments={12: []})
+    # triage_state.py reads an upgrade issue as any issue: NEW, or NEEDS_DECISION with the label
+    lines = [triage_line(13, "NEW"), triage_line(12, "NEEDS_DECISION"), triage_line(4, "NEEDS_DECISION")]
+    rows = ws.intake("o/r", 1, "\n".join(lines), [], lambda n: [], BOT, False, False, upgrades.found)
+    want = [("UPGRADE_PENDING", "#13", "changelog-fragments: ask the maintainer (upgrade = propose)")]
+    assert [(r.state, r.subject, r.detail) for r in rows] == [*want, ("NEEDS_DECISION", "o/r", "#4 #12")]
+    lines.append(triage_line(20, "NEW"))  # another new issue still reads ISSUES, without the upgrade's number
+    rows = ws.intake("o/r", 1, "\n".join(lines), [], lambda n: [], BOT, False, False, upgrades.found)
+    assert [(r.state, r.detail) for r in rows][:2] == [("UPGRADE_PENDING", want[0][2]), ("ISSUES", "NEW #20")]
+
+
+def test_s014_10_d16_an_untrusted_upgrade_issue_stays_untrusted_for_an_unattended_gate(ws: ModuleType) -> None:
+    # the release workflow opens the issue as github-actions[bot]: neither trusted nor the gate's
+    # App, so with --trusted-only triage_state.py reads it UNTRUSTED, and no session starts for it
+    issues = [upgrade_issue(ws, 12, labels=("needs-decision",)), upgrade_issue(ws, 13)]
+    upgrades = Upgrades(ws, issues, comments={12: []})
+    lines = [triage_line(12, "UNTRUSTED"), triage_line(13, "UNTRUSTED")]
+    rows = ws.intake("o/r", 0, "\n".join(lines), [], lambda n: [], BOT, True, False, upgrades.found)
+    assert [(r.state, r.detail, r.json()["agent"]) for r in rows] == [("UNTRUSTED", "#12 #13", False)]
+    # an upgrade issue the gate's App or a maintainer opened reads as any other
+    lines = [triage_line(12, "NEEDS_DECISION"), triage_line(13, "NEW")]
+    rows = ws.intake("o/r", 1, "\n".join(lines), [], lambda n: [], BOT, True, False, upgrades.found)
+    assert [(r.state, r.subject) for r in rows] == [("UPGRADE_PENDING", "#13"), ("NEEDS_DECISION", "o/r")]
+
+
+def test_s014_10_without_upgrade_issues_the_intake_rows_are_unchanged(ws: ModuleType) -> None:
+    triage = "\n".join([triage_line(12, "NEW"), triage_line(9, "BLOCKED"), triage_line(4, "NEEDS_DECISION")])
+    before = ws.intake("o/r", 1, triage, [pull(3)], lambda n: [])
+    none = Upgrades(ws, []).found
+    assert ws.intake("o/r", 1, triage, [pull(3)], lambda n: [], None, False, False, none) == before
+    assert [r.state for r in before] == ["ISSUES", "ISSUES_OPEN", "PRS_OPEN", "NEEDS_DECISION"]
+
+
+def test_s014_10_an_issue_without_the_marker_first_or_the_label_is_triages(ws: ModuleType) -> None:
+    line = "<!-- shipmill-upgrade: changelog-fragments 0.37.0 -->"
+    quoted = issue(ws, 14, ("shipmill-upgrade",), body=f"see\n{line}")
+    unlabelled = issue(ws, 15, body=f"{line}\n")
+    found = Upgrades(ws, [quoted, unlabelled]).found
+    assert found.rows == [] and found.owned == set()
+
+
+def test_s014_12_a_pull_request_closed_unmerged_declines_and_a_merged_one_never_does(ws: ModuleType) -> None:
+    upgrades = Upgrades(ws, [upgrade_issue(ws, 12)], declined=[30, 33])
+    assert upgrades.asked == ["changelog-fragments"]
+    detail = "changelog-fragments: pull request #33 closed unmerged, a decline: close #12 as not planned"
+    assert upgrades.pending == [("#12", detail)]
+    closed = [
+        {"number": 30, "state": "MERGED", "isCrossRepository": False},  # gh's closed state lists merged ones
+        {"number": 31, "state": "CLOSED", "isCrossRepository": True},  # a fork's branch of the same name
+        {"number": 33, "state": "CLOSED", "isCrossRepository": False},
+    ]
+    assert ws.declined(closed) == [33]
+    assert ws.declined(closed[:2]) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "level"),
+    [
+        ('mode = "release"\n', "propose"),
+        ('[autonomy]\nupgrade = "act"\n', "act"),
+        ("[autonomy]\nupgrade = 'observe'  # quiet\n", "observe"),
+        ('[autonomy]\nrelease = "act"\ndeploy.production = "propose"\n', "propose"),
+    ],
+)
+def test_s014_10_the_upgrade_autonomy_reads_alike_on_3_11_and_3_10(ws: ModuleType, text: str, level: str) -> None:
+    policy = Path(".github/shipmill.toml")
+    assert ws.config(text, policy).upgrade == level
+    assert ws.upgrade_autonomy_310(text, policy) == level
+    assert ws.upgrade_autonomy_toml(tomllib.loads(text), policy) == level
+
+
+@pytest.mark.parametrize("value", ['"always"', "true"])
+def test_s014_10_an_upgrade_autonomy_of_another_value_is_refused(ws: ModuleType, value: str) -> None:
+    text = f"[autonomy]\nupgrade = {value}\n"
+    policy = Path(".github/shipmill.toml")
+    with pytest.raises(SystemExit) as refused:
+        ws.upgrade_autonomy_310(text, policy)
+    assert refused.value.code == 2
+    with pytest.raises(SystemExit, match=r"\[autonomy\] upgrade must be one of"):
+        ws.upgrade_autonomy_toml(tomllib.loads(text), policy)

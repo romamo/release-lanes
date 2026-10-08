@@ -1,0 +1,3 @@
+### Added
+
+- Config upgrades are asked about and carried out: `watch_state.py` reports an open `shipmill-upgrade` issue as `UPGRADE_PENDING` (or in NEEDS_DECISION while its question waits), github-ship-watch asks the maintainer through the needs-decision protocol under `[autonomy] upgrade = "propose"` and opens the upgrade pull request as the App on `shipmill/upgrade-<id>`, github-pr-triage merges it only on an accepting answer from an owner, member, or collaborator or under `act`, and `shipmill upgrade --propose` takes the `shipmill-upgrade-later` ("not now") label off only once a newer shipmill release changes the upgrade (#281)

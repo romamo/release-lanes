@@ -47,6 +47,22 @@ Hold and postmortems (a repo with a shipmill config):
                   issue's URL, or "#N" for the repo itself), read through the GitHub
                   contents API, not the checkout
 
+Config upgrades (a repo with a shipmill config; spec 014's shipmill-upgrade issues, each
+with the `<!-- shipmill-upgrade: <id> <version> -->` marker on its first line):
+  UPGRADE_PENDING an open upgrade issue an agent session takes up now, as #N with the
+                  upgrade's id and what the session does: ask the maintainer (the
+                  [autonomy] upgrade default, propose, and act under an open shipmill-hold),
+                  open the pull request (act), take up a trusted reply to its question, or
+                  close it as not planned when a pull request from the repo's own
+                  shipmill/upgrade-<id> branch closed unmerged. None under observe, nor for an
+                  issue labelled shipmill-upgrade-later ("not now") or with an open pull request
+                  closing it. One labelled needs-decision whose question has no trusted reply
+                  is in NEEDS_DECISION instead. Upgrade issues are never in ISSUES or
+                  ISSUES_OPEN; with --trusted-only, one triage_state.py reads as UNTRUSTED
+                  (opened by neither an OWNER, MEMBER, or COLLABORATOR nor the --bot-login,
+                  such as by the release workflow's github-actions[bot]) stays in UNTRUSTED
+                  and nothing else (D-16)
+
 Operations (only when the config declares environments; read from the
 deployments and issues shipmill operate writes):
   OPERATE_FAILED  the latest finished run of the workflow that calls shipmill's operate.yml
@@ -148,7 +164,8 @@ API error: rerun". An auth, not-found, or any other failure stops it at once.
 
 --json prints one JSON object per row: state, subject, detail, and agent, true when the
 row needs an agent (BOT_FAILED, BOT_STALLED, WORK_BRANCH_STALE, NOT_PUBLISHED, UNANNOUNCED,
-ISSUES, OPERATE_FAILED, INCIDENT_OPEN): the rows shipmill gate starts a session for. A waiting
+ISSUES, OPERATE_FAILED, INCIDENT_OPEN, UPGRADE_PENDING): the rows shipmill gate starts a
+session for. A waiting
 item is in no agent row, so it neither starts a session nor changes the gate's fingerprint.
 Each line has a fix too (spec 011): the one line that clears the row, an exact command where
 one exists (every gh naming the repo, every git its checkout with -C), else the decision to
@@ -161,8 +178,8 @@ after its row, unless the row's detail already ends with it.
 Holds and incidents lead the report. Exit 0 when nothing needs action, 1 when any
 BOT_FAILED, BOT_STALLED, BOT_PLAN_FAILED, WORK_BRANCH_STALE, NOT_PUBLISHED, UNANNOUNCED,
 ISSUES, OPERATE_FAILED, UNHEALTHY, PROMOTION_DUE, INCIDENT_OPEN, POSTMORTEM_DUE,
-NEEDS_DECISION, BRANCH_DELETE_OFF, SHIPMILL_OUTDATED, GATE_NO_APP, or SKILL_SHADOWED row is
-present, 2 on bad input or a git, gh, or uvx failure (a failing `shipmill worktrees`; a
+NEEDS_DECISION, BRANCH_DELETE_OFF, SHIPMILL_OUTDATED, GATE_NO_APP, SKILL_SHADOWED, or
+UPGRADE_PENDING row is present, 2 on bad input or a git, gh, or uvx failure (a failing `shipmill worktrees`; a
 `shipmill plan` failing with its own `shipmill: ` error is the BOT_PLAN_FAILED row instead).
 Needs git, an authenticated gh, and uvx (for a shipmill bot's plan and worktrees; `shipmill
 worktrees` needs claude on PATH too, to see the live sessions). Python 3.10+,
@@ -260,6 +277,7 @@ ACTION = {
     "SHIPMILL_OUTDATED",
     "GATE_NO_APP",
     "SKILL_SHADOWED",
+    "UPGRADE_PENDING",
 }
 # the states whose row needs an agent: --json marks each row's "agent" from this, and
 # shipmill gate starts a session on those rows (SKILL.md's repair table says what it does)
@@ -272,6 +290,7 @@ AGENT = {
     "ISSUES",
     "OPERATE_FAILED",
     "INCIDENT_OPEN",
+    "UPGRADE_PENDING",
 }
 # the states whose every row carries a fix, the one line that clears it (spec 011): every
 # action, and the report-only rows a person still has to act on. PRS_OPEN carries one only
@@ -319,6 +338,11 @@ GH_CLIENT_ERROR = re.compile(r"\bHTTP 4\d\d\b")  # auth, not found, a bad query:
 GH_FIELDS = ("-f", "-F", "--field", "--raw-field", "--input")  # make gh api POST unless -X says otherwise
 GH_PAUSE = 5.0  # seconds before the one rerun
 GH_RERUN = "transient GitHub API error: rerun"  # ends the error line when the rerun failed too
+UPGRADE_LABEL = "shipmill-upgrade"  # shipmill's github.UPGRADE_LABEL: a config upgrade's issue (spec 014)
+UPGRADE_LATER_LABEL = "shipmill-upgrade-later"  # shipmill's github.UPGRADE_LATER_LABEL: answered "not now"
+# an upgrade issue's first line, shipmill's upgrades.marker: the upgrade's id and its version
+UPGRADE_MARKER = re.compile(r"^<!-- shipmill-upgrade: ([a-z][a-z0-9]*(?:-[a-z0-9]+)*) (\S+) -->\s*$")
+UPGRADE_BRANCH = "shipmill/upgrade-"  # an upgrade pull request's head: this and the upgrade's id
 OPERATE_USES = re.compile(
     r"^\s*(?:-\s*)?uses:\s*[\"']?(?:[\w.-]+/[\w.-]+/\.github/workflows/operate\.ya?ml@|\./\.github/workflows/operate\.ya?ml)",
     re.MULTILINE,
@@ -876,6 +900,7 @@ class Config:
 
     environments: list[Environment]
     incident_label: str
+    upgrade: str = "propose"  # [autonomy] upgrade: observe, propose (the default), or act (spec 014)
 
 
 def ago(span: dt.timedelta) -> str:
@@ -888,26 +913,58 @@ def ago(span: dt.timedelta) -> str:
 
 
 def config(text: str, policy: Path, incident_label: str | None = None) -> Config:
-    """The environments and the incident label of the config, read as shipmill reads it: with
-    tomllib on Python 3.11+, with the regex fallback on 3.10. A given incident_label (the
-    --incident-label flag) takes the place of the config's, which is still checked"""
+    """The environments, the incident label, and the upgrade autonomy of the config, read as
+    shipmill reads it: with tomllib on Python 3.11+, with the regex fallback on 3.10. A given
+    incident_label (the --incident-label flag) takes the place of the config's, which is still
+    checked"""
     if tomllib is None:
         envs, levels = environments_310(text, policy), deploy_autonomy_310(text, policy)
-        label = incident_label_310(text, policy)
+        label, upgrade = incident_label_310(text, policy), upgrade_autonomy_310(text, policy)
     else:
         try:
             raw = tomllib.loads(text)
         except tomllib.TOMLDecodeError as exc:
             raise Refused(f"error: {policy}: {exc}") from None
         envs, levels = environments_toml(raw, policy), deploy_autonomy_toml(raw, policy)
-        label = incident_label_toml(raw, policy)
-    return Config([replace(e, deploy=levels.get(e.name, "act")) for e in envs], incident_label or label)
+        label, upgrade = incident_label_toml(raw, policy), upgrade_autonomy_toml(raw, policy)
+    deployed = [replace(e, deploy=levels.get(e.name, "act")) for e in envs]
+    return Config(deployed, incident_label or label, upgrade)
 
 
 def autonomy_level(value: object, name: str, policy: Path) -> str:
     if not isinstance(value, str) or value not in AUTONOMY:
         raise Refused(f"error: {policy}: [autonomy] deploy.{name} must be one of {list(AUTONOMY)}, got {value!r}")
     return value
+
+
+def upgrade_level(value: object, policy: Path) -> str:
+    if not isinstance(value, str) or value not in AUTONOMY:
+        raise Refused(f"error: {policy}: [autonomy] upgrade must be one of {list(AUTONOMY)}, got {value!r}")
+    return value
+
+
+def upgrade_autonomy_toml(raw: dict[str, object], policy: Path) -> str:
+    """[autonomy] upgrade of the parsed config, or its default, propose"""
+    table = raw.get("autonomy", {})
+    if not isinstance(table, dict):
+        raise Refused(f"error: {policy}: autonomy is not a table")
+    return upgrade_level(table.get("upgrade", "propose"), policy)
+
+
+def upgrade_autonomy_310(text: str, policy: Path) -> str:
+    """[autonomy] upgrade, a plain string key of a plain [autonomy] table, or propose"""
+    tables = toml_tables(text)
+    if re.search(r"^\s*[\"']?autonomy[\"']?\s*[.=]", tables.get("", ""), re.MULTILINE):
+        raise Refused(f"error: {policy}: can't read [autonomy] on Python 3.10: use 3.11+ or a plain [autonomy] table")
+    found = None
+    for line in tables.get("autonomy", "").splitlines():
+        if not re.match(r"^\s*[\"']?upgrade[\"']?\s*=", line):
+            continue
+        key = re.match(r"^\s*[\"']?upgrade[\"']?\s*=\s*(?:\"([^\"]*)\"|'([^']*)')\s*(?:#.*)?$", line)
+        if key is None or found is not None:
+            raise Refused(f"error: {policy}: can't read [autonomy] upgrade on Python 3.10: use 3.11+")
+        found = key.group(1) if key.group(1) is not None else key.group(2)
+    return upgrade_level("propose" if found is None else found, policy)
 
 
 def deploy_autonomy_toml(raw: dict[str, object], policy: Path) -> dict[str, str]:
@@ -1377,6 +1434,83 @@ def pr_comments(repo: str, number: int) -> Comments:
     return [(str(c[0]), str(c[1]), str(c[2])) for c in map(json.loads, out.splitlines())]
 
 
+@dataclass(frozen=True)
+class Upgrades:
+    """What the open shipmill-upgrade issues add to the report (spec 014)"""
+
+    rows: list[Row]  # UPGRADE_PENDING, one per issue an agent session takes up now
+    waiting: list[int]  # labelled needs-decision, the question with no trusted reply yet
+    owned: frozenset[int]  # every upgrade issue: the watch reads it here, never as triage's work
+
+
+def upgrade_id(issue: Issue) -> str | None:
+    """The upgrade an issue proposes, from the marker on its body's first line; None without one"""
+    found = UPGRADE_MARKER.match(issue.body.replace("\r\n", "\n").split("\n", 1)[0])
+    return found.group(1) if found else None
+
+
+def upgrade_rows(
+    issues: list[Issue],
+    level: str,
+    held: bool,
+    comments_of: Callable[[int], Comments],
+    declined_of: Callable[[str], list[int]],
+    repo: str,
+    bot_login: str | None = None,
+) -> Upgrades:
+    """The open shipmill-upgrade issues (S-014-10): level is [autonomy] upgrade, held whether
+    a shipmill-hold issue is open (act then reads as propose, D-8). Under observe none is
+    taken up. One answered "not now" (shipmill-upgrade-later) or with an open pull request
+    closing it waits; one labelled needs-decision waits too until a trusted reply (its
+    comments read only then, by triage_state.py's rule); any other is UPGRADE_PENDING. Its
+    detail says what the session does: close it as not planned when a pull request on its
+    branch closed unmerged (declined_of, read only then; a merged one closed the issue
+    already), take up the answer, open the pull request (act), or ask. The id comes from the
+    marker only; the fix never holds issue text (D-16)"""
+    rows: list[Row] = []
+    waiting: list[int] = []
+    owned: set[int] = set()
+    fix = skill_fix("github-ship-watch", repo)
+    for issue in sorted(issues, key=lambda i: i.number):
+        name = upgrade_id(issue) if UPGRADE_LABEL in issue.labels else None
+        if name is None:
+            continue  # not shipmill's proposal: triage reads it as any issue
+        owned.add(issue.number)
+        if level == "observe" or UPGRADE_LATER_LABEL in issue.labels or issue.closing_prs:
+            continue
+        asked = TRIAGE.DECISION_LABEL in issue.labels
+        if asked and TRIAGE.waits_on_decision(comments_of(issue.number), bot_login):
+            waiting.append(issue.number)
+            continue
+        declined = declined_of(name)
+        if declined:
+            pr = f"#{max(declined)}"
+            detail = f"{name}: pull request {pr} closed unmerged, a decline: close #{issue.number} as not planned"
+        elif asked:
+            detail = f"{name}: answered; take up the answer"
+        elif level == "act" and not held:
+            detail = f"{name}: open the pull request (upgrade = act)"
+        else:
+            under = f"act, held by {HOLD_LABEL}" if level == "act" else level
+            detail = f"{name}: ask the maintainer (upgrade = {under})"
+        rows.append(Row("UPGRADE_PENDING", f"#{issue.number}", detail, fix))
+    return Upgrades(rows, waiting, frozenset(owned))
+
+
+def declined_prs(repo: str, name: str) -> list[int]:
+    """The pull requests from the repo's own upgrade branch that closed without merging. gh's
+    closed state lists merged ones too, which GitHub tells apart as MERGED; a fork's branch of
+    the same name is anyone's, so it never declines (D-16)"""
+    cmd = ["gh", "pr", "list", "-R", repo, "--head", f"{UPGRADE_BRANCH}{name}", "--state", "closed"]
+    found = json.loads(run([*cmd, "--json", "number,state,isCrossRepository", "-L", "100"]))
+    return declined(found)
+
+
+def declined(found: list[dict[str, Any]]) -> list[int]:
+    """gh pr list's closed pull requests that closed unmerged, from the repo itself"""
+    return sorted(int(p["number"]) for p in found if p["state"] == "CLOSED" and p["isCrossRepository"] is False)
+
+
 def intake(
     repo: str,
     code: int,
@@ -1386,21 +1520,35 @@ def intake(
     bot_login: str | None = None,
     trusted_only: bool = False,
     lands_prs: bool = False,
+    upgrades: Upgrades | None = None,
 ) -> list[Row]:
     """The intake rows from triage_state.py's exit code and --json lines, and the open pull
     requests (number, isDraft, isCrossRepository, labels). Each pull request is UNTRUSTED
     (with trusted_only, a head in a fork), else waiting on a decision (labelled, no reply;
     its comments are read only then), else in PRS_OPEN unless a draft. lands_prs is the
-    config's [agents] prs = true: a gate lands them, so PRS_OPEN carries no fix"""
+    config's [agents] prs = true: a gate lands them, so PRS_OPEN carries no fix. upgrades
+    are the shipmill-upgrade issues: their UPGRADE_PENDING rows come first, none is in the
+    issue rows, and the ones waiting on a reply join NEEDS_DECISION. One triage_state.py
+    reads as UNTRUSTED (with trusted_only, an author who is neither trusted nor the
+    --bot-login, such as the release workflow's github-actions[bot]) stays UNTRUSTED and
+    nothing else: an unattended session never starts for it (D-16)"""
+    owned = upgrades.owned if upgrades is not None else frozenset()
     counts: dict[str, list[int]] = {}
+    untrusted_upgrades = set()
     for line in triage.splitlines():
         row = json.loads(line)
-        counts.setdefault(row["state"], []).append(int(row["number"]))
-    rows = []
-    if code == 1:
-        detail = "; ".join(
-            f"{s} {' '.join(f'#{n}' for n in numbers)}" for s, numbers in sorted(counts.items()) if s in TRIAGE_ACTION
-        )
+        number = int(row["number"])
+        if number in owned and row["state"] == "UNTRUSTED":
+            untrusted_upgrades.add(number)
+        elif number in owned:
+            continue
+        counts.setdefault(row["state"], []).append(number)
+    held_back = {f"#{n}" for n in untrusted_upgrades}
+    rows = [r for r in (upgrades.rows if upgrades is not None else []) if r.subject not in held_back]
+    detail = "; ".join(
+        f"{s} {' '.join(f'#{n}' for n in numbers)}" for s, numbers in sorted(counts.items()) if s in TRIAGE_ACTION
+    )
+    if code == 1 and detail:  # triage_state.py exits 1 only with an action line: an upgrade issue's, left out
         rows.append(Row("ISSUES", repo, detail, skill_fix("github-issue-triage", repo)))
     elsewhere = TRIAGE_ACTION | {"NEEDS_DECISION", "UNTRUSTED"}  # rows of their own
     rest = "; ".join(
@@ -1409,6 +1557,7 @@ def intake(
     if rest:
         rows.append(Row("ISSUES_OPEN", repo, rest))
     waiting, untrusted = list(counts.get("NEEDS_DECISION", [])), list(counts.get("UNTRUSTED", []))
+    waiting += [n for n in (upgrades.waiting if upgrades is not None else []) if n not in untrusted_upgrades]
     ready = []
     for pr in prs:
         number = int(pr["number"])
@@ -1439,7 +1588,13 @@ def lands_prs(table: dict[str, str] | None) -> bool:
     return table is not None and table.get("prs") == "true"
 
 
-def intake_rows(repo: str, bot_login: str | None = None, trusted_only: bool = False, lands: bool = False) -> list[Row]:
+def intake_rows(
+    repo: str,
+    bot_login: str | None = None,
+    trusted_only: bool = False,
+    lands: bool = False,
+    upgrades: Upgrades | None = None,
+) -> list[Row]:
     cmd = [sys.executable, str(TRIAGE_STATE), repo, "--json"]
     cmd += ["--bot-login", bot_login] if bot_login is not None else []
     cmd += ["--trusted-only"] if trusted_only else []
@@ -1449,9 +1604,11 @@ def intake_rows(repo: str, bot_login: str | None = None, trusted_only: bool = Fa
         raise SystemExit(2)
     fields = "number,isDraft,isCrossRepository,labels"
     prs = json.loads(run(["gh", "pr", "list", "-R", repo, "--json", fields, "-L", "100"]))
-    return intake(
-        repo, proc.returncode, proc.stdout, prs, lambda n: pr_comments(repo, n), bot_login, trusted_only, lands
-    )
+
+    def comments_of(number: int) -> Comments:
+        return pr_comments(repo, number)
+
+    return intake(repo, proc.returncode, proc.stdout, prs, comments_of, bot_login, trusted_only, lands, upgrades)
 
 
 # -- agents --------------------------------------------------------------------------------
@@ -1890,6 +2047,7 @@ def main() -> int:
                 rows.append(unannounced_row(args.repo, tag.name, tags[i + 1].name, issues))
 
     table = None
+    upgrades = None
     if policy is not None:
         text = (repo_dir / policy).read_text(encoding="utf-8")
         rows.append(triage_mode_row(text, policy))
@@ -1904,8 +2062,17 @@ def main() -> int:
             rows += postmortem_rows(closed, read.incident_label, texts, args.repo, now)
         if read.environments:
             rows += operations_rows(args.repo, repo_dir, read.environments, bool(holds), read.incident_label, now)
+        upgrades = upgrade_rows(
+            fetch_issues(args.repo, "--label", UPGRADE_LABEL),
+            read.upgrade,
+            bool(holds),
+            lambda n: pr_comments(args.repo, n),
+            lambda name: declined_prs(args.repo, name),
+            args.repo,
+            args.bot_login,
+        )  # its rows come with the intake's, which knows which issues triage_state.py trusts
 
-    rows += intake_rows(args.repo, args.bot_login, args.trusted_only, lands_prs(table))
+    rows += intake_rows(args.repo, args.bot_login, args.trusted_only, lands_prs(table), upgrades)
     rows += active_rows(fetch_active(args.repo), now)
     rows += agent_rows(args.repo, repo_dir, now)
     rows += shipmill_rows(args.repo, repo_dir)

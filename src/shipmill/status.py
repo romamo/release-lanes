@@ -77,6 +77,7 @@ PLACED = {
     "SHIPMILL_VERSION",
     "GATE_NO_APP",  # D-19's row; the github app line says the same
     "HOST_UNKNOWN",  # the sessions line says it
+    "UPGRADE_PENDING",  # spec 014: the upgrade lines say it, each with its issue (S-014-15)
 }
 # the release rows the repo line names in place of "release ok" (S-009-17)
 RELEASE_PROBLEMS = ("BOT_FAILED", "BOT_STALLED", "BOT_PLAN_FAILED", "WORK_BRANCH_STALE", "NOT_PUBLISHED", "UNANNOUNCED")
