@@ -16,7 +16,7 @@
                   table, --json for its JSON lines
   upgrade         list the config upgrades this repo hasn't decided or declined (spec 014); --apply <id>
                   makes one's edit in the checkout and commits nothing; --propose opens or updates
-                  one shipmill-upgrade issue per pending upgrade, as the release workflow runs it
+                  one shipmill-upgrade issue per pending upgrade, as land.yml runs it after a release
   init            write a starting policy and the calling workflow (--operate: the operate one)
   gate            start a Claude Code session for the repo only when its state needs one; each tick,
                   held or not, prunes the worktrees that landed, as `worktrees --prune` does
@@ -121,7 +121,6 @@ from shipmill.planner import Event, Hotfix, Planner, Proposal
 from shipmill.policy import Lane, Policy
 from shipmill.propose import close_released, propose, run_url
 from shipmill.stamp import notes, sync
-from shipmill.upgrades import WORKFLOW as UPGRADE_WORKFLOW
 from shipmill.upgrades import UpgradeId, apply, find, offers, pending
 from shipmill.upgrades import propose as propose_upgrades
 from shipmill.version import Version
@@ -947,7 +946,7 @@ def _upgrade(root: Path, args: argparse.Namespace, github: GitHub) -> int:
     if args.propose:
         autonomy = Table(raw, str(CONFIG_PATH)).table("autonomy", optional=True)
         level = AutonomyPolicy.parse(autonomy).upgrade
-        fix = f"grant `issues: write` to the job in {CALLER} that calls shipmill's {UPGRADE_WORKFLOW}"
+        fix = f"grant `issues: write` to the job in {CALLER} that calls shipmill's land.yml"
         done = propose_upgrades(raw, level, github, fix)
         if args.json:
             records = [{"id": str(d.upgrade.id), "issue": d.issue, "outcome": str(d.outcome)} for d in done]

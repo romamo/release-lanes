@@ -492,8 +492,9 @@ def test_doctor_warns_on_a_land_job_that_cannot_close_the_proposal_only_under_pr
         found = doctor(repo.root, repo.github)
         return [c.detail for c in found if c.name == "permissions" and "land job" in c.detail]
 
+    set_autonomy(repo, 'upgrade = "observe"\n')  # spec 014's own land warning stays out of this test
     assert land_warnings() == []
-    set_autonomy(repo, 'release = "propose"\n')
+    set_autonomy(repo, 'release = "propose"\nupgrade = "observe"\n')
     [detail] = land_warnings()
     assert detail.startswith("release autonomy is propose") and detail.endswith("grants no `issues: write`: add it")
     repo.write(".github/workflows/release.yml", LAND_CALLER.format(issues="      issues: write\n"))

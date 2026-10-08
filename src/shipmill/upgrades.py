@@ -34,7 +34,6 @@ _HEADER = re.compile(r"^\s*\[\s*([A-Za-z0-9_-]+)\s*\]\s*(?:#.*)?$")
 _ANY_HEADER = re.compile(r"^\s*\[")
 _LINE = re.compile(r"[^\n]*\n|[^\n]+\Z")
 _MARKER = re.compile(r"^<!-- shipmill-upgrade: (\S+) (\S+) -->\s*$")
-WORKFLOW = "upgrade.yml"  # shipmill's reusable workflow that runs `shipmill upgrade --propose`
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,7 +252,7 @@ def body(upgrade: Upgrade) -> str:
         "",
         f"Say so here, or close this issue: shipmill won't propose {upgrade.id} again.",
         "",
-        f"Each release run updates this issue while the upgrade is pending, and closes it once"
+        f"Each release shipmill cuts updates this issue while the upgrade is pending, and closes it once"
         f" `[{upgrade.table}]` sets `{upgrade.key}`, to any value.",
     ]
     return "\n".join(lines) + "\n"

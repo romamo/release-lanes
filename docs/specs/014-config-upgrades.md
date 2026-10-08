@@ -69,8 +69,12 @@ A new command in `src/shipmill/cli.py`:
 
 ### Proposal issues
 
-The release workflow (`.github/workflows/release.yml`), which every client already runs,
-runs `shipmill upgrade --propose` in the job that already has `issues: write`. Each issue:
+The release workflow, which every client already runs, runs `shipmill upgrade --propose` in
+`upgrade`, its own job in shipmill's reusable `.github/workflows/land.yml`, after a release
+lands. The job sets no permissions, so it runs with the `issues: write` the caller's land
+job already grants, and no client edits its workflow; no job needs it, so a failure there
+fails that job only. A dry run lands nothing and proposes nothing, and `prepare.yml` runs no
+proposal, since a failed job there would stop the release. Each issue:
 
 - carries the label `shipmill-upgrade` and a first line marker `<!-- shipmill-upgrade:
   <id> <version> -->`, the version being the release that last changed the upgrade; one issue per id, opened once and kept up to date, as release proposals are
@@ -87,7 +91,7 @@ The release workflow posts no question itself: a comment by the workflow's
 Closing the issue, as completed or not planned, without the upgrade in the config is a
 decline: no issue for that id is opened again, and `shipmill upgrade` stops listing it. A
 config that holds the key closes its open issue as completed on the next run. `doctor` warns
-about `issues: write` only when `upgrade` is `propose` or `act` and an upgrade is pending
+about the land job's `issues: write` only when `upgrade` is `propose` or `act` and an upgrade is pending
 (D-9).
 
 ### The question

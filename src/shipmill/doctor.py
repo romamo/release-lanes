@@ -24,7 +24,6 @@ from shipmill.gitrepo import REMOTE, Git
 from shipmill.land import BLOCKING_BRANCH, WORK_PREFIX, blocked
 from shipmill.policy import BumpFrom, Lane, Policy, VersionFiles
 from shipmill.stamp import project_version
-from shipmill.upgrades import WORKFLOW as UPGRADE_WORKFLOW
 from shipmill.upgrades import offers, pending
 
 CALLER = Path(".github") / "workflows" / "release.yml"
@@ -228,7 +227,7 @@ def doctor(
         uses_bot = all(re.search(rf"uses:\s*\S*/\.github/workflows/{name}\b", text) for name in _BOT_WORKFLOWS)
         add(uses_bot, "workflow", f"{CALLER} calls prepare.yml and land.yml")
         for m in _LOCAL_USES.finditer(text):
-            if m["file"] in (*_BOT_WORKFLOWS, UPGRADE_WORKFLOW):  # the bot's own, when a repository hosts it
+            if m["file"] in _BOT_WORKFLOWS:  # the bot's own, when a repository hosts it
                 continue
             ci = root / ".github" / "workflows" / m["file"]
             ok = ci.is_file() and _takes_input(ci.read_text(encoding="utf-8"), "workflow_call", "ref")
@@ -397,8 +396,8 @@ def _upgrades(
 ) -> list[Check]:
     """Spec 014: each pending upgrade with its fix, the open issue's link or the --apply
     command, as a PASS: an upgrade is an offer, never a failure. When `upgrade` is propose or
-    act and one is pending, a WARN when no caller job runs shipmill's upgrade.yml with
-    `issues: write` (D-9); a WARN when the issues can't be read"""
+    act and one is pending, a WARN when the caller's land job, whose grant land.yml's upgrade
+    job runs with, has no `issues: write` (D-9); a WARN when the issues can't be read"""
     if not pending(raw):
         return []
     if github is None:
@@ -418,16 +417,12 @@ def _upgrades(
         checks.append(Check("PASS", "upgrade", detail))
     if not found or policy.autonomy.upgrade is Autonomy.OBSERVE or not caller.is_file():
         return checks
-    grants = _job_grants(caller.read_text("utf-8"), UPGRADE_WORKFLOW, "issues")
-    why = f"upgrade autonomy is {policy.autonomy.upgrade} and {len(found)} upgrade(s) pending"
-    if grants is None:
+    # None, no land job at all, is the workflow check's failure, not this one's
+    if _job_grants(caller.read_text("utf-8"), "land.yml", "issues") is False:
         detail = (
-            f"{why}, but no job in {CALLER} calls shipmill's {UPGRADE_WORKFLOW}, so no issue proposes them:"
-            f" add the upgrade job `{cli_command()} init` writes, with `issues: write`"
+            f"upgrade autonomy is {policy.autonomy.upgrade} and {len(found)} upgrade(s) pending, but the land"
+            f" job in {CALLER}, whose grant proposes them, grants no `issues: write`: add it"
         )
-        checks.append(Check("WARN", "permissions", detail))
-    elif grants is False:
-        detail = f"{why}, but the job in {CALLER} that calls {UPGRADE_WORKFLOW} grants no `issues: write`: add it"
         checks.append(Check("WARN", "permissions", detail))
     return checks
 

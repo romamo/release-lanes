@@ -1,4 +1,4 @@
-"""Spec 014: `shipmill upgrade --propose`, the release workflow's upgrade job, doctor's
+"""Spec 014: `shipmill upgrade --propose`, land.yml's upgrade job, doctor's
 permission warning, and the pending upgrades in `shipmill status`"""
 
 import json
@@ -174,31 +174,30 @@ def _job(text: str, name: str) -> str:
     return text[start : start + 1 + following.start()] if following else text[start:]
 
 
+def test_s014_8_land_yml_proposes_in_its_own_job_after_a_release_landed() -> None:
+    text = (WORKFLOWS / "land.yml").read_text(encoding="utf-8")
+    job = _job(text, "upgrade")
+    assert job.startswith("\n  upgrade:\n    needs: land\n")  # only after a release landed, never a dry run
+    assert "    if:" not in job  # the default: land succeeded
+    # no permissions: the caller's land grant, `issues: write` included; a nested job asking
+    # for more than the caller grants fails the whole run, release included
+    assert "permissions:" not in job
+    assert 'shipmill upgrade --propose | tee -a "$GITHUB_STEP_SUMMARY"' in job
+    assert "shell: bash" in job  # -eo pipefail: a failed propose fails the job despite the tee
+    for other in ("land", "close-proposal", "cleanup"):  # no job waits on it: it never stops a release
+        assert not re.search(r"^    (?:needs|if):.*upgrade", _job(text, other), re.MULTILINE)
+    assert "upgrade" not in (WORKFLOWS / "prepare.yml").read_text(encoding="utf-8").split("\njobs:", 1)[1]
+
+
 @pytest.mark.parametrize("caller", ["release.yml", "init"])
-def test_s014_8_the_release_workflow_proposes_in_its_own_job_after_the_release_jobs(caller: str) -> None:
+def test_s014_8_the_caller_needs_no_job_of_its_own_only_its_land_grant(caller: str) -> None:
     if caller == "init":
         text = caller_text(Detected("demo", "main", Style.KEEP_A_CHANGELOG, VersionFiles.NONE), "ci.yml")
     else:
         text = (WORKFLOWS / caller).read_text(encoding="utf-8")
-    job = _job(text, "upgrade")
-    assert "    needs: [prepare, ci, land]\n" in job  # after the release jobs
-    assert "!cancelled()" in job  # whatever they did: a release that failed or skipped still proposes
-    assert re.search(r"uses: \S*\.github/workflows/upgrade\.yml\b", job)
-    assert re.search(r"^      issues: write\b", job, re.MULTILINE)
-    assert re.search(r"^      contents: read\b", job, re.MULTILINE)
-    for other in ("prepare", "ci", "land"):  # no release job waits on it
-        assert not re.search(r"^    (?:needs|if):.*upgrade", _job(text, other), re.MULTILINE)
-
-
-def test_s014_8_upgrade_yml_runs_propose_with_the_callers_grant() -> None:
-    text = (WORKFLOWS / "upgrade.yml").read_text(encoding="utf-8")
-    assert "workflow_call:" in text
-    # a nested job asking for more than the caller grants fails the whole run, release included
-    assert not re.search(r"^\s*permissions:", text, re.MULTILINE)
-    assert 'shipmill upgrade --propose | tee -a "$GITHUB_STEP_SUMMARY"' in text
-    assert "shell: bash" in text  # -eo pipefail: a failed propose fails the job despite the tee
-    for name in ("prepare.yml", "land.yml"):
-        assert "upgrade" not in (WORKFLOWS / name).read_text(encoding="utf-8").split("\njobs:", 1)[1]
+    assert "\n  upgrade:\n" not in text and "upgrade.yml" not in text
+    assert re.search(r"^      issues: write\b", _job(text, "land"), re.MULTILINE)
+    assert not (WORKFLOWS / "upgrade.yml").exists()
 
 
 class Refusing(FakeGitHub):
@@ -214,7 +213,7 @@ class Refusing(FakeGitHub):
 def test_s014_8_a_failure_names_the_upgrade_and_the_fix(repo: Repo) -> None:
     with pytest.raises(ReleaseError, match=r"^upgrade changelog-fragments: gh issue create .*HTTP 403.*") as found:
         main(["--repo", str(repo.root), "upgrade", "--propose"], github=Refusing())
-    assert f"grant `issues: write` to the job in {CALLER} that calls shipmill's upgrade.yml" in str(found.value)
+    assert f"grant `issues: write` to the job in {CALLER} that calls shipmill's land.yml" in str(found.value)
     refusing = Refusing()
     number = FakeGitHub.create_issue(refusing, "t", f"{marker(FRAGMENTS)}\n", (UPGRADE_LABEL,))
     write_config(repo.root, DECIDED)
@@ -235,17 +234,18 @@ def test_s014_8_a_failed_read_names_the_pending_upgrades(repo: Repo) -> None:
 
 # -- doctor (S-014-9) ------------------------------------------------------------------------
 
-UPGRADE_JOB = """\
+LAND_JOB = """\
 jobs:
   prepare:
     uses: shipmill/shipmill/.github/workflows/prepare.yml@v0
     permissions:
       contents: write
       issues: write
-  upgrade:
-    uses: shipmill/shipmill/.github/workflows/upgrade.yml@v0
+  land:
+    uses: shipmill/shipmill/.github/workflows/land.yml@v0
     permissions:
-      contents: read
+      contents: write
+      actions: write
       issues: {issues}
 """
 
@@ -255,15 +255,14 @@ def upgrade_checks(repo: Repo) -> list[Check]:
 
 
 def test_s014_9_doctor_warns_about_issues_write_only_when_upgrades_propose_and_one_is_pending(repo: Repo) -> None:
-    repo.write(str(CALLER), UPGRADE_JOB.split("  upgrade:\n")[0])
-    warned = [c for c in upgrade_checks(repo) if c.status == "WARN"]
-    assert [c.name for c in warned] == ["permissions"]
-    assert "upgrade autonomy is propose and 1 upgrade(s) pending" in warned[0].detail
-    assert "no job in .github/workflows/release.yml calls shipmill's upgrade.yml" in warned[0].detail
-    repo.write(str(CALLER), UPGRADE_JOB.format(issues="read"))
+    repo.write(str(CALLER), LAND_JOB.split("  land:\n")[0])  # no land job: the workflow check's failure
+    assert [c.status for c in upgrade_checks(repo)] == ["PASS"]
+    repo.write(str(CALLER), LAND_JOB.format(issues="read"))
     (warn,) = [c for c in upgrade_checks(repo) if c.status == "WARN"]
-    assert warn.detail.endswith(
-        "the job in .github/workflows/release.yml that calls upgrade.yml grants no `issues: write`: add it"
+    assert warn.name == "permissions"
+    assert warn.detail == (
+        "upgrade autonomy is propose and 1 upgrade(s) pending, but the land job in .github/workflows/release.yml,"
+        " whose grant proposes them, grants no `issues: write`: add it"
     )
     write_config(repo.root, POLICY + '\n[autonomy]\nupgrade = "act"\n')
     assert [c.status for c in upgrade_checks(repo)] == ["PASS", "WARN"]
@@ -276,12 +275,12 @@ def test_s014_9_doctor_warns_about_issues_write_only_when_upgrades_propose_and_o
     repo.github.close_issue(repo.github.create_issue("t", f"{marker(FRAGMENTS)}\n", (UPGRADE_LABEL,)), "")
     assert upgrade_checks(repo) == []  # declined: nothing pending either
     repo.github.closed_issues.clear()
-    repo.write(str(CALLER), UPGRADE_JOB.format(issues="write"))
+    repo.write(str(CALLER), LAND_JOB.format(issues="write"))
     assert [c.status for c in upgrade_checks(repo)] == ["PASS"]
 
 
 def test_s014_9_pending_upgrades_alone_never_make_doctor_exit_1(repo: Repo, capsys: pytest.CaptureFixture[str]) -> None:
-    repo.write(str(CALLER), UPGRADE_JOB.split("  upgrade:\n")[0])
+    repo.write(str(CALLER), LAND_JOB.format(issues="read"))
     (repo.root / "changelog.d").mkdir()
     write_config(repo.root, DECIDED + AGENTS + "plugin_update = false\n")
     decided = {c.name for c in doctor(repo.root, repo.github) if c.status == "FAIL"}

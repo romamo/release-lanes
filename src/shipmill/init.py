@@ -224,17 +224,7 @@ jobs:
     permissions:
       contents: write # main, release branches, tags, and releases
       actions: write # starts the lane's dispatch workflows
-      issues: write # closes the issue release = "propose" opens, once the lane released
-
-  # After the release jobs, whatever they did: one issue per config upgrade this repo hasn't
-  # decided ([autonomy] upgrade); a failure here fails this job only, never a release
-  upgrade:
-    needs: [prepare, ci, land]
-    if: ${{{{ !cancelled() && !inputs.dry-run }}}}
-    uses: {uses}/upgrade.yml@{BOT_REF}
-    permissions:
-      contents: read # the config
-      issues: write # opens, updates, and closes the shipmill-upgrade issues
+      issues: write # closes the issue release = "propose" opens, and proposes config upgrades
 """
 
 
