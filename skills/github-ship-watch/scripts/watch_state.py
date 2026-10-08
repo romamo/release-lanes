@@ -138,6 +138,11 @@ shipmill on this host (from `claude plugin list --json` and `claude plugin marke
                   /shipmill:<name>, is a person's in their home folder: an action, never an
                   agent's
 
+A gh read (the watch never writes GitHub) that fails on a server or network error (HTTP 5xx,
+a timeout, a reset or refused connection, an unexpected EOF) is run once more after 5
+seconds; when that fails too, the watch exits 2 with an error line ending "transient GitHub
+API error: rerun". An auth, not-found, or any other failure stops it at once.
+
 --incident-label names the label the repo's incidents carry, in place of the config's
 [operate] incident_label (fleet.py passes a fleet file's incident_label this way).
 
@@ -177,9 +182,10 @@ import shlex
 import shutil
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import ModuleType
@@ -297,6 +303,17 @@ PROPOSAL_SEARCH = 'in:title "Ready to"'  # proposals opened before the label; th
 PROPOSAL = re.compile(r"<!-- shipmill:propose deploy=(?P<env>\S+) -->")  # shipmill's operate.deploy_marker
 PROPOSED_TAG = re.compile(r"<!-- shipmill:tag=(?P<tag>\S+) -->")
 ENV_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")  # shipmill's environments._NAME
+# a gh read that fails on one of these on its stderr is run once more (S-011-11): a server
+# error, a timeout, a reset or refused connection, or a cut-off response. shipmill's
+# status.GH_TRANSIENT is the same pattern (tests/test_ship_watch.py keeps the two equal)
+GH_TRANSIENT = re.compile(
+    r"\bHTTP 5\d\d\b|\btime(?:d )?out\b|deadline exceeded|connection (?:reset|refused)|unexpected EOF",
+    re.IGNORECASE,
+)
+GH_CLIENT_ERROR = re.compile(r"\bHTTP 4\d\d\b")  # auth, not found, a bad query: never retried
+GH_FIELDS = ("-f", "-F", "--field", "--raw-field", "--input")  # make gh api POST unless -X says otherwise
+GH_PAUSE = 5.0  # seconds before the one rerun
+GH_RERUN = "transient GitHub API error: rerun"  # ends the error line when the rerun failed too
 OPERATE_USES = re.compile(
     r"^\s*(?:-\s*)?uses:\s*[\"']?(?:[\w.-]+/[\w.-]+/\.github/workflows/operate\.ya?ml@|\./\.github/workflows/operate\.ya?ml)",
     re.MULTILINE,
@@ -390,17 +407,69 @@ def spawn(
 
 
 def run(cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None) -> str:
-    return checked(cmd, spawn(cmd, cwd, env))
+    return checked(cmd, retried(cmd, lambda c: spawn(c, cwd, env)))
 
 
 def capture(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+    return retried(cmd, spawn)
+
+
+def gh_read(cmd: Sequence[str]) -> bool:
+    """A gh command that only reads GitHub: a list or view, or a GET through gh api (its
+    default unless a field is passed). Only a read is ever run twice"""
+    if len(cmd) < 3 or cmd[0] != "gh":
+        return False
+    if cmd[1] != "api":
+        return cmd[2] in {"list", "view"}
+    words = list(cmd)
+    method = None  # the last -X wins, as gh reads it: "-X POST", "-XPOST", "--method=POST"
+    fields = False  # "-f x", "-fx", "--field=x", "--input=x"
+    for at, word in enumerate(words):
+        if word in ("-X", "--method"):
+            method = words[at + 1] if at + 1 < len(words) else ""
+        elif word.startswith("--method="):
+            method = word.partition("=")[2]
+        elif word.startswith("-X"):
+            method = word[2:]
+        elif word.split("=")[0] in GH_FIELDS or word[:2] in ("-f", "-F"):
+            fields = True
+    return method.upper() == "GET" if method is not None else not fields
+
+
+def transient(cmd: Sequence[str], proc: subprocess.CompletedProcess[str]) -> bool:
+    """A gh read that failed on a server or network error, never on auth, a missing
+    resource, or a bad query (S-011-11)"""
+    if proc.returncode == 0 or not gh_read(cmd) or GH_CLIENT_ERROR.search(proc.stderr):
+        return False
+    return GH_TRANSIENT.search(proc.stderr) is not None
+
+
+def retried(
+    cmd: list[str],
+    execute: Callable[[list[str]], subprocess.CompletedProcess[str]],
+    pause: Callable[[float], None] = time.sleep,
+) -> subprocess.CompletedProcess[str]:
+    """The command's result, a gh read that failed on a transient error run once more after
+    GH_PAUSE seconds (S-011-11)"""
+    proc = execute(cmd)
+    if transient(cmd, proc):
+        pause(GH_PAUSE)
+        proc = execute(cmd)
+    return proc
+
+
+def failure(cmd: Sequence[str], proc: subprocess.CompletedProcess[str]) -> str:
+    """A failed command's error for the watch's error line; a transient one, already rerun,
+    on one line that ends GH_RERUN"""
+    if transient(cmd, proc):
+        return f"{' '.join(proc.stderr.split())}; {GH_RERUN}"
+    return proc.stderr.strip()
 
 
 def checked(cmd: list[str], proc: subprocess.CompletedProcess[str]) -> str:
     """The command's output; a failed command stops the watch (exit 2)"""
     if proc.returncode != 0:
-        sys.stderr.write(f"error: {' '.join(cmd[:3])}...: {proc.stderr.strip()}\n")
+        sys.stderr.write(f"error: {' '.join(cmd[:3])}...: {failure(cmd, proc)}\n")
         raise SystemExit(2)
     return proc.stdout
 
@@ -1169,7 +1238,7 @@ def postmortem_texts(repo: str, branch: str) -> list[str]:
     """Every docs/postmortems/*.md on the default branch, through the contents API; none
     without the folder"""
     listing = ["gh", "api", "-X", "GET", f"repos/{repo}/contents/{POSTMORTEMS}", "-f", f"ref={branch}"]
-    proc = subprocess.run(listing, capture_output=True, text=True, check=False)
+    proc = capture(listing)
     raw = ["gh", "api", "-X", "GET", "-H", "Accept: application/vnd.github.raw+json"]
     return [
         run([*raw, f"repos/{repo}/contents/{path}", "-f", f"ref={branch}"])
@@ -1183,7 +1252,7 @@ def postmortem_paths(proc: subprocess.CompletedProcess[str], repo: str, branch: 
     if proc.returncode != 0 and "Not Found (HTTP 404)" in proc.stderr:
         return []
     if proc.returncode != 0:
-        sys.stderr.write(f"error: gh api {POSTMORTEMS}: {proc.stderr.strip()}\n")
+        sys.stderr.write(f"error: gh api {POSTMORTEMS}: {failure(proc.args, proc)}\n")
         raise SystemExit(2)
     entries = json.loads(proc.stdout)
     if not isinstance(entries, list):

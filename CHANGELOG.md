@@ -35,6 +35,11 @@ bot.
   malformed fragment exits 2 naming it, and `shipmill doctor` counts fragments and names
   one a released section already holds, with the `git rm` that removes it. Without the
   key nothing changes (#272)
+- Spec 011: github-ship-watch's `watch_state.py` and `shipmill status` run a `gh` read that
+  fails on an `HTTP 5xx`, a timeout, or a reset or refused connection once more after 5
+  seconds; when it fails again, the error line ends `transient GitHub API error: rerun`. An
+  auth, not-found, or any other failure still fails at once, and no write is ever rerun
+  (#261)
 
 ### Fixed
 

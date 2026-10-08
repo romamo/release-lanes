@@ -11,9 +11,11 @@ from pathlib import Path
 import pytest
 
 from shipmill import UVX
+from shipmill.errors import ReleaseError
 from shipmill.gitrepo import Git
 from shipmill.launchd import label
 from shipmill.status import (
+    GH_PAUSE,
     STUCK_ROWS,
     YOURS_ROWS,
     Facts,
@@ -26,6 +28,7 @@ from shipmill.status import (
     cli_update,
     parse_issues,
     parse_rows,
+    read_branch,
     read_main,
     read_pulls,
     report,
@@ -230,6 +233,55 @@ def test_s011_16_the_repo_lines_fix_catches_up_off_the_default_branch_too(tmp_pa
 def test_s011_17_a_pull_request_to_land_says_what_keeps_it(merge: str, shown: str) -> None:
     found = facts(Row("PRS_OPEN", REPO, "#8", False), pulls=[Pull(8, False, merge, "main")])
     assert f"  to land        #8 {URL}/pull/8{shown}" in lines(found)
+
+
+class GhAnswers:
+    """Each gh call's (exit, stdout, stderr), in order, as status's injected runner"""
+
+    def __init__(self, *answers: tuple[int, str, str]) -> None:
+        self.answers = list(answers)
+        self.ran: list[list[str]] = []
+        self.paused: list[float] = []
+
+    def __call__(self, cmd: list[str]) -> subprocess.CompletedProcess[str]:
+        self.ran.append(cmd)
+        code, out, err = self.answers.pop(0)
+        return subprocess.CompletedProcess(cmd, code, out, err)
+
+    def pause(self, seconds: float) -> None:
+        self.paused.append(seconds)
+
+
+BAD_GATEWAY = "HTTP 502: Bad Gateway (https://api.github.com/graphql)"
+
+
+@pytest.mark.parametrize("read", ["pulls", "branch"])
+def test_s011_11_status_reruns_a_transient_gh_read_once(read: str) -> None:
+    out = "[]" if read == "pulls" else "main\n"
+    answers = GhAnswers((1, "", BAD_GATEWAY), (0, out, ""))
+    got = read_pulls(REPO, answers, answers.pause) if read == "pulls" else read_branch(REPO, answers, answers.pause)
+    assert got == ([] if read == "pulls" else "main")
+    assert len(answers.ran) == 2 and answers.ran[0] == answers.ran[1]
+    assert answers.paused == [GH_PAUSE]
+
+
+@pytest.mark.parametrize("read", ["pulls", "branch"])
+def test_s011_11_status_says_rerun_after_a_second_transient_failure(read: str) -> None:
+    answers = GhAnswers((1, "", BAD_GATEWAY), (1, "", "read: connection reset by peer"))
+    with pytest.raises(ReleaseError, match=r"connection reset by peer; transient GitHub API error: rerun$"):
+        read_pulls(REPO, answers, answers.pause) if read == "pulls" else read_branch(REPO, answers, answers.pause)
+    assert len(answers.ran) == 2
+
+
+@pytest.mark.parametrize(
+    "error", ["HTTP 401: Bad credentials (https://api.github.com/graphql)", "gh: Not Found (HTTP 404)"]
+)
+def test_s011_11_status_never_reruns_an_auth_or_not_found_failure(error: str) -> None:
+    answers = GhAnswers((1, "", error))
+    with pytest.raises(ReleaseError) as failed:
+        read_branch(REPO, answers, answers.pause)
+    assert (len(answers.ran), answers.paused) == (1, [])
+    assert "transient" not in str(failed.value)
 
 
 def test_s011_17_the_pull_request_read_asks_for_the_merge_state() -> None:
