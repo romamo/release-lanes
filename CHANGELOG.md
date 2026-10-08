@@ -12,6 +12,10 @@ bot.
 - Spec 011: every row and summary line of `shipmill status` that waits on you or is stuck
   ends with its fix, an exact command scoped to where it runs or the decision to make;
   `--json` carries it as a `fix` field, and a test fails on a row without one (#242)
+- Spec 012: every agent session writes to GitHub as the repo's App, not only gated ones:
+  `shipmill gh` runs `gh` with the App's token and never falls back to a person's login,
+  `shipmill app-token` works with no checkout, and `status` and `doctor` flag agent text
+  posted under a person's name (#250)
 
 ## [0.34.0] - 2026-10-08
 
