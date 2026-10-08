@@ -140,6 +140,13 @@ shipmill on this host (from `claude plugin list --json` and `claude plugin marke
 row needs an agent (BOT_FAILED, BOT_STALLED, WORK_BRANCH_STALE, NOT_PUBLISHED, UNANNOUNCED,
 ISSUES, OPERATE_FAILED, INCIDENT_OPEN): the rows shipmill gate starts a session for. A waiting
 item is in no agent row, so it neither starts a session nor changes the gate's fingerprint.
+Each line has a fix too (spec 011): the one line that clears the row, an exact command where
+one exists (every gh naming the repo, every git its checkout with -C), else the decision to
+make; null for a row with nothing to clear. Every action row, HOLD, WORKTREE_STALE, and
+UNTRUSTED carry one, and PRS_OPEN while no gate lands pull requests ([agents] prs not true).
+A fix is built from the repo, numbers, run ids, tags, paths, and config keys, never from an
+issue's or a pull request's text (D-16). The table prints it on an indented "fix:" line
+after its row, unless the row's detail already ends with it.
 
 Holds and incidents lead the report. Exit 0 when nothing needs action, 1 when any
 BOT_FAILED, BOT_STALLED, WORK_BRANCH_STALE, NOT_PUBLISHED, UNANNOUNCED, ISSUES,
@@ -160,6 +167,7 @@ import json
 import os
 import plistlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -247,6 +255,12 @@ AGENT = {
     "OPERATE_FAILED",
     "INCIDENT_OPEN",
 }
+# the states whose every row carries a fix, the one line that clears it (spec 011): every
+# action, and the report-only rows a person still has to act on. PRS_OPEN carries one only
+# while no gate lands pull requests; every other state's fix is None
+FIXED = ACTION | {"HOLD", "WORKTREE_STALE", "UNTRUSTED"}
+FIX_INDENT = " " * 15  # the table's fix line starts under the subject column
+RUN_ID = re.compile(r"/actions/runs/(\d+)(?:/|$)")  # a workflow run's URL names its id
 STALE = dt.timedelta(days=7)  # a kept shipmill worktree older than this is reported
 # the reasons `shipmill worktrees` keeps a worktree that isn't a shipmill worktree at all
 NOT_SHIPMILL = {"main checkout", "current checkout", "not a shipmill worktree"}
@@ -275,6 +289,7 @@ PROPOSAL_LABEL = "shipmill-proposal"  # shipmill's github.PROPOSAL_LABEL
 PROPOSAL_SEARCH = 'in:title "Ready to"'  # proposals opened before the label; the marker in the body decides
 PROPOSAL = re.compile(r"<!-- shipmill:propose deploy=(?P<env>\S+) -->")  # shipmill's operate.deploy_marker
 PROPOSED_TAG = re.compile(r"<!-- shipmill:tag=(?P<tag>\S+) -->")
+ENV_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")  # shipmill's environments._NAME
 OPERATE_USES = re.compile(
     r"^\s*(?:-\s*)?uses:\s*[\"']?(?:[\w.-]+/[\w.-]+/\.github/workflows/operate\.ya?ml@|\./\.github/workflows/operate\.ya?ml)",
     re.MULTILINE,
@@ -294,15 +309,45 @@ class Refused(SystemExit):
 
 @dataclass(frozen=True)
 class Row:
+    """One finding. fix is the one line that clears it, built from trusted values only (the
+    repo, numbers, run ids, tags, paths, config keys), never an issue's or a pull request's
+    text (D-16); a FIXED state without one is a programming error"""
+
     state: str
     subject: str
     detail: str
+    fix: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.state in FIXED and not self.fix:
+            raise ValueError(f"a {self.state} row needs a fix: {self.subject} {self.detail}")
 
     def text(self) -> str:
-        return f"{self.state:<14} {self.subject:<16} {self.detail}"
+        line = f"{self.state:<14} {self.subject:<16} {self.detail}"
+        if self.fix is None or self.detail.endswith(self.fix):
+            return line
+        return f"{line}\n{FIX_INDENT}fix: {self.fix}"
 
-    def json(self) -> dict[str, str | bool]:
-        return {"state": self.state, "subject": self.subject, "detail": self.detail, "agent": self.state in AGENT}
+    def json(self) -> dict[str, str | bool | None]:
+        return {
+            "state": self.state,
+            "subject": self.subject,
+            "detail": self.detail,
+            "agent": self.state in AGENT,
+            "fix": self.fix,
+        }
+
+
+def rerun_fix(repo: str, url: str) -> str:
+    """The rerun of a failed run's failed jobs, the id read from the run's URL"""
+    found = RUN_ID.search(url)
+    if found is None:
+        raise Refused(f"error: {url!r} is not a workflow run's URL")
+    return f"gh run rerun {found.group(1)} --failed -R {repo}"
+
+
+def skill_fix(skill: str, repo: str) -> str:
+    return f"/shipmill:{skill} {repo}"
 
 
 @dataclass(frozen=True)
@@ -373,28 +418,52 @@ def bot_workflow(repo_dir: Path) -> tuple[str, bool] | None:
     raise Refused(f"error: {policy} exists but neither release.yml nor release-bot.yml calls a bot")
 
 
-def bot_rows(runs: list[Run], due: str | None, now: dt.datetime, grace: dt.timedelta, name: str) -> list[Row]:
+@dataclass(frozen=True)
+class Due:
+    """A release the shipmill planner would cut now: its reason and the lane it names"""
+
+    reason: str
+    lane: str
+
+
+def failed_run(runs: list[Run]) -> Run | None:
+    """The newest finished run, newest first, when it failed; a cancelled run is skipped: a
+    newer push cancels the settle wait on purpose"""
+    finished = [r for r in runs if r.status == "completed" and r.conclusion != "cancelled"]
+    return finished[0] if finished and finished[0].conclusion not in {"success", "skipped"} else None
+
+
+def bot_rows(
+    runs: list[Run], due: Due | None, now: dt.datetime, grace: dt.timedelta, name: str, repo: str
+) -> list[Row]:
     """Classify the bot from its recent runs, newest first, and a planned due release"""
     rows = []
-    finished = [r for r in runs if r.status == "completed" and r.conclusion != "cancelled"]
-    if finished and finished[0].conclusion not in {"success", "skipped"}:
-        rows.append(Row("BOT_FAILED", name, f"{finished[0].conclusion}: {finished[0].url}"))
+    failed = failed_run(runs)
+    if failed is not None:
+        rows.append(Row("BOT_FAILED", name, f"{failed.conclusion}: {failed.url}", rerun_fix(repo, failed.url)))
     if due is not None:
         active = any(r.status in ACTIVE for r in runs)
         recent = bool(runs) and now - runs[0].created < grace
         if not active and not recent:
-            rows.append(Row("BOT_STALLED", name, f"due and not running: {due}"))
+            start = f"gh workflow run {name} -R {repo} -f lane={due.lane} -f dry-run=false"
+            rows.append(Row("BOT_STALLED", name, f"due and not running: {due.reason}", start))
     return rows or [Row("BOT_OK", name, "")]
 
 
-def work_branch_rows(branches: dict[str, str], runs: list[Run], workflow: str) -> list[Row]:
+def work_branch_rows(branches: dict[str, str], runs: list[Run], workflow: str, repo: str) -> list[Row]:
     """Each work branch on origin (name to commit) while none of the workflow's unfinished
     runs (fetch_unfinished) is queued or in progress: no run owns it, so it stops every
-    later run"""
+    later run. Its fix is the watch's repair, which checks the owners again before it
+    deletes the branch: never a bare delete"""
     if any(r.status in ACTIVE for r in runs):
         return []
     return [
-        Row("WORK_BRANCH_STALE", name, f"at {sha[:12]}, and no run of {workflow} is queued or in progress")
+        Row(
+            "WORK_BRANCH_STALE",
+            name,
+            f"at {sha[:12]}, and no run of {workflow} is queued or in progress",
+            skill_fix("github-ship-watch", repo),
+        )
         for name, sha in sorted(branches.items())
     ]
 
@@ -437,7 +506,7 @@ def fetch_unfinished(
     return sorted(found.values(), key=lambda r: r.created, reverse=True)
 
 
-def planned_release(repo: str, repo_dir: Path, policy: Path, branch: str, tool: str) -> str | None:
+def planned_release(repo: str, repo_dir: Path, policy: Path, branch: str, tool: str) -> Due | None:
     """What the shipmill planner would release now on the default branch, or None"""
     work = repo_dir / "tmp" / f"ship-watch-{os.getpid()}"
     run(["git", "worktree", "add", "-q", "--detach", str(work), f"origin/{branch}"], cwd=repo_dir)
@@ -450,11 +519,16 @@ def planned_release(repo: str, repo_dir: Path, policy: Path, branch: str, tool: 
     policy_mode = re.search(r'^mode\s*=\s*"(\w[\w-]*)"', (repo_dir / policy).read_text(), re.MULTILINE)
     if decision["action"] != "release" or policy_mode is None or policy_mode.group(1) != "release":
         return None
-    return str(decision["reason"])
+    lane = decision.get("lane")
+    if not isinstance(lane, str) or not lane:
+        raise Refused(f"error: shipmill plan decided a release but named no lane: {out[:200]!r}")
+    return Due(str(decision["reason"]), lane)
 
 
-def stale_rows(text: str) -> list[Row]:
-    """`shipmill worktrees --json`'s kept shipmill worktrees created over STALE ago"""
+def stale_rows(text: str, main: Path, branch: str) -> list[Row]:
+    """`shipmill worktrees --json`'s kept shipmill worktrees created over STALE ago; main is
+    the main checkout its paths are relative to, and branch the default branch, for the fix
+    that shows the work not landed on it (D-24: the person finishes or removes it)"""
     try:
         report = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -472,13 +546,28 @@ def stale_rows(text: str) -> list[Row]:
         if not isinstance(reason, str) or not isinstance(age, int) or isinstance(age, bool):
             raise Refused(f"error: shipmill worktrees --json printed a kept row without a reason and age: {tree!r}")
         if dt.timedelta(hours=age) > STALE:
-            rows.append(Row("WORKTREE_STALE", tree["path"], f"{reason}; created {age // 24}d ago"))
+            rows.append(
+                Row(
+                    "WORKTREE_STALE",
+                    tree["path"],
+                    f"{reason}; created {age // 24}d ago",
+                    stale_fix(main, tree["path"], branch),
+                )
+            )
     return rows
 
 
-def stale_worktrees(repo_dir: Path, tool: str) -> list[Row]:
+def stale_fix(main: Path, path: str, branch: str) -> str:
+    where = shlex.quote(str(main / path))
+    see = f"git -C {where} log origin/{branch}..HEAD"
+    remove = f"git -C {shlex.quote(str(main))} worktree remove {where}"
+    return f"see the work not landed: {see}; then push it and open a pull request, or remove it: {remove}"
+
+
+def stale_worktrees(repo_dir: Path, tool: str, branch: str) -> list[Row]:
     """The kept shipmill worktrees of the checkout's repository created over STALE ago"""
-    return stale_rows(run(["uvx", "--from", tool, "shipmill", "--repo", str(repo_dir), "worktrees", "--json"]))
+    out = run(["uvx", "--from", tool, "shipmill", "--repo", str(repo_dir), "worktrees", "--json"])
+    return stale_rows(out, project_folder(repo_dir), branch)
 
 
 # -- releases ------------------------------------------------------------------------------
@@ -557,9 +646,13 @@ def publish_row(
     now: dt.datetime,
     grace: dt.timedelta,
     first: dt.datetime | None = None,
+    *,
+    repo: str,
+    runs_on: Callable[[str], list[Run]],
 ) -> Row:
     """A version tag against PyPI; first is the package's earliest upload there, and a tag
-    created before it was cut before the repo published, so its absence needs no repair"""
+    created before it was cut before the repo published, so its absence needs no repair.
+    runs_on reads the runs on a tag, newest first, only for a NOT_PUBLISHED row's fix"""
     if package is None or listed is None:
         return Row("NO_REGISTRY", tag.name, "")
     if listed:
@@ -568,12 +661,35 @@ def publish_row(
         return Row("PREDATES_PUBLISH", tag.name, f"{package} {tag.name[1:]} tagged before the first PyPI upload")
     if now - tag.created < grace:
         return Row("PUBLISHING", tag.name, f"tagged {int((now - tag.created).total_seconds() // 60)} min ago")
-    return Row("NOT_PUBLISHED", tag.name, f"{package} {tag.name[1:]} missing from PyPI")
+    fix = publish_fix(repo, tag.name, runs_on(tag.name))
+    return Row("NOT_PUBLISHED", tag.name, f"{package} {tag.name[1:]} missing from PyPI", fix)
+
+
+def publish_fix(repo: str, tag: str, runs: list[Run]) -> str:
+    """The rerun of the newest finished run on the tag when it failed; else where to look"""
+    failed = failed_run(runs)
+    if failed is not None:
+        return rerun_fix(repo, failed.url)
+    return f"find the publish run for {tag}: gh run list -R {repo} --branch {tag}"
+
+
+def fetch_tag_runs(repo: str, tag: str) -> list[Run]:
+    """The workflow runs a tag started, newest first"""
+    out = run(
+        ["gh", "run", "list", "-R", repo, "--branch", tag, "-L", "20", "--json", "status,conclusion,createdAt,url"]
+    )
+    found = [Run(r["status"], r["conclusion"] or "", parse_time(r["createdAt"]), r["url"]) for r in json.loads(out)]
+    return sorted(found, key=lambda r: r.created, reverse=True)
 
 
 def unannounced(repo: str, repo_dir: Path, prev: str, tag: str) -> list[str]:
     out = run([sys.executable, str(SHIPPED), repo, prev, tag, "--repo-dir", str(repo_dir)])
     return [line.split()[0] for line in out.splitlines() if "WOULD POST" in line]
+
+
+def unannounced_row(repo: str, tag: str, prev: str, issues: list[str]) -> Row:
+    """The issues the tag fixed that no "Released in" comment tells; the watch posts them"""
+    return Row("UNANNOUNCED", tag, f"{' '.join(issues)} (since {prev})", skill_fix("github-ship-watch", repo))
 
 
 # -- holds and operations ------------------------------------------------------------------
@@ -826,10 +942,10 @@ def current_deployment(deployments: list[Deployment], statuses_of: Callable[[int
     return None
 
 
-def operate_rows(runs: list[Run], caller: str) -> list[Row]:
-    finished = [r for r in runs if r.status == "completed" and r.conclusion != "cancelled"]
-    if finished and finished[0].conclusion not in {"success", "skipped"}:
-        return [Row("OPERATE_FAILED", caller, f"{finished[0].conclusion}: {finished[0].url}")]
+def operate_rows(runs: list[Run], caller: str, repo: str) -> list[Row]:
+    failed = failed_run(runs)
+    if failed is not None:
+        return [Row("OPERATE_FAILED", caller, f"{failed.conclusion}: {failed.url}", rerun_fix(repo, failed.url))]
     return []
 
 
@@ -852,7 +968,8 @@ def unhealthy_row(env: str, current: Current | None, now: dt.datetime) -> Row | 
     if current is None or not ours or ours[-1].state != "failure":
         return None
     why = ours[-1].description[len(HEALTH_PREFIX) :].lstrip(": ")
-    return Row("UNHEALTHY", env, f"{current.tag}: {why}, since {ago(now - ours[-1].created)} ago")
+    fix = f"operate rolls {env} back after [operate] rollback_after failures; check its health check if it persists"
+    return Row("UNHEALTHY", env, f"{current.tag}: {why}, since {ago(now - ours[-1].created)} ago", fix)
 
 
 def proposal_issues(labelled: list[Issue], search: Callable[[], list[Issue]]) -> list[Issue]:
@@ -862,8 +979,11 @@ def proposal_issues(labelled: list[Issue], search: Callable[[], list[Issue]]) ->
     return labelled + [i for i in search() if i.number not in seen]
 
 
-def proposal_rows(issues: list[Issue], caller: str, held: bool) -> list[Row]:
-    """The open proposal issues shipmill operate opens for a deploy that waits on approval"""
+def proposal_rows(issues: list[Issue], caller: str, held: bool, repo: str) -> list[Row]:
+    """The open proposal issues shipmill operate opens for a deploy that waits on approval;
+    the fix is the detail's approve command, naming the repo. The environment comes from the
+    issue's body, which anyone can write on an issue the title search finds, so a name no
+    environment can have never reaches the fix (D-16)"""
     rows = []
     for issue in issues:
         found = PROPOSAL.search(issue.body)
@@ -874,7 +994,12 @@ def proposal_rows(issues: list[Issue], caller: str, held: bool) -> list[Row]:
         approve = f"gh workflow run {caller} -f approve={env} -f dry-run=false"
         first = f"close the {HOLD_LABEL} issues, then " if held else ""
         detail = f"#{issue.number} {tag.group('tag') if tag else issue.title}: {first}{approve}"
-        rows.append(Row("PROMOTION_DUE", env, detail))
+        if ENV_NAME.fullmatch(env):
+            fix = f"{first}gh workflow run {caller} -R {repo} -f approve={env} -f dry-run=false"
+        else:
+            n = issue.number
+            fix = f"check proposal #{n} by hand, it names no environment: gh issue view {n} -R {repo}"
+        rows.append(Row("PROMOTION_DUE", env, detail, fix))
     return rows
 
 
@@ -913,11 +1038,13 @@ def unpromoted_row(
     held: bool,
     command: str,
     now: dt.datetime,
+    fix: str,
 ) -> Row | None:
     """A `from` environment that operate would promote, or propose promoting, now if it ran:
     its source baked a release, the environment is behind it and never tried it, and its
     deploy autonomy isn't observe. With operate running, its proposal issue or its deploy is
-    the signal instead; with it idle, no proposal issue ever opens, so this row stands in"""
+    the signal instead; with it idle, no proposal issue ever opens, so this row stands in.
+    command is the detail's way to run operate, and fix the same as one line naming the repo"""
     if env.source is None or idle is None or source is None or env.deploy == "observe":
         return None  # observe never promotes, nor proposes
     wanted = version_key(source.tag)
@@ -938,10 +1065,10 @@ def unpromoted_row(
         after = f" after the {HOLD_LABEL} issues close" if held else ""
         approve = f"approve with `shipmill operate --approve {env.name}` once it runs{after}"
         would = f"operate would propose promoting {source.tag} to {env.name} ({approve}; {healthy})"
-    return Row("PROMOTION_DUE", env.name, f"{would}, but {idle}; {command}")
+    return Row("PROMOTION_DUE", env.name, f"{would}, but {idle}; {command}", fix)
 
 
-def incident_rows(issues: list[Issue], label: str, now: dt.datetime) -> list[Row]:
+def incident_rows(issues: list[Issue], label: str, now: dt.datetime, repo: str) -> list[Row]:
     rows = []
     for issue in issues:
         if label not in issue.labels:
@@ -949,7 +1076,12 @@ def incident_rows(issues: list[Issue], label: str, now: dt.datetime) -> list[Row
         prs = " ".join(f"#{n}" for n in issue.closing_prs)
         linked = f"PR {prs} links it" if prs else "no PR links it"
         detail = f"{issue.title}; open {ago(now - issue.created)}, {linked}"
-        rows.append(Row("INCIDENT_OPEN", f"#{issue.number}", detail))
+        if issue.closing_prs:
+            hotfix = " or ".join(f"{repo}#{n}" for n in issue.closing_prs)
+            fix = f"land the hotfix pull request linked to it: {hotfix}"
+        else:
+            fix = f"{skill_fix('github-issue-resolve', repo)}#{issue.number}"
+        rows.append(Row("INCIDENT_OPEN", f"#{issue.number}", detail, fix))
     return rows
 
 
@@ -973,7 +1105,11 @@ def postmortem_rows(issues: list[Issue], label: str, texts: list[str], repo: str
         if label not in i.labels or i.closed is None or i.state_reason not in POSTMORTEM_REASONS or i.number in named:
             continue
         missing = f"no {POSTMORTEMS}/*.md names it (Incident: {repo}#{i.number})"
-        rows.append(Row("POSTMORTEM_DUE", f"#{i.number}", f"{i.title}; closed {ago(now - i.closed)} ago, {missing}"))
+        line = f"Incident: {repo}#{i.number}"
+        draft = f"{skill_fix('github-ship-watch', repo)} (drafts the postmortem with its {line} line)"
+        rows.append(
+            Row("POSTMORTEM_DUE", f"#{i.number}", f"{i.title}; closed {ago(now - i.closed)} ago, {missing}", draft)
+        )
     return rows
 
 
@@ -1003,12 +1139,14 @@ def postmortem_paths(proc: subprocess.CompletedProcess[str], repo: str, branch: 
     return [e["path"] for e in entries if e["type"] == "file" and e["name"].endswith(".md")]
 
 
-def hold_rows(issues: list[Issue], now: dt.datetime) -> list[Row]:
+def hold_rows(issues: list[Issue], now: dt.datetime, repo: str) -> list[Row]:
+    """The open holds; the fix is the person's decision to lift one (D-15), never an agent's"""
     return [
         Row(
             "HOLD",
             f"#{i.number}",
             f"{i.title}; opened by @{i.author} {ago(now - i.created)} ago ({i.created:%Y-%m-%d %H:%M} UTC)",
+            f"close #{i.number} when the factory may go on: gh issue close {i.number} -R {repo}",
         )
         for i in issues
         if HOLD_LABEL in i.labels
@@ -1058,12 +1196,23 @@ def fetch_statuses(repo: str, deployment: int) -> list[Status]:
     return sorted(found, key=lambda s: s.id)
 
 
+def operate_start(caller: tuple[str, bool] | None, repo: str, repo_dir: Path) -> tuple[str, str]:
+    """How an idle operate runs once: the words a PROMOTION_DUE detail ends with, and the fix
+    as one line naming the repo and the checkout"""
+    if caller:
+        command = f"run it once: gh workflow run {caller[0]} -f dry-run=false"
+        return command, f"gh workflow run {caller[0]} -R {repo} -f dry-run=false"
+    written = f"shipmill --repo {shlex.quote(str(repo_dir))} init --operate"
+    fix = f"{written}, land it, then run it once: gh workflow run operate.yml -R {repo} -f dry-run=false"
+    return "write one with `shipmill init --operate`, then run it once", fix
+
+
 def operations_rows(
     repo: str, repo_dir: Path, envs: list[Environment], held: bool, label: str, now: dt.datetime
 ) -> list[Row]:
     caller = operate_caller(repo_dir)
     runs = fetch_runs(repo, caller[0]) if caller else []
-    rows = operate_rows(runs, caller[0]) if caller else []
+    rows = operate_rows(runs, caller[0], repo) if caller else []
     deployments = {e.name: fetch_deployments(repo, e.name) for e in envs}
     current = {e.name: current_deployment(deployments[e.name], lambda i: fetch_statuses(repo, i)) for e in envs}
     for env in envs:
@@ -1073,22 +1222,19 @@ def operations_rows(
     issues = proposal_issues(
         fetch_issues(repo, "--label", PROPOSAL_LABEL), lambda: fetch_issues(repo, "--search", PROPOSAL_SEARCH)
     )
-    proposals = proposal_rows(issues, caller[0] if caller else "operate.yml", held)
+    proposals = proposal_rows(issues, caller[0] if caller else "operate.yml", held, repo)
     rows += proposals
     idle = operate_idle(caller, runs, now)
-    if caller:
-        command = f"run it once: gh workflow run {caller[0]} -f dry-run=false"
-    else:
-        command = "write one with `shipmill init --operate`, then run it once"
+    command, fix = operate_start(caller, repo, repo_dir)
     proposed = {r.subject for r in proposals}
     for env in envs:
         if env.name in proposed or env.source is None:
             continue
         source = current.get(env.source)
-        row = unpromoted_row(env, source, current[env.name], deployments[env.name], idle, held, command, now)
+        row = unpromoted_row(env, source, current[env.name], deployments[env.name], idle, held, command, now, fix)
         if row is not None:
             rows.append(row)
-    return rows + incident_rows(fetch_issues(repo, "--label", label), label, now)
+    return rows + incident_rows(fetch_issues(repo, "--label", label), label, now, repo)
 
 
 # -- intake --------------------------------------------------------------------------------
@@ -1113,11 +1259,13 @@ def intake(
     comments_of: Callable[[int], Comments],
     bot_login: str | None = None,
     trusted_only: bool = False,
+    lands_prs: bool = False,
 ) -> list[Row]:
     """The intake rows from triage_state.py's exit code and --json lines, and the open pull
     requests (number, isDraft, isCrossRepository, labels). Each pull request is UNTRUSTED
     (with trusted_only, a head in a fork), else waiting on a decision (labelled, no reply;
-    its comments are read only then), else in PRS_OPEN unless a draft"""
+    its comments are read only then), else in PRS_OPEN unless a draft. lands_prs is the
+    config's [agents] prs = true: a gate lands them, so PRS_OPEN carries no fix"""
     counts: dict[str, list[int]] = {}
     for line in triage.splitlines():
         row = json.loads(line)
@@ -1127,7 +1275,7 @@ def intake(
         detail = "; ".join(
             f"{s} {' '.join(f'#{n}' for n in numbers)}" for s, numbers in sorted(counts.items()) if s in TRIAGE_ACTION
         )
-        rows.append(Row("ISSUES", repo, detail))
+        rows.append(Row("ISSUES", repo, detail, skill_fix("github-issue-triage", repo)))
     elsewhere = TRIAGE_ACTION | {"NEEDS_DECISION", "UNTRUSTED"}  # rows of their own
     rest = "; ".join(
         f"{s} {' '.join(f'#{n}' for n in numbers)}" for s, numbers in sorted(counts.items()) if s not in elsewhere
@@ -1146,15 +1294,26 @@ def intake(
         elif not pr["isDraft"]:
             ready.append(f"#{number}")
     if ready:
-        rows.append(Row("PRS_OPEN", repo, " ".join(ready)))
+        land = f"set prs = true under [agents] in {POLICY}, or land them by hand: {skill_fix('github-pr-triage', repo)}"
+        rows.append(Row("PRS_OPEN", repo, " ".join(ready), None if lands_prs else land))
     if waiting:
-        rows.append(Row("NEEDS_DECISION", repo, " ".join(f"#{n}" for n in sorted(set(waiting)))))
+        named = " ".join(f"#{n}" for n in sorted(set(waiting)))
+        rows.append(Row("NEEDS_DECISION", repo, named, f"answer the needs-decision question on {repo} {named}"))
     if untrusted:
-        rows.append(Row("UNTRUSTED", repo, " ".join(f"#{n}" for n in sorted(set(untrusted)))))
+        review = (
+            f"review them in an interactive session: {skill_fix('github-issue-triage', repo)} for issues,"
+            f" {skill_fix('github-pr-triage', repo)} for pull requests"
+        )
+        rows.append(Row("UNTRUSTED", repo, " ".join(f"#{n}" for n in sorted(set(untrusted))), review))
     return rows
 
 
-def intake_rows(repo: str, bot_login: str | None = None, trusted_only: bool = False) -> list[Row]:
+def lands_prs(table: dict[str, str] | None) -> bool:
+    """[agents] prs = true (agents_table's): a gate lands the open pull requests"""
+    return table is not None and table.get("prs") == "true"
+
+
+def intake_rows(repo: str, bot_login: str | None = None, trusted_only: bool = False, lands: bool = False) -> list[Row]:
     cmd = [sys.executable, str(TRIAGE_STATE), repo, "--json"]
     cmd += ["--bot-login", bot_login] if bot_login is not None else []
     cmd += ["--trusted-only"] if trusted_only else []
@@ -1164,7 +1323,9 @@ def intake_rows(repo: str, bot_login: str | None = None, trusted_only: bool = Fa
         raise SystemExit(2)
     fields = "number,isDraft,isCrossRepository,labels"
     prs = json.loads(run(["gh", "pr", "list", "-R", repo, "--json", fields, "-L", "100"]))
-    return intake(repo, proc.returncode, proc.stdout, prs, lambda n: pr_comments(repo, n), bot_login, trusted_only)
+    return intake(
+        repo, proc.returncode, proc.stdout, prs, lambda n: pr_comments(repo, n), bot_login, trusted_only, lands
+    )
 
 
 # -- agents --------------------------------------------------------------------------------
@@ -1185,7 +1346,7 @@ def gate_app_rows(table: dict[str, str] | None) -> list[Row]:
     if table is None or "prompt" not in table or "app_id" in table:
         return []
     fix = "run shipmill-setup's step 3 (app-create), then set app_id in [agents]"
-    return [Row("GATE_NO_APP", "[agents]", f"no app connected: sessions write as the host's gh login; {fix}")]
+    return [Row("GATE_NO_APP", "[agents]", f"no app connected: sessions write as the host's gh login; {fix}", fix)]
 
 
 def agents_table(text: str, policy: Path) -> dict[str, str] | None:
@@ -1369,7 +1530,7 @@ def plugin_rows(
             raise Refused(f"error: {PLUGIN} {scope} install has version {version!r}")
         if key < newest:
             fix = plugin_fix(scope, where, keyed)
-            rows.append(Row("SHIPMILL_OUTDATED", f"plugin {scope}", f"{version}, latest {latest}; {fix}"))
+            rows.append(Row("SHIPMILL_OUTDATED", f"plugin {scope}", f"{version}, latest {latest}; {fix}", fix))
     found = ", ".join(f"{scope} {version}" + (f" ({where})" if where else "") for scope, version, where in installs)
     detail = f"latest {latest}; plugin: {found or 'not installed for this repo on this host'}"
     market = PLUGIN.partition("@")[2]
@@ -1463,7 +1624,9 @@ def shadow_rows(home: Path, names: list[str]) -> list[Row]:
                 continue
             what, remove = (f"a link to {target}", f"rm {path}") if path.is_symlink() else ("a copy", f"rm -r {path}")
             fix = f"remove it ({remove}) or call the skill as /shipmill:{name}"
-            rows.append(Row("SKILL_SHADOWED", name, f"{path} is {what}: /{name} loads it, not the plugin's; {fix}"))
+            rows.append(
+                Row("SKILL_SHADOWED", name, f"{path} is {what}: /{name} loads it, not the plugin's; {fix}", fix)
+            )
     return rows
 
 
@@ -1478,7 +1641,7 @@ def settings_rows(repo: str, delete_on_merge: object) -> list[Row]:
     if delete_on_merge:
         return []
     fix = f"gh repo edit {repo} --delete-branch-on-merge"
-    return [Row("BRANCH_DELETE_OFF", repo, f"merged PR branches stay on GitHub; turn it on: {fix}")]
+    return [Row("BRANCH_DELETE_OFF", repo, f"merged PR branches stay on GitHub; turn it on: {fix}", fix)]
 
 
 # -- workflows -----------------------------------------------------------------------------
@@ -1549,13 +1712,13 @@ def main() -> int:
         # the branches before the runs: a run that ends between the two reads deleted its branch
         branches = work_branches(repo_dir) if shipmill else {}
         runs = fetch_runs(args.repo, workflow)
-        rows += bot_rows(runs, due, now, grace, workflow)
+        rows += bot_rows(runs, due, now, grace, workflow, args.repo)
         # an older run can still own the branch behind newer finished ones, so the owners
         # are asked by status; only with a branch, so a normal pass makes no extra call
         owners = fetch_unfinished(args.repo, workflow) if branches else []
-        rows += work_branch_rows(branches, owners, workflow)
+        rows += work_branch_rows(branches, owners, workflow, args.repo)
         if shipmill:  # after the plan, whose own worktree is gone by then
-            rows += stale_worktrees(repo_dir, args.tool)
+            rows += stale_worktrees(repo_dir, args.tool, branch)
 
     tags = version_tags(repo_dir)
     package = package_name(repo_dir)
@@ -1564,19 +1727,30 @@ def main() -> int:
     first = first_upload(project, package) if package is not None and project is not None else None
     for i, tag in enumerate(tags[: args.releases]):
         listed = on_pypi(f"{package}/{tag.name[1:]}") if registered else None
-        row = publish_row(tag, package if registered else None, listed, now, grace, first)
+        row = publish_row(
+            tag,
+            package if registered else None,
+            listed,
+            now,
+            grace,
+            first,
+            repo=args.repo,
+            runs_on=lambda name: fetch_tag_runs(args.repo, name),
+        )
         rows.append(row)
         if row.state in {"PUBLISHED", "NO_REGISTRY"} and i + 1 < len(tags):
             issues = unannounced(args.repo, repo_dir, tags[i + 1].name, tag.name)
             if issues:
-                rows.append(Row("UNANNOUNCED", tag.name, f"{' '.join(issues)} (since {tags[i + 1].name})"))
+                rows.append(unannounced_row(args.repo, tag.name, tags[i + 1].name, issues))
 
+    table = None
     if policy is not None:
         text = (repo_dir / policy).read_text(encoding="utf-8")
         rows.append(triage_mode_row(text, policy))
-        rows += gate_app_rows(agents_table(text, policy))
+        table = agents_table(text, policy)
+        rows += gate_app_rows(table)
         read = config(text, policy, args.incident_label)
-        holds = hold_rows(fetch_issues(args.repo, "--label", HOLD_LABEL), now)
+        holds = hold_rows(fetch_issues(args.repo, "--label", HOLD_LABEL), now, args.repo)
         rows += holds
         closed = fetch_issues(args.repo, "--label", read.incident_label, state="closed")
         if closed:  # the postmortems are read only once an incident has closed
@@ -1585,7 +1759,7 @@ def main() -> int:
         if read.environments:
             rows += operations_rows(args.repo, repo_dir, read.environments, bool(holds), read.incident_label, now)
 
-    rows += intake_rows(args.repo, args.bot_login, args.trusted_only)
+    rows += intake_rows(args.repo, args.bot_login, args.trusted_only, lands_prs(table))
     rows += active_rows(fetch_active(args.repo), now)
     rows += agent_rows(args.repo, repo_dir, now)
     rows += shipmill_rows(args.repo, repo_dir)

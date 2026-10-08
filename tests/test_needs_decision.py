@@ -269,7 +269,13 @@ def test_s005_9_waiting_items_leave_issues_and_prs_open_for_a_needs_decision_row
     found = rows(ws, ws.intake("o/r", 1, out, prs, comments(asked)))
     assert found["ISSUES"]["detail"] == "NEEDS_PR #9; NEW #12"
     assert found["PRS_OPEN"]["detail"] == "#3 #5"  # #5 was answered; #6 is a draft
-    assert found["NEEDS_DECISION"] == {"state": "NEEDS_DECISION", "subject": "o/r", "detail": "#4 #7", "agent": False}
+    assert found["NEEDS_DECISION"] == {
+        "state": "NEEDS_DECISION",
+        "subject": "o/r",
+        "detail": "#4 #7",
+        "agent": False,
+        "fix": "answer the needs-decision question on o/r #4 #7",
+    }
     assert "NEEDS_DECISION" in ws.ACTION and "NEEDS_DECISION" not in ws.AGENT
 
 
@@ -324,7 +330,12 @@ def test_s005_10_trusted_only_lists_fork_prs_as_untrusted(ws: ModuleType) -> Non
     out = triage((11, "UNTRUSTED"), (12, "NEW"))
     found = rows(ws, ws.intake("o/r", 1, out, prs, comments({}), None, True))
     assert found["PRS_OPEN"]["detail"] == "#3"
-    assert found["UNTRUSTED"] == {"state": "UNTRUSTED", "subject": "o/r", "detail": "#8 #9 #11", "agent": False}
+    assert {k: v for k, v in found["UNTRUSTED"].items() if k != "fix"} == {
+        "state": "UNTRUSTED",
+        "subject": "o/r",
+        "detail": "#8 #9 #11",
+        "agent": False,
+    }
     assert "UNTRUSTED" not in ws.ACTION and "UNTRUSTED" not in ws.AGENT
     # mode 1 doesn't filter: a fork's pull request is open work
     assert rows(ws, ws.intake("o/r", 0, "", prs[:2], comments({})))["PRS_OPEN"]["detail"] == "#3 #8"
@@ -332,7 +343,8 @@ def test_s005_10_trusted_only_lists_fork_prs_as_untrusted(ws: ModuleType) -> Non
 
 def test_existing_intake_rows_keep_their_shape(ws: ModuleType) -> None:
     found = ws.intake("o/r", 1, triage((12, "NEW"), (9, "NEEDS_PR"), (5, "TRIAGED")), [pr(3), pr(4)], comments({}))
-    assert [r.json() for r in found] == [
+    # S-011-1: the fix is added beside the four keys, which keep their values
+    assert [{k: v for k, v in r.json().items() if k != "fix"} for r in found] == [
         {"state": "ISSUES", "subject": "o/r", "detail": "NEEDS_PR #9; NEW #12", "agent": True},
         {"state": "ISSUES_OPEN", "subject": "o/r", "detail": "TRIAGED #5", "agent": False},  # #182
         {"state": "PRS_OPEN", "subject": "o/r", "detail": "#3 #4", "agent": False},

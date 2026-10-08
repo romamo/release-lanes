@@ -28,6 +28,8 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 
 `scripts/watch_state.py <owner/repo> [--repo-dir PATH]` answers the whole status question deterministically. Run it with `uv run --no-project python` (or `python3`, 3.10+) at the start of every pass and again before the report. Exit 0 means nothing needs action; 1 means a row below is an action; 2 is a git, gh, uvx, or PyPI failure (report it and stop).
 
+Each row that needs a person or an agent carries a `fix` (`--json`'s `"fix"` key, the table's indented `fix:` line): the one line that clears it, built only from trusted values (never an issue's or a pull request's text). Give the user that line in the report; the repair table below stays your procedure under "watch", and a fix never runs by itself.
+
 | State | Repair under "watch" |
 |---|---|
 | INCIDENT_OPEN | Report first: the issue, how long it has been open, and whether a PR links it to close it. Recommend landing the linked hotfix PR, or writing one when none links it. Rollback is operate's (or the user's), never the watch's |
