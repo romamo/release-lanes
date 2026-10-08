@@ -289,6 +289,7 @@ PROPOSAL_LABEL = "shipmill-proposal"  # shipmill's github.PROPOSAL_LABEL
 PROPOSAL_SEARCH = 'in:title "Ready to"'  # proposals opened before the label; the marker in the body decides
 PROPOSAL = re.compile(r"<!-- shipmill:propose deploy=(?P<env>\S+) -->")  # shipmill's operate.deploy_marker
 PROPOSED_TAG = re.compile(r"<!-- shipmill:tag=(?P<tag>\S+) -->")
+ENV_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")  # shipmill's environments._NAME
 OPERATE_USES = re.compile(
     r"^\s*(?:-\s*)?uses:\s*[\"']?(?:[\w.-]+/[\w.-]+/\.github/workflows/operate\.ya?ml@|\./\.github/workflows/operate\.ya?ml)",
     re.MULTILINE,
@@ -980,7 +981,9 @@ def proposal_issues(labelled: list[Issue], search: Callable[[], list[Issue]]) ->
 
 def proposal_rows(issues: list[Issue], caller: str, held: bool, repo: str) -> list[Row]:
     """The open proposal issues shipmill operate opens for a deploy that waits on approval;
-    the fix is the detail's approve command, naming the repo"""
+    the fix is the detail's approve command, naming the repo. The environment comes from the
+    issue's body, which anyone can write on an issue the title search finds, so a name no
+    environment can have never reaches the fix (D-16)"""
     rows = []
     for issue in issues:
         found = PROPOSAL.search(issue.body)
@@ -991,7 +994,11 @@ def proposal_rows(issues: list[Issue], caller: str, held: bool, repo: str) -> li
         approve = f"gh workflow run {caller} -f approve={env} -f dry-run=false"
         first = f"close the {HOLD_LABEL} issues, then " if held else ""
         detail = f"#{issue.number} {tag.group('tag') if tag else issue.title}: {first}{approve}"
-        fix = f"{first}gh workflow run {caller} -R {repo} -f approve={env} -f dry-run=false"
+        if ENV_NAME.fullmatch(env):
+            fix = f"{first}gh workflow run {caller} -R {repo} -f approve={env} -f dry-run=false"
+        else:
+            n = issue.number
+            fix = f"check proposal #{n} by hand, it names no environment: gh issue view {n} -R {repo}"
         rows.append(Row("PROMOTION_DUE", env, detail, fix))
     return rows
 

