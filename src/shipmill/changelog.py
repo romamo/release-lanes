@@ -105,8 +105,19 @@ class Changelog:
     def promoted(self, version: Version) -> list[Entry]:
         """What a stable release of version holds: the pending Unreleased entries, then the
         entries of its rc sections, newest section first, each entry once (D-25)"""
-        folded = (e for rc in self.rc_sections(version) for e in self.section_entries(rc))
-        return list(dict.fromkeys([*self.pending(), *folded]))
+        return list(dict.fromkeys([*self.pending(), *self._folded(version)]))
+
+    def _folded(self, version: Version) -> list[Entry]:
+        """The entries of version's rc sections, newest section first. Folding removes the
+        sections, so text that is not an entry (prose, a '#### ' heading, a numbered list)
+        fails here rather than vanish"""
+        return [
+            e
+            for rc in self.rc_sections(version)
+            for e in _entries(
+                self.section(rc).splitlines(), self.style, strict=True, where=f"{rc}, folded into {version}"
+            )
+        ]
 
     def section(self, version: Version) -> str:
         found = [s for s in self._segments if s.version == version]
@@ -144,7 +155,7 @@ class Changelog:
             raise ReleaseError(f"the CHANGELOG already has a section for {version}")
         rcs = self.rc_sections(version)
         folded = set(rcs)
-        held = [e for rc in rcs for e in self.section_entries(rc)]
+        held = self._folded(version)
         current = self.unreleased()
         moved = set(entries)
         if from_unreleased and (missing := [e for e in entries if e not in current and e not in held]):

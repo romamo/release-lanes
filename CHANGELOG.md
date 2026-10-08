@@ -28,7 +28,9 @@ bot.
   the rc sections newest first, each entry once), and removes the rc sections and their
   compare links; the GitHub release notes and a release proposal list the same entries.
   When a promotion still skips, the reason names the rc sections it found or says there
-  were none. A CHANGELOG without rc sections releases as before (#243)
+  were none. An rc section holding text that is not an entry (prose, a `####` heading, a
+  numbered list) stops the release with an error naming it rather than lose that text. A
+  CHANGELOG without rc sections releases as before (#243)
 
 ## [0.33.2] - 2026-10-07
 

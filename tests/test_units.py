@@ -253,6 +253,21 @@ class TestChangelog:
         )
         assert "[1.1.0]: https://github.com/o/demo/compare/v1.0.0...v1.1.0\n" in after
 
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "This candidate reworks the parser.\n\n### Added\n\n- Fix C (#3)\n",
+            "### Added\n\n- Fix C (#3)\n\n#### Internals\n\n- Fix D (#4)\n",
+            "- Fix C (#3)\n",
+        ],
+    )
+    def test_folding_refuses_an_rc_section_with_text_that_is_not_an_entry(self, body: str) -> None:  # #243
+        # the fold removes the rc section, so what it can't carry over must not vanish silently
+        text = KAC.replace("## [1.0.0]", f"## [1.1.0rc1] - 2026-10-03\n\n{body}\n## [1.0.0]")
+        changelog = Changelog(text, Style.KEEP_A_CHANGELOG)
+        with pytest.raises(ReleaseError, match=r"1\.1\.0rc1, folded into 1\.1\.0: "):
+            changelog.promoted(v("1.1.0"))
+
     def test_needs_unreleased_link(self) -> None:
         changelog = Changelog(KAC.replace("[Unreleased]: https", "[Other]: https"), Style.KEEP_A_CHANGELOG)
         entry = changelog.unreleased()[0]
