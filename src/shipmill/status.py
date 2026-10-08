@@ -16,6 +16,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from shipmill.agent_as_person import NAME as AGENT_AS_PERSON
+from shipmill.agent_as_person import Flagged
 from shipmill.agents import AgentsConfig, Mode
 from shipmill.app import Identity, default_key
 from shipmill.config import CONFIG_PATH, config_path, read
@@ -222,6 +224,7 @@ class Facts:
     now: dt.datetime
     checkout: Path  # the checkout --repo names, which a git fix runs in (D-23)
     command: str  # how a fix names the CLI: cli_command()'s form
+    agent_as_person: Flagged | None = None  # spec 012's check, read only with [agents] app_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -893,6 +896,15 @@ def shipmill_lines(facts: Facts) -> list[str]:
     return _after(_line("shipmill", ", ".join(parts)), [row_fix(facts.repo, r) for r in outdated])
 
 
+def agent_as_person_lines(facts: Facts) -> list[str]:
+    """S-012-7: a WARN row when agent-marked items went out under a person's login, its fix on
+    an indented `fix:` line (S-011-12); a warning beside the verdict, not a reason for it"""
+    found = facts.agent_as_person
+    if found is None or not found.urls:
+        return []
+    return _after(_line("WARN", f"{AGENT_AS_PERSON}: {found.summary()}"), [found.fix(facts.command)])
+
+
 def report(facts: Facts) -> Report:
     found, reasons, working = verdict(facts)
     open_ = sum(1 for i in facts.issues if i.state not in CLOSED_STATES)
@@ -902,6 +914,7 @@ def report(facts: Facts) -> Report:
         count_line("open issues", open_, f"{github(facts.repo)}/issues"),
         count_line("pull requests", len(facts.pulls), f"{github(facts.repo)}/pulls"),
         *gate_lines(facts),
+        *agent_as_person_lines(facts),
         *shipmill_lines(facts),
     ]
     return Report(found, reasons, working, lines)

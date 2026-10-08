@@ -32,6 +32,11 @@ bot.
   repo; any failure to get it exits 2 and never runs `gh`), else as the host's login with
   no empty `GH_TOKEN`; and `shipmill app-token` works outside a checkout, caching under
   `$XDG_CACHE_HOME/shipmill/<owner>/<repo>/` with mode 0600 (spec 012) (#262)
+- `AGENT_AS_PERSON`: with `[agents] app_id` set, `shipmill status` prints a WARN row and
+  `shipmill doctor` a WARN check when an issue, pull request, or issue comment of the last
+  7 days carries an agent's marker but a person's login wrote it, naming the count, up to
+  three URLs, and the fix (`shipmill gh`); one GraphQL search, and no request without an
+  `app_id` (#264)
 
 ### Changed
 
