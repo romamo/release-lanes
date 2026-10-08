@@ -365,6 +365,25 @@ def test_s013_14_a_line_added_under_unreleased_fails_naming_the_fragment(tmp_pat
     assert "move the entry into a new fragment, changelog.d/12-a-fix.md," in done.stdout
 
 
+def test_s013_14_rewording_an_unreleased_entry_in_place_fails(tmp_path: Path) -> None:
+    # #304: an edit is a removed line plus an added one, and the added one fails
+    root = with_fragments(tmp_path)
+    commit(root, BEFORE.replace("- A\n", "- A, reworded\n"), "reword an Unreleased entry")
+    done = guard(root, "check", "--base", "main")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "added under Unreleased, line 7: - A, reworded" in done.stdout
+
+
+def test_s013_14_moving_an_unreleased_entry_into_a_fragment_passes(tmp_path: Path) -> None:
+    # #304: the skills tell a reviewer to fix stale Unreleased wording this way
+    root = with_fragments(tmp_path)
+    commit(root, BEFORE.replace("### Fixed\n\n- A\n\n", ""), "move A out of Unreleased")
+    add(root, "12-a-fix.md", "### Fixed\n\n- A, reworded\n")
+    done = guard(root, "check", "--base", "main")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "ok: no entry added under Unreleased; 1 fragment(s) added or changed in changelog.d" in done.stdout
+
+
 def test_s013_14_a_well_formed_fragment_passes(tmp_path: Path) -> None:
     root = with_fragments(tmp_path)
     add(root, "12-a-fix.md", GOOD)
