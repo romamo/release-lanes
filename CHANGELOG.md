@@ -40,17 +40,6 @@ bot.
   seconds; when it fails again, the error line ends `transient GitHub API error: rerun`. An
   auth, not-found, or any other failure still fails at once, and no write is ever rerun
   (#261)
-
-### Fixed
-
-- A failing `shipmill plan` no longer stops github-ship-watch's `watch_state.py`, so the
-  gate reads a repo's issues and pull requests again: the failure is a new `BOT_PLAN_FAILED`
-  row on the release workflow, with the planner's error line and the plan to run to see it, an
-  action for a person (exit 1, not an agent's), read as no release due; `shipmill status`
-  reads it as STUCK (#276)
-
-### Added
-
 - `shipmill upgrade` lists the config upgrades a repo hasn't decided (`--json` for
   scripts): `changelog-fragments` until `[changelog] fragments` is set to any value, and
   `plugin-update` for a config with an `[agents]` section and no `plugin_update` key.
@@ -60,6 +49,14 @@ bot.
   one already decided exits 2 naming it. `[autonomy] upgrade` takes observe, propose (the
   default), or act, and an open hold reads act as propose; doctor's autonomy row names it
   (spec 014) (#279)
+
+### Fixed
+
+- A failing `shipmill plan` no longer stops github-ship-watch's `watch_state.py`, so the
+  gate reads a repo's issues and pull requests again: the failure is a new `BOT_PLAN_FAILED`
+  row on the release workflow, with the planner's error line and the plan to run to see it, an
+  action for a person (exit 1, not an agent's), read as no release due; `shipmill status`
+  reads it as STUCK (#276)
 
 ## [0.36.0] - 2026-10-08
 
