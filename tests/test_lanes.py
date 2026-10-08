@@ -282,6 +282,32 @@ def test_a_promotion_with_nothing_to_fold_names_the_rc_sections(
     assert f"v1.1.0rc2's base has nothing pending under Unreleased, and {found}" in decision.reason
 
 
+def test_a_bad_rc_section_to_fold_leaves_the_rc_lane_releasing(repo: Repo) -> None:  # #296
+    repo.at(at_day(0))
+    prose = "The second 1.1 release candidate: 1 addition and 1 fix."
+    bad = LEGACY_RC_SECTIONS.replace("## [1.1.0rc2] - 2026-10-04\n", f"## [1.1.0rc2] - 2026-10-04\n\n{prose}\n")
+    _tag_on_main(repo, bad, "v1.1.0rc2")
+    fold_error = f"1.1.0rc2, folded into 1.1.0: text outside a '- ' entry: {prose!r}"
+
+    # nothing else to release: the plan fails with the stable lane's error, as before
+    with pytest.raises(ReleaseError, match="folded into 1.1.0"):
+        plan(repo, at_day(4))
+
+    # a pending entry: the rc lane cuts the next rc, and the reason names the stable lane's error
+    repo.at(at_day(4))
+    repo.merge(4, "Fixed", "Fix D, after the rc")
+    decision = plan(repo, at_day(5))
+    assert (decision.action, decision.lane, str(decision.version)) == ("release", Lane.RC, "1.1.0rc3")
+    assert decision.reason.endswith(f"; stable: not planned, {fold_error}")
+    sha = release(repo, decision)  # prepare for an rc never reads the fold
+    assert repo.git.remote_tag("v1.1.0rc3")
+    assert prose in (repo.git.show(sha, "CHANGELOG.md") or "")
+
+    # the stable lane started by hand still fails with the fold's error
+    with pytest.raises(ReleaseError, match="folded into 1.1.0"):
+        plan(repo, at_day(9), event=Event.MANUAL, lane=Lane.STABLE)
+
+
 def test_hotfix_ships_chosen_prs_from_the_release_branch(repo: Repo) -> None:
     repo.merge(1, "Added", "Feature A, not ready", "src/a.py", "A = 1\n")
     repo.merge(2, "Fixed", "Urgent fix", "src/app.py", "VALUE = 2\n")
