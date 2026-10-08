@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-10-08
+
 ### Changed
 
 - Decision D-26: when a stable release folds its rc sections, prose before an rc
@@ -1262,7 +1264,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.38.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.39.0...HEAD
+[0.39.0]: https://github.com/shipmill/shipmill/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/shipmill/shipmill/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/shipmill/shipmill/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/shipmill/shipmill/compare/v0.35.0...v0.36.0
