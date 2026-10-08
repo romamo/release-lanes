@@ -69,6 +69,76 @@ def test_a_due_release_with_a_live_or_recent_run_waits(ws: ModuleType, status: s
     assert states(ws.bot_rows(runs, ws.Due("stable 0.3.0", "stable"), NOW, GRACE, "release.yml", "o/r")) == ["BOT_OK"]
 
 
+TREATY_ERROR = "shipmill: CHANGELOG.md line 12: a line outside an entry in [1.0.0rc1]: 'This rc adds ...'"
+
+
+class Spawned:
+    """A stand-in for watch_state's spawn: each command's exit and output, by its first words"""
+
+    def __init__(self, plan: tuple[int, str, str], add: int = 0, remove: int = 0) -> None:
+        self.answers = {"uvx": plan, "git worktree add": (add, "", "no"), "git worktree remove": (remove, "", "no")}
+        self.calls: list[list[str]] = []
+
+    def __call__(
+        self, cmd: list[str], cwd: Path | None, env: dict[str, str] | None
+    ) -> subprocess.CompletedProcess[str]:
+        self.calls.append(cmd)
+        code, out, err = self.answers[cmd[0] if cmd[0] == "uvx" else " ".join(cmd[:3])]
+        return subprocess.CompletedProcess(cmd, code, out, err)
+
+
+def plan_checkout(tmp_path: Path, mode: str = "release") -> Path:
+    (tmp_path / ".github").mkdir()
+    (tmp_path / ".github" / "shipmill.toml").write_text(f'mode = "{mode}"\n')
+    return tmp_path
+
+
+def test_a_failing_plan_is_a_bot_row_and_the_watch_goes_on(ws: ModuleType, tmp_path: Path) -> None:
+    # #276: treaty's rc section opens with a prose line, so `shipmill plan` exits 2 on every tick
+    spawned = Spawned((2, "", f"Installed 9 packages in 12ms\n{TREATY_ERROR}\n"))
+    checkout = plan_checkout(tmp_path)
+    due, rows = ws.bot_plan(REPO, checkout, ws.POLICY, "main", "shipmill==0.36.0", "release.yml", spawned)
+    assert due is None
+    assert [(r.state, r.subject, r.detail, r.fix) for r in rows] == [
+        (
+            "BOT_PLAN_FAILED",
+            "release.yml",
+            f"shipmill plan failed: {TREATY_ERROR}",
+            f"on an up-to-date main: uvx --from shipmill==0.36.0 shipmill --repo {checkout} plan --event schedule"
+            " --dry-run",
+        )
+    ]
+    assert [c[:3] for c in spawned.calls][-1] == ["git", "worktree", "remove"]  # the worktree is still removed
+    assert rows[0].json()["agent"] is False and "BOT_PLAN_FAILED" in ws.ACTION
+
+
+def test_a_plan_that_passes_reads_its_release(ws: ModuleType, tmp_path: Path) -> None:
+    decision = json.dumps({"action": "release", "reason": "stable 1.0.0: main quiet", "lane": "stable"})
+    spawned = Spawned((0, decision, ""))
+    due, rows = ws.bot_plan(REPO, plan_checkout(tmp_path), ws.POLICY, "main", "t", "release.yml", spawned)
+    assert (due, rows) == (ws.Due("stable 1.0.0: main quiet", "stable"), [])
+
+
+@pytest.mark.parametrize(
+    ("spawned", "stop"),
+    [
+        (Spawned((2, "", "x"), add=128), SystemExit),
+        (Spawned((2, "", "x"), remove=1), SystemExit),
+        (Spawned((0, "not json", "")), json.JSONDecodeError),
+        (Spawned((2, "", "error: Failed to fetch: `https://x:tok@h/s.git`\n  Caused by: refused\n")), SystemExit),
+        (Spawned((2, "", "")), SystemExit),
+    ],
+    ids=["worktree add", "worktree remove", "no JSON", "uvx resolve", "silent"],
+)
+def test_only_the_plan_itself_failing_is_the_row(
+    ws: ModuleType, tmp_path: Path, spawned: Spawned, stop: type[BaseException]
+) -> None:
+    # #276: a failed worktree add or remove, output that isn't JSON, or a failure that isn't the
+    # planner's own `shipmill: ` error (uvx unable to fetch the tool, say) still stops the watch
+    with pytest.raises(stop):
+        ws.bot_plan(REPO, plan_checkout(tmp_path), ws.POLICY, "main", "t", "release.yml", spawned)
+
+
 def test_a_work_branch_no_run_owns_is_stale(ws: ModuleType) -> None:
     # #175: the run that pushed shipmill/v0.17.0 was cancelled before its cleanup got a runner
     runs = [run(ws, "completed", "success", 5), run(ws, "completed", "cancelled", 900)]
@@ -668,6 +738,7 @@ REPORT_ROWS = [
     "SHIPMILL_OUTDATED",
     "SKILL_SHADOWED",
     "POSTMORTEM_DUE",
+    "BOT_PLAN_FAILED",
     "BOT_OK",
     "PUBLISHED",
     "PUBLISHING",
@@ -1199,6 +1270,7 @@ def fixed_rows(ws: ModuleType, home: Path) -> dict[str, list[Any]]:
     rows: list[Any] = [
         *ws.bot_rows(failed, None, NOW, GRACE, "release.yml", REPO),
         *ws.bot_rows([], ws.Due("stable 1.0.0: main quiet", "stable"), NOW, GRACE, "release.yml", REPO),
+        ws.plan_failed_row(ws.PlanFailed(TREATY_ERROR), "release.yml", CHECKOUT, "main", "shipmill==0.36.0"),
         *ws.work_branch_rows({"shipmill/v1.0.0": "a" * 40}, [], "release.yml", REPO),
         publish_row(ws, ws.Tag("v1.0.0", NOW - dt.timedelta(hours=2)), "pkg", False, NOW, GRACE, runs=tuple(failed)),
         ws.unannounced_row(REPO, "v1.0.0", "v0.9.0", ["#3"]),
@@ -1225,6 +1297,9 @@ def fixed_rows(ws: ModuleType, home: Path) -> dict[str, list[Any]]:
 FIXES = {
     "BOT_FAILED": ["gh run rerun 5 --failed -R o/r"],
     "BOT_STALLED": ["gh workflow run release.yml -R o/r -f lane=stable -f dry-run=false"],
+    "BOT_PLAN_FAILED": [
+        "on an up-to-date main: uvx --from shipmill==0.36.0 shipmill --repo /work/r plan --event schedule --dry-run"
+    ],
     "WORK_BRANCH_STALE": ["/shipmill:github-ship-watch o/r"],
     "NOT_PUBLISHED": ["gh run rerun 5 --failed -R o/r"],
     "UNANNOUNCED": ["/shipmill:github-ship-watch o/r"],
