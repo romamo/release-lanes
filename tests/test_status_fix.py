@@ -4,12 +4,14 @@ the item lines say what acting on them needs"""
 import dataclasses
 import datetime as dt
 import json
+import shlex
 import subprocess
 from pathlib import Path
 
 import pytest
 
 from shipmill import UVX
+from shipmill.gitrepo import Git
 from shipmill.launchd import label
 from shipmill.status import (
     STUCK_ROWS,
@@ -24,6 +26,7 @@ from shipmill.status import (
     cli_update,
     parse_issues,
     parse_rows,
+    read_main,
     read_pulls,
     report,
 )
@@ -183,8 +186,35 @@ def test_s011_15_an_outdated_cli_names_the_form_installed() -> None:
 
 
 def test_s011_16_the_repo_line_pulls_in_the_checkout_named() -> None:
-    behind = facts(main=Main("main", "a" * 40, "b" * 40, 0, 3), checkout=Path("/src/my web"))
+    behind = facts(main=Main("main", "a" * 40, "b" * 40, 0, 3, True), checkout=Path("/src/my web"))
     assert lines(behind)[1] == "  repo           3 behind: git -C '/src/my web' pull --ff-only at v0.26.0, release ok"
+
+
+def _git(*args: str, cwd: Path) -> None:
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args], cwd=cwd, check=True, capture_output=True
+    )
+
+
+def test_s011_16_the_repo_lines_fix_catches_up_off_the_default_branch_too(tmp_path: Path) -> None:
+    """Regression: with another branch checked out, `git pull --ff-only` pulls that branch (or
+    fails without an upstream) and leaves the default branch behind; the fix must catch it up"""
+    origin, pusher, work = tmp_path / "origin.git", tmp_path / "pusher", tmp_path / "work"
+    _git("init", "-q", "--bare", "-b", "main", str(origin), cwd=tmp_path)
+    _git("clone", "-q", str(origin), str(pusher), cwd=tmp_path)
+    _git("commit", "-q", "--allow-empty", "-m", "one", cwd=pusher)
+    _git("push", "-q", "origin", "main", cwd=pusher)
+    _git("clone", "-q", str(origin), str(work), cwd=tmp_path)
+    _git("switch", "-q", "-c", "feat/x", cwd=work)
+    _git("commit", "-q", "--allow-empty", "-m", "two", cwd=pusher)
+    _git("push", "-q", "origin", "main", cwd=pusher)
+    _git("fetch", "-q", "origin", cwd=work)
+    main = read_main(Git(work), "main")
+    assert main.behind == 1
+    line = lines(facts(main=main, checkout=work))[1]
+    fix = line.partition("1 behind: ")[2].partition(" at v")[0]
+    subprocess.run(shlex.split(fix), check=True, capture_output=True)
+    assert read_main(Git(work), "main").behind == 0, line
 
 
 @pytest.mark.parametrize(

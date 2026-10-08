@@ -56,7 +56,7 @@ def facts(*rows: Row, **changes: object) -> Facts:
         rows=[*rows, VERSION],
         issues=[],
         pulls=[],
-        main=Main("main", SHA, SHA, 0, 0),
+        main=Main("main", SHA, SHA, 0, 0, True),
         version=Described("v0.26.0", 0),
         gate=GATE,
         cli="0.26.0",
@@ -400,11 +400,12 @@ def test_s009_16_the_gate_reasons_are_lines_too() -> None:
 @pytest.mark.parametrize(
     ("main_", "shown"),
     [
-        (Main("main", SHA, SHA, 0, 0), "in sync"),
-        (Main("main", SHA, "b" * 40, 0, 2), f"2 behind: git -C {CHECKOUT} pull --ff-only"),  # S-011-16
-        (Main("main", SHA, "b" * 40, 1, 0), "1 ahead"),
-        (Main("main", SHA, "b" * 40, 1, 2), "diverged (1 ahead, 2 behind)"),
-        (Main("main", None, SHA, 0, 0), "no local main"),
+        (Main("main", SHA, SHA, 0, 0, True), "in sync"),
+        (Main("main", SHA, "b" * 40, 0, 2, True), f"2 behind: git -C {CHECKOUT} pull --ff-only"),  # S-011-16
+        (Main("main", SHA, "b" * 40, 0, 2, False), f"2 behind: git -C {CHECKOUT} fetch origin main:main"),
+        (Main("main", SHA, "b" * 40, 1, 0, True), "1 ahead"),
+        (Main("main", SHA, "b" * 40, 1, 2, True), "diverged (1 ahead, 2 behind)"),
+        (Main("main", None, SHA, 0, 0, False), "no local main"),
     ],
 )
 def test_s009_17_the_repo_line_compares_local_with_github(main_: Main, shown: str) -> None:

@@ -141,13 +141,15 @@ class Pull:
 
 @dataclass(frozen=True, slots=True)
 class Main:
-    """The default branch here and on GitHub; local is None without a local branch"""
+    """The default branch here and on GitHub; local is None without a local branch, and
+    checked_out says whether the checkout is on it"""
 
     branch: str
     local: str | None
     remote: str
     ahead: int
     behind: int
+    checked_out: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -330,10 +332,13 @@ def read_main(git: Git, branch: str) -> Main:
     """After watch_state.py's fetch, so origin's branch is GitHub's"""
     remote = git.run("rev-parse", "--verify", "-q", f"refs/remotes/origin/{branch}^{{commit}}").strip()
     if not git.ok("rev-parse", "--verify", "-q", f"refs/heads/{branch}"):
-        return Main(branch, None, remote, 0, 0)
+        return Main(branch, None, remote, 0, 0, False)
     local = git.sha(f"refs/heads/{branch}")
     ahead, behind = git.run("rev-list", "--left-right", "--count", f"{local}...{remote}").split()
-    return Main(branch, local, remote, int(ahead), int(behind))
+    on = (
+        git.ok("symbolic-ref", "-q", "HEAD") and git.run("symbolic-ref", "-q", "HEAD").strip() == f"refs/heads/{branch}"
+    )
+    return Main(branch, local, remote, int(ahead), int(behind), on)
 
 
 def describe(git: Git, rev: str) -> Described:
@@ -707,7 +712,10 @@ def repo_line(facts: Facts) -> str:
     elif m.ahead and m.behind:
         state = f"diverged ({m.ahead} ahead, {m.behind} behind)"
     elif m.behind:  # S-011-16: the pull names the checkout, so it works from any folder (D-23)
-        state = f"{m.behind} behind: git -C {shlex.quote(str(facts.checkout))} pull --ff-only"
+        at = shlex.quote(str(facts.checkout))
+        # off the branch, a pull would pull the branch checked out: fast-forward the default one
+        catch_up = "pull --ff-only" if m.checked_out else f"fetch origin {shlex.quote(f'{m.branch}:{m.branch}')}"
+        state = f"{m.behind} behind: git -C {at} {catch_up}"
     elif m.ahead:
         state = f"{m.ahead} ahead"
     else:

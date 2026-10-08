@@ -30,7 +30,8 @@ bot.
   update for the form installed, and landing pull requests when no gate does. Its item lines
   say what acting on them needs: a pull request behind or in conflict with its base, the
   pull requests covering an issue in progress, what a parked issue waits on, how to ready a
-  draft, and the `git -C <checkout> pull --ff-only` for a branch behind (#259)
+  draft, and the `git -C <checkout> pull --ff-only` for a branch behind (`fetch origin
+  <branch>:<branch>` when another branch is checked out) (#259)
 
 ## [0.35.0] - 2026-10-08
 
