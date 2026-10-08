@@ -7,6 +7,19 @@ bot.
 
 ## [Unreleased]
 
+## [0.41.1] - 2026-10-08
+
+### Fixed
+
+- github-pr-triage no longer tells a reviewer to reword an Unreleased entry after a rebase in
+  a repo with changelog fragments, which `changelog_guard.py check` fails: stale wording is
+  fixed in the fragment that holds the entry, and an entry still under Unreleased stays or
+  moves into a fragment in the same PR (#304)
+- `shipmill upgrade --apply changelog-fragments` writes `changelog.d/README.md` with an
+  example in the config's `[changelog] style`, as `shipmill init` does, instead of always
+  the keep-a-changelog one; it refuses a style it doesn't know, and still leaves an existing
+  `README.md` alone (#305)
+
 ## [0.41.0] - 2026-10-08
 
 ### Changed
@@ -1324,7 +1337,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.41.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.41.1...HEAD
+[0.41.1]: https://github.com/shipmill/shipmill/compare/v0.41.0...v0.41.1
 [0.41.0]: https://github.com/shipmill/shipmill/compare/v0.40.0...v0.41.0
 [0.40.0]: https://github.com/shipmill/shipmill/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/shipmill/shipmill/compare/v0.38.0...v0.39.0
