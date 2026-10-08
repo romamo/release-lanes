@@ -36,7 +36,15 @@ A triage verdict that waits on a decision says so in its first line ("Waits on y
 
 An interactive gate session that gets the answer through AskUserQuestion puts the record on GitHub before it acts, so the item doesn't wait on a question already answered and the thread shows who decided:
 
-1. Post the answer on the item as a comment without the marker, through `--body-file`: `Answered in the session: <the option or the user's own words>`
+1. Post the answer on the item as a comment without the marker, through `--body-file`. Posted as the App (`shipmill gh` with `[agents] app_id` set), its first line names who decided and who relayed it, so the thread tells a person's decision from agent text:
+
+   ```markdown
+   Decision by @<login>, relayed by <agent>
+
+   Answered in the session: <the option or the user's own words>
+   ```
+
+   `<login>` is the person who answered, `<agent>` the tool that relays it (`Claude Code`)
 2. Remove the `needs-decision` label: `gh issue edit <n> --remove-label needs-decision` (or `gh pr edit`)
 3. Record the answer with `decisions.py add` when it sets a rule, as the [design gate](design-gate.md) says, and go on
 
