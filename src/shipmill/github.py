@@ -15,6 +15,14 @@ from shipmill.errors import ReleaseError
 PROPOSAL_LABEL = "shipmill-proposal"  # on every issue proposing a release or a deploy
 OPEN_LIMIT = 100  # open issues read per label: proposals are one per lane and per environment
 PULL_LIMIT = 1000  # open pull requests read at once; gh's own default is 30
+MERGED_PER_BRANCH = 20  # merged pull requests read per head branch name, the newest
+HISTORY_LIMIT = 100  # a merged pull request's commits, and its force-pushes, read: the last ones
+_MERGED_FRAGMENT = (
+    "fragment merged on PullRequestConnection { nodes { number headRefName baseRefName headRefOid "
+    f"commits(last: {HISTORY_LIMIT}) {{ nodes {{ commit {{ oid }} }} }} "
+    f"timelineItems(itemTypes: [HEAD_REF_FORCE_PUSHED_EVENT], last: {HISTORY_LIMIT}) "
+    "{ nodes { ... on HeadRefForcePushedEvent { beforeCommit { oid } afterCommit { oid } } } } } }"
+)
 _LABEL_DESCRIPTIONS = {PROPOSAL_LABEL: "Opened by shipmill: a release or deploy waiting for a person"}
 # the statuses of a run not finished yet, each listed with its own query: GitHub filters runs
 # by one status at a time
@@ -47,6 +55,17 @@ class Issue:
 class PullRequest:
     number: int
     head: str  # the head branch's name
+
+
+@dataclass(frozen=True, slots=True)
+class MergedPull:
+    """A merged pull request and every commit known to have been its head: its head when
+    merged, its commits, and each force-push's commit before and after"""
+
+    number: int
+    head: str  # the head branch's name
+    heads: frozenset[str]  # full commit SHAs
+    base: str  # the branch it merged into: only a merge into the default branch landed
 
 
 class DeploymentState(StrEnum):
@@ -149,6 +168,12 @@ class GitHub(Protocol):
 
     def open_pull_requests(self) -> list[PullRequest]:
         """The open pull requests, by number (the newest PULL_LIMIT)"""
+        ...
+
+    def merged_pull_requests(self, branches: Sequence[str]) -> list[MergedPull]:
+        """The merged pull requests whose head branch is named one of branches, by number, with
+        their head history (the newest MERGED_PER_BRANCH per name, the last HISTORY_LIMIT
+        commits and force-pushes of each); one request for all the names, none for no name"""
         ...
 
     def active_runs(self, workflow: str) -> list[WorkflowRun]:
@@ -365,3 +390,94 @@ class GhCli:
                 raise ReleaseError(f"gh pr list printed {pr!r}: a pull request needs a number and a headRefName")
             pulls.append(PullRequest(pr["number"], pr["headRefName"]))
         return sorted(pulls, key=lambda p: p.number)
+
+    def merged_pull_requests(self, branches: Sequence[str]) -> list[MergedPull]:
+        names = sorted(set(branches))
+        if not names:
+            return []
+        params = "".join(f", $b{i}: String!" for i in range(len(names)))
+        aliases = " ".join(
+            f"b{i}: pullRequests(headRefName: $b{i}, states: MERGED, last: {MERGED_PER_BRANCH}) {{ ...merged }}"
+            for i in range(len(names))
+        )
+        query = (
+            f"query($owner: String!, $name: String!{params}) "
+            f"{{ repository(owner: $owner, name: $name) {{ {aliases} }} }} {_MERGED_FRAGMENT}"
+        )
+        variables = [a for i, n in enumerate(names) for a in ("-f", f"b{i}={n}")]
+        found = json.loads(
+            self._gh("api", "graphql", "-F", "owner={owner}", "-F", "name={repo}", "-f", f"query={query}", *variables)
+        )
+        return parse_merged_pulls(found, len(names))
+
+
+def parse_merged_pulls(found: Any, aliases: int) -> list[MergedPull]:
+    """The `b<i>` connections of merged_pull_requests' GraphQL answer; anything else is refused,
+    since a pull request misread could prove a branch landed that didn't"""
+
+    def refuse(what: str) -> ReleaseError:
+        return ReleaseError(f"gh api graphql printed {what} for the merged pull requests: {str(found)[:300]}")
+
+    if not isinstance(found, dict) or found.get("errors"):
+        raise refuse("errors or no object")
+    data = found.get("data")
+    repository = data.get("repository") if isinstance(data, dict) else None
+    if not isinstance(repository, dict):
+        raise refuse("no repository")
+    pulls: dict[int, MergedPull] = {}
+    for i in range(aliases):
+        connection = repository.get(f"b{i}")
+        if not isinstance(connection, dict) or not isinstance(connection.get("nodes"), list):
+            raise refuse(f"no b{i} connection")
+        for node in connection["nodes"]:
+            pull = _merged_pull(node)
+            if pull is None:
+                raise refuse(
+                    "a pull request without a number, headRefName, baseRefName, headRefOid, commits, or timeline"
+                )
+            pulls[pull.number] = pull
+    return [pulls[n] for n in sorted(pulls)]
+
+
+def _oid(holder: Any, key: str) -> str | None:
+    """holder[key]["oid"]; None when holder[key] is null (a commit GitHub no longer has)"""
+    if not isinstance(holder, dict):
+        raise ReleaseError(f"gh api graphql printed {holder!r} where an object holds {key}")
+    value = holder.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not isinstance(value.get("oid"), str) or not value["oid"]:
+        raise ReleaseError(f"gh api graphql printed {holder!r}: {key} needs an oid")
+    return str(value["oid"])
+
+
+def _merged_pull(node: Any) -> MergedPull | None:
+    if not isinstance(node, dict):
+        return None
+    number, head, oid = node.get("number"), node.get("headRefName"), node.get("headRefOid")
+    base, commits, timeline = node.get("baseRefName"), node.get("commits"), node.get("timelineItems")
+    if (
+        not isinstance(number, int)
+        or not isinstance(head, str)
+        or not isinstance(base, str)
+        or not isinstance(oid, str)
+        or not isinstance(commits, dict)
+        or not isinstance(commits.get("nodes"), list)
+        or not isinstance(timeline, dict)
+        or not isinstance(timeline.get("nodes"), list)
+    ):
+        return None
+    heads = {oid}
+    for c in commits["nodes"]:
+        sha = _oid(c, "commit")
+        if sha is None:
+            raise ReleaseError(f"gh api graphql printed {c!r} for #{number}: a commit needs an oid")
+        heads.add(sha)
+    for event in timeline["nodes"]:
+        if not isinstance(event, dict):
+            raise ReleaseError(f"gh api graphql printed {event!r} for #{number}: not a force-push event")
+        for key in ("beforeCommit", "afterCommit"):
+            sha = _oid(event, key)
+            if sha is not None:
+                heads.add(sha)
+    return MergedPull(number, head, frozenset(heads), base)
