@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-10-08
+
 ### Added
 
 - Spec 011: every row and summary line of `shipmill status` that waits on you or is stuck
@@ -1115,7 +1117,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.34.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.35.0...HEAD
+[0.35.0]: https://github.com/shipmill/shipmill/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/shipmill/shipmill/compare/v0.33.2...v0.34.0
 [0.33.2]: https://github.com/shipmill/shipmill/compare/v0.33.1...v0.33.2
 [0.33.1]: https://github.com/shipmill/shipmill/compare/v0.33.0...v0.33.1
