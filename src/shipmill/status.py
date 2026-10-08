@@ -12,6 +12,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +33,15 @@ from shipmill.version import Version
 DECISION = re.compile(r"^[A-Z]+: ")
 FAILURE = re.compile(r"^(?:shipmill: |error: |Traceback )")
 NEVER_EXITED = "(never exited)"  # launchctl's last exit code before a job's first run
+# a gh read failing on one of these is run once more (S-011-11): watch_state.py's
+# GH_TRANSIENT and GH_CLIENT_ERROR (tests/test_ship_watch.py keeps them equal)
+GH_TRANSIENT = re.compile(
+    r"\bHTTP 5\d\d\b|\btime(?:d )?out\b|deadline exceeded|connection (?:reset|refused)|unexpected EOF",
+    re.IGNORECASE,
+)
+GH_CLIENT_ERROR = re.compile(r"\bHTTP 4\d\d\b")  # auth, not found, a bad query: never retried
+GH_PAUSE = 5.0  # seconds before the one rerun
+GH_RERUN = "transient GitHub API error: rerun"
 
 # watch_state.py's rows by the verdict they bring (S-009-2, S-009-5)
 STUCK_ROWS = (
@@ -315,18 +325,37 @@ def read_issues(repo: str, run: StateRunner, bot_login: str | None) -> list[Issu
     return parse_issues(proc.stdout)
 
 
-def read_pulls(repo: str, run: StateRunner) -> list[Pull]:
+def _transient(proc: subprocess.CompletedProcess[str]) -> bool:
+    """A failed gh read's server or network error, never auth, not found, or a bad query"""
+    failed = proc.returncode != 0 and not GH_CLIENT_ERROR.search(proc.stderr)
+    return failed and GH_TRANSIENT.search(proc.stderr) is not None
+
+
+def gh_read(cmd: list[str], run: StateRunner, what: str, pause: Callable[[float], None] = time.sleep) -> str:
+    """A gh read's output, run once more after GH_PAUSE seconds when it fails on a transient
+    error; a second failure names it (S-011-11)"""
+    proc = run(cmd)
+    if _transient(proc):
+        pause(GH_PAUSE)
+        proc = run(cmd)
+        if _transient(proc):
+            error = " ".join(proc.stderr.split())[-500:]
+            raise ReleaseError(f"{what} failed (exit {proc.returncode}): {error}; {GH_RERUN}")
+    return _checked(proc, what)
+
+
+def read_pulls(repo: str, run: StateRunner, pause: Callable[[float], None] = time.sleep) -> list[Pull]:
     fields = "number,isDraft,mergeStateStatus,baseRefName"
-    out = _checked(run(["gh", "pr", "list", "-R", repo, "--json", fields, "-L", "1000"]), "gh pr list")
+    out = gh_read(["gh", "pr", "list", "-R", repo, "--json", fields, "-L", "1000"], run, "gh pr list", pause)
     found = json.loads(out)
     return [
         Pull(int(p["number"]), bool(p["isDraft"]), str(p["mergeStateStatus"]), str(p["baseRefName"])) for p in found
     ]
 
 
-def read_branch(repo: str, run: StateRunner) -> str:
+def read_branch(repo: str, run: StateRunner, pause: Callable[[float], None] = time.sleep) -> str:
     cmd = ["gh", "repo", "view", repo, "--json", "defaultBranchRef", "-q", ".defaultBranchRef.name"]
-    branch = _checked(run(cmd), "gh repo view").strip()
+    branch = gh_read(cmd, run, "gh repo view", pause).strip()
     if not branch:
         raise ReleaseError(f"gh repo view {repo} named no default branch")
     return branch

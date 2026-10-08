@@ -27,7 +27,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 
 ## The script
 
-`scripts/watch_state.py <owner/repo> [--repo-dir PATH]` answers the whole status question deterministically. Run it with `uv run --no-project python` (or `python3`, 3.10+) at the start of every pass and again before the report. Exit 0 means nothing needs action; 1 means a row below is an action; 2 is a git, gh, uvx, or PyPI failure (report it and stop).
+`scripts/watch_state.py <owner/repo> [--repo-dir PATH]` answers the whole status question deterministically. Run it with `uv run --no-project python` (or `python3`, 3.10+) at the start of every pass and again before the report. Exit 0 means nothing needs action; 1 means a row below is an action; 2 is a git, gh, uvx, or PyPI failure (report it and stop). A gh read that fails on a server or network error is already run once more by the script; an error line ending `transient GitHub API error: rerun` means GitHub failed twice, so run the pass again later rather than chasing a cause.
 
 Each row that needs a person or an agent carries a `fix` (`--json`'s `"fix"` key, the table's indented `fix:` line): the one line that clears it, built only from trusted values (never an issue's or a pull request's text). Give the user that line in the report; the repair table below stays your procedure under "watch", and a fix never runs by itself.
 

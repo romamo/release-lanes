@@ -13,6 +13,8 @@ from typing import Any
 
 import pytest
 
+from shipmill import status as shipmill_status
+
 SCRIPT = Path(__file__).resolve().parents[1] / "skills" / "github-ship-watch" / "scripts" / "watch_state.py"
 NOW = dt.datetime(2026, 10, 3, 12, 0, tzinfo=dt.timezone.utc)  # noqa: UP017 (runs under 3.10 too, as the script does)
 GRACE = dt.timedelta(minutes=20)
@@ -421,6 +423,112 @@ def test_only_a_missing_postmortems_folder_reads_as_none(ws: ModuleType, capsys:
         ws.postmortem_paths(gh(1, err="gh: Server Error (HTTP 502)"), "o/r", "main")
     with pytest.raises(ws.Refused):
         ws.postmortem_paths(gh(0, '{"type": "file"}'), "o/r", "main")
+
+
+TRANSIENT_ERRORS = [
+    "gh: Server Error (HTTP 502)",
+    "HTTP 503: Service Unavailable (https://api.github.com/graphql)",
+    'Post "https://api.github.com/graphql": net/http: TLS handshake timeout',
+    "read tcp 10.0.0.2:51234->140.82.112.6:443: read: connection reset by peer",
+    'Get "https://api.github.com/repos/o/r": dial tcp: connect: connection refused',
+    'Get "https://api.github.com/repos/o/r": context deadline exceeded',
+    "error: unexpected EOF",
+]
+STEADY_ERRORS = [
+    "HTTP 401: Bad credentials (https://api.github.com/graphql)\nTry authenticating with:  gh auth login",
+    "gh: Not Found (HTTP 404)",
+    "GraphQL: Could not resolve to a Repository with the name 'o/r'. (repository)",
+    "To get started with GitHub CLI, please run:  gh auth login",
+]
+READ = ["gh", "run", "list", "-R", "o/r", "--json", "url"]
+
+
+class Answers:
+    """Each call's (exit, stderr), in order, as an injected runner; what it ran and paused"""
+
+    def __init__(self, *answers: tuple[int, str]) -> None:
+        self.answers = list(answers)
+        self.ran: list[list[str]] = []
+        self.paused: list[float] = []
+
+    def __call__(self, cmd: list[str]) -> subprocess.CompletedProcess[str]:
+        self.ran.append(cmd)
+        code, err = self.answers.pop(0)
+        return subprocess.CompletedProcess(cmd, code, "[]" if code == 0 else "", err)
+
+    def pause(self, seconds: float) -> None:
+        self.paused.append(seconds)
+
+
+@pytest.mark.parametrize("error", TRANSIENT_ERRORS)
+def test_s011_11_a_transient_gh_read_failure_is_run_once_more(ws: ModuleType, error: str) -> None:
+    answers = Answers((1, error), (0, ""))
+    assert ws.checked(READ, ws.retried(READ, answers, answers.pause)) == "[]"
+    assert answers.ran == [READ, READ]
+    assert answers.paused == [ws.GH_PAUSE]  # one short pause, injected: no real sleep
+
+
+@pytest.mark.parametrize("error", TRANSIENT_ERRORS)
+def test_s011_11_a_second_transient_failure_exits_2_and_says_rerun(
+    ws: ModuleType, capsys: pytest.CaptureFixture[str], error: str
+) -> None:
+    answers = Answers((1, error), (1, error))
+    with pytest.raises(SystemExit) as stopped:
+        ws.checked(READ, ws.retried(READ, answers, answers.pause))
+    assert stopped.value.code == 2
+    assert len(answers.ran) == 2
+    line = capsys.readouterr().err
+    assert line.count("\n") == 1 and line.endswith("transient GitHub API error: rerun\n")
+
+
+@pytest.mark.parametrize("error", STEADY_ERRORS)
+def test_s011_11_an_auth_or_not_found_failure_is_not_retried(
+    ws: ModuleType, capsys: pytest.CaptureFixture[str], error: str
+) -> None:
+    answers = Answers((1, error))
+    with pytest.raises(SystemExit):
+        ws.checked(READ, ws.retried(READ, answers, answers.pause))
+    assert (len(answers.ran), answers.paused) == (1, [])
+    assert "transient" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        ["gh", "issue", "comment", "4", "-R", "o/r", "--body", "x"],
+        ["gh", "api", "repos/o/r/issues/4/comments", "-f", "body=x"],
+        ["gh", "api", "-X", "POST", "repos/o/r/issues/4/labels"],
+        ["git", "fetch", "origin"],
+    ],
+    ids=["comment", "api field", "api POST", "git"],
+)
+def test_s011_11_only_a_gh_read_is_ever_run_twice(ws: ModuleType, cmd: list[str]) -> None:
+    answers = Answers((1, "gh: Server Error (HTTP 502)"))
+    assert ws.retried(cmd, answers, answers.pause).returncode == 1
+    assert len(answers.ran) == 1
+
+
+def test_s011_11_every_gh_call_the_watch_makes_is_a_read(ws: ModuleType) -> None:
+    calls = re.findall(r'\["gh", ([^\]]*)\]', SCRIPT.read_text())
+    assert calls, "the watch's gh calls"
+    for call in calls:
+        words = ["gh", *re.findall(r'"([^"]*)"', call)]
+        assert ws.gh_read(words), call
+
+
+def test_s011_11_a_transient_postmortem_listing_says_rerun(ws: ModuleType, capsys: pytest.CaptureFixture[str]) -> None:
+    listing = ["gh", "api", "-X", "GET", "repos/o/r/contents/docs/postmortems", "-f", "ref=main"]
+    proc = subprocess.CompletedProcess(listing, 1, "", "gh: Server Error (HTTP 502)")
+    with pytest.raises(SystemExit):
+        ws.postmortem_paths(proc, "o/r", "main")
+    assert capsys.readouterr().err.endswith("transient GitHub API error: rerun\n")
+
+
+def test_s011_11_status_reads_the_same_transient_errors(ws: ModuleType) -> None:
+    found = shipmill_status
+    assert (found.GH_TRANSIENT.pattern, found.GH_TRANSIENT.flags) == (ws.GH_TRANSIENT.pattern, ws.GH_TRANSIENT.flags)
+    assert found.GH_CLIENT_ERROR.pattern == ws.GH_CLIENT_ERROR.pattern
+    assert (found.GH_PAUSE, found.GH_RERUN) == (ws.GH_PAUSE, ws.GH_RERUN)
 
 
 def test_the_template_names_no_incident(ws: ModuleType) -> None:
