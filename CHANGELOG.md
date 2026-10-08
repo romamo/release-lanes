@@ -12,6 +12,22 @@ bot.
 - The package metadata names its author as Roman Medvedev instead of the handle Romamo
 - The LICENSE names the copyright holder as Roman Medvedev instead of the handle Romamo
 
+### Added
+
+- `shipmill upgrade --propose` opens one issue labelled `shipmill-upgrade` per pending
+  config upgrade, with `<!-- shipmill-upgrade: <id> <version> -->` on its first line, and
+  updates it in place on later runs; under `[autonomy] upgrade = "observe"` it opens none.
+  An upgrade whose issue was closed while the config lacks its key is declined: never
+  proposed again, and no longer listed by `shipmill upgrade`, which now reads the
+  `shipmill-upgrade` issues when one is pending. A config that sets the key closes its open
+  issue as completed. A new reusable `upgrade.yml` runs it with the caller's grant, and the
+  release workflow `shipmill init` writes calls it in its own `upgrade` job after the release
+  jobs, with `issues: write`, so a failure there names the upgrade and never stops a release.
+  `shipmill doctor` lists each pending upgrade with its fix, never failing on one, and warns
+  about a caller without that job or its `issues: write` only when `upgrade` is propose or
+  act and an upgrade is pending (D-9); `shipmill status` lists each pending upgrade with its
+  issue's link or the `--apply` command as its fix (spec 014) (#280)
+
 ## [0.40.0] - 2026-10-08
 
 ### Changed

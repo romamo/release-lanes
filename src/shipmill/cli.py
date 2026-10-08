@@ -14,8 +14,9 @@
   status          say whether the factory works or is stuck: a verdict, then a short summary with
                   a line per reason and a direct link per item; --rows for github-ship-watch's
                   table, --json for its JSON lines
-  upgrade         list the config upgrades this repo hasn't decided (spec 014); --apply <id> makes one's
-                  edit in the checkout and commits nothing
+  upgrade         list the config upgrades this repo hasn't decided or declined (spec 014); --apply <id>
+                  makes one's edit in the checkout and commits nothing; --propose opens or updates
+                  one shipmill-upgrade issue per pending upgrade, as the release workflow runs it
   init            write a starting policy and the calling workflow (--operate: the operate one)
   gate            start a Claude Code session for the repo only when its state needs one; each tick,
                   held or not, prunes the worktrees that landed, as `worktrees --prune` does
@@ -87,8 +88,8 @@ from shipmill.app_create import (
 )
 from shipmill.app_gh import GhRunner, as_app, as_host, find_gh, named_repo, run_gh
 from shipmill.app_install import WAIT_SECONDS, guide
-from shipmill.autonomy import Hold
-from shipmill.config import CONFIG_PATH, config_path
+from shipmill.autonomy import Autonomy, AutonomyPolicy, Hold
+from shipmill.config import CONFIG_PATH, Table, config_path
 from shipmill.config import read as read_config
 from shipmill.doctor import CALLER, OPERATE_CALLER, doctor, read_plugin_rows
 from shipmill.errors import ReleaseError
@@ -109,7 +110,7 @@ from shipmill.gate import (
     watch,
     watch_command,
 )
-from shipmill.github import GhCli, GitHub
+from shipmill.github import UPGRADE_LABEL, GhCli, GitHub
 from shipmill.gitrepo import Git
 from shipmill.init import init, init_operate
 from shipmill.land import ActionsRun, Prepared, Stop, cleanup, land, prepare, work_branch
@@ -120,7 +121,9 @@ from shipmill.planner import Event, Hotfix, Planner, Proposal
 from shipmill.policy import Lane, Policy
 from shipmill.propose import close_released, propose, run_url
 from shipmill.stamp import notes, sync
-from shipmill.upgrades import UpgradeId, apply, find, pending
+from shipmill.upgrades import WORKFLOW as UPGRADE_WORKFLOW
+from shipmill.upgrades import UpgradeId, apply, find, offers, pending
+from shipmill.upgrades import propose as propose_upgrades
 from shipmill.version import Version
 from shipmill.worktrees import ClaudeSessions, Sessions, judge, prune, table
 from shipmill.worktrees import report as worktrees_report
@@ -256,10 +259,17 @@ def _parser() -> argparse.ArgumentParser:
     shown.add_argument("--json", action="store_true", help="print github-ship-watch's JSON lines instead")
 
     p = sub.add_parser("upgrade", help=f"list the config upgrades {CONFIG_PATH} hasn't decided (spec 014)")
-    p.add_argument(
+    acts = p.add_mutually_exclusive_group()
+    acts.add_argument(
         "--apply",
         metavar="ID",
         help="make the upgrade's edit in the checkout: the config line and its files; no commit",
+    )
+    acts.add_argument(
+        "--propose",
+        action="store_true",
+        help="open or update one shipmill-upgrade issue per pending upgrade (none under observe), and close"
+        " the issue of each upgrade the config decided",
     )
     p.add_argument("--json", action="store_true", help="print the result as JSON")
 
@@ -420,7 +430,7 @@ def main(
     if args.command == "status":
         return _status(root, args, state or run_state, api or UrllibApi(), signer or Openssl())
     if args.command == "upgrade":
-        return _upgrade(root, args)
+        return _upgrade(root, args, github or GhCli(root))
     hub = github or GhCli(root)
     if args.command == "init" and args.operate:
         print(f"wrote {init_operate(root, args.force).relative_to(root)}")
@@ -438,7 +448,7 @@ def main(
         people = (
             None if slug is None else (lambda: agent_as_person.read(slug, state or run_state, dt.datetime.now(dt.UTC)))
         )
-        checks = doctor(root, github or (GhCli(root) if shutil.which("gh") else None), plugins, people)
+        checks = doctor(root, github or (GhCli(root) if shutil.which("gh") else None), plugins, people, slug)
         for check in checks:
             print(f"{check.status} {check.name}: {check.detail}")
         return 1 if any(c.status == "FAIL" for c in checks) else 0
@@ -841,6 +851,7 @@ def _status(
         checkout=top,
         command=cli_command(),
         agent_as_person=people,
+        upgrades=status.read_upgrades(slug, top, run),
     )
     sys.stdout.write(status.report(facts).text(slug))
     return proc.returncode  # S-009-14: spec 008's code, whatever the verdict
@@ -909,8 +920,9 @@ def _app_install(
     return 1 if missing else 0
 
 
-def _upgrade(root: Path, args: argparse.Namespace) -> int:
-    """List the pending upgrades, or apply one: its edit in the checkout, nothing committed"""
+def _upgrade(root: Path, args: argparse.Namespace, github: GitHub) -> int:
+    """List the pending upgrades, apply one (its edit in the checkout, nothing committed), or
+    propose them as issues; the list and the proposals leave out a declined upgrade"""
     if args.apply is not None:
         applied = apply(root, find(UpgradeId(args.apply)))
         upgrade = applied.upgrade
@@ -931,16 +943,37 @@ def _upgrade(root: Path, args: argparse.Namespace) -> int:
             print(f"kept {path.as_posix()}: it already exists")
         print("next: review the diff, commit it on a branch, and open a pull request")
         return 0
-    upgrades = pending(read_config(config_path(root)))
-    if args.json:
-        print(json.dumps([u.record() for u in upgrades], indent=2))
+    raw = read_config(config_path(root))
+    if args.propose:
+        autonomy = Table(raw, str(CONFIG_PATH)).table("autonomy", optional=True)
+        level = AutonomyPolicy.parse(autonomy).upgrade
+        fix = f"grant `issues: write` to the job in {CALLER} that calls shipmill's {UPGRADE_WORKFLOW}"
+        done = propose_upgrades(raw, level, github, fix)
+        if args.json:
+            records = [{"id": str(d.upgrade.id), "issue": d.issue, "outcome": str(d.outcome)} for d in done]
+            print(json.dumps(records, indent=2))
+            return 0
+        for d in done:
+            print(f"{d.outcome} #{d.issue}: {d.upgrade.id}")
+        if level is Autonomy.OBSERVE:
+            print("upgrade autonomy is observe: no upgrade issue opened or updated")
+        elif not done:
+            print("no pending upgrades")
         return 0
-    if not upgrades:
+    # GitHub is read only when an upgrade is pending, to leave out the declined ones
+    found = offers(raw, github.labelled_issues(UPGRADE_LABEL)) if pending(raw) else ()
+    if args.json:
+        print(json.dumps([o.upgrade.record() | {"issue": o.issue} for o in found], indent=2))
+        return 0
+    if not found:
         print("no pending upgrades")
-    for upgrade in upgrades:
+    for offer in found:
+        upgrade = offer.upgrade
         print(f"{upgrade.id} (shipmill {upgrade.version}): {upgrade.changes}")
         print(f"  adds: [{upgrade.table}] {upgrade.line}")
         print(f"  off: {upgrade.off}")
+        if offer.issue is not None:
+            print(f"  proposed: #{offer.issue}")
         print(f"  apply: `{cli_command()} upgrade --apply {upgrade.id}`")
     return 0
 

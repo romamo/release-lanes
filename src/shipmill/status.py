@@ -24,8 +24,10 @@ from shipmill.app import Identity, default_key
 from shipmill.config import CONFIG_PATH, config_path, read
 from shipmill.errors import ReleaseError
 from shipmill.gate import StateRunner, skills_dir
+from shipmill.github import UPGRADE_LABEL, labelled_command, parse_labelled
 from shipmill.gitrepo import Git
 from shipmill.launchd import label
+from shipmill.upgrades import Offer, offers, pending
 from shipmill.version import Version
 
 # the gate log's decision lines (QUIET, LAUNCH, ...), and the lines a failed tick leaves:
@@ -236,6 +238,7 @@ class Facts:
     checkout: Path  # the checkout --repo names, which a git fix runs in (D-23)
     command: str  # how a fix names the CLI: cli_command()'s form
     agent_as_person: Flagged | None = None  # spec 012's check, read only with [agents] app_id
+    upgrades: Sequence[Offer] = ()  # spec 014's pending upgrades, each with its open issue
 
 
 @dataclass(frozen=True, slots=True)
@@ -351,6 +354,18 @@ def read_pulls(repo: str, run: StateRunner, pause: Callable[[float], None] = tim
     return [
         Pull(int(p["number"]), bool(p["isDraft"]), str(p["mergeStateStatus"]), str(p["baseRefName"])) for p in found
     ]
+
+
+def read_upgrades(
+    repo: str, root: Path, run: StateRunner, pause: Callable[[float], None] = time.sleep
+) -> tuple[Offer, ...]:
+    """Spec 014: the checkout config's pending upgrades, less the declined ones, each with its
+    open shipmill-upgrade issue; GitHub is read only when one is pending"""
+    raw = read(config_path(root)) if (root / CONFIG_PATH).is_file() else {}
+    if not raw or not pending(raw):
+        return ()
+    cmd = ["gh", *labelled_command(UPGRADE_LABEL), "-R", repo]
+    return offers(raw, parse_labelled(gh_read(cmd, run, "gh issue list", pause)))
 
 
 def read_branch(repo: str, run: StateRunner, pause: Callable[[float], None] = time.sleep) -> str:
@@ -821,6 +836,16 @@ def pull_value(facts: Facts, number: int) -> str:
     return shown
 
 
+def upgrade_value(facts: Facts, offer: Offer) -> tuple[str, str]:
+    """S-014-15: a pending upgrade and its fix, the open issue's link, else the --apply
+    command; an offer to the maintainer, not a reason for the verdict"""
+    upgrade = offer.upgrade
+    value = f"{upgrade.id} (shipmill {upgrade.version}): {upgrade.changes}"
+    if offer.issue is None:
+        return value, f"{facts.command} upgrade --apply {upgrade.id}"
+    return value, f"{github(facts.repo)}/issues/{offer.issue}"
+
+
 def item_lines(facts: Facts) -> list[str]:
     """The lines shown only when they hold something, between repo and open issues"""
     repo, rows = facts.repo, facts.rows
@@ -845,6 +870,7 @@ def item_lines(facts: Facts) -> list[str]:
     suspect = sorted((i.number for i in facts.issues if i.state in CLOSED_STATES), reverse=True)
     lines += _group("suspect close", [item(repo, n, False) for n in suspect])
     lines += _fixed("branches", [("merged branches kept", fixed(r)) for r in of("BRANCH_DELETE_OFF")][:1])
+    lines += _fixed("upgrade", [upgrade_value(facts, o) for o in facts.upgrades])
     for name, states in ISSUE_LINES:
         found = sorted((i for i in facts.issues if i.state in states), key=lambda i: i.number, reverse=True)
         lines += _group(name, [issue_value(repo, i) for i in found])

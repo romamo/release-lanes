@@ -373,12 +373,13 @@ jobs:
 def test_doctor_warns_on_a_caller_that_cannot_open_the_proposal_only_when_needed(repo: Repo) -> None:
     caller = ".github/workflows/release.yml"
     repo.write(caller, CALLER_TEXT.format(prepare="read", other="write"))
+    set_autonomy(repo, 'upgrade = "observe"\n')  # spec 014's own warning stays out of this test
     assert "permissions" not in checks(repo, repo.github)  # no propose, no hold: nothing opens an issue
-    set_autonomy(repo, 'rollback = "propose"\n')
+    set_autonomy(repo, 'rollback = "propose"\nupgrade = "observe"\n')
     status, detail = checks(repo, repo.github)["permissions"]
     assert status == "WARN" and detail.startswith("the config sets a stage to propose")
     assert detail.endswith("change its `issues: read` to `issues: write`")  # another job's write doesn't count
-    set_autonomy(repo, "")
+    set_autonomy(repo, 'upgrade = "observe"\n')
     repo.github.holds = ["#7 Investigating"]
     assert checks(repo, repo.github)["permissions"][1].startswith(f"held by {HOLD_LABEL} #7")
     repo.write(caller, CALLER_TEXT.format(prepare="write", other="read"))

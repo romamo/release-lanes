@@ -15,14 +15,14 @@ from shipmill.config import CONFIG_PATH, Table
 from shipmill.errors import ReleaseError
 from shipmill.upgrades import CATALOGUE, FRAGMENTS_README, UpgradeId, find
 
-from .conftest import POLICY, Repo
+from .conftest import POLICY, FakeGitHub, Repo
 
 AGENTS = '\n[agents]\nprompt = "triage {repo}"\n'
 HELD = Hold(("#7 Investigating",))
 
 
-def listed(root: Path, capsys: pytest.CaptureFixture[str]) -> list[str]:
-    assert main(["--repo", str(root), "upgrade", "--json"]) == 0
+def listed(root: Path, capsys: pytest.CaptureFixture[str], github: FakeGitHub | None = None) -> list[str]:
+    assert main(["--repo", str(root), "upgrade", "--json"], github=github or FakeGitHub()) == 0
     return [u["id"] for u in json.loads(capsys.readouterr().out)]
 
 
@@ -78,19 +78,19 @@ def test_s014_1_lists_plugin_update_only_with_agents_and_no_key(repo: Repo, caps
 
 def test_s014_1_lists_for_people_with_the_apply_command(repo: Repo, capsys: pytest.CaptureFixture[str]) -> None:
     write_config(repo.root, POLICY + AGENTS)
-    assert main(["--repo", str(repo.root), "upgrade"]) == 0
+    assert main(["--repo", str(repo.root), "upgrade"], github=FakeGitHub()) == 0
     out = capsys.readouterr().out
     assert out.startswith("changelog-fragments (shipmill ")
     assert '  adds: [changelog] fragments = "changelog.d"\n' in out
     assert "upgrade --apply changelog-fragments`" in out
     assert "plugin-update (shipmill " in out and "upgrade --apply plugin-update`" in out
     write_config(repo.root, POLICY.replace("[changelog]\n", '[changelog]\nfragments = "x"\n'))
-    assert main(["--repo", str(repo.root), "upgrade"]) == 0
+    assert main(["--repo", str(repo.root), "upgrade"], github=FakeGitHub()) == 0
     assert capsys.readouterr().out == "no pending upgrades\n"
 
 
 def test_listing_json_carries_the_proposal_text(repo: Repo, capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["--repo", str(repo.root), "upgrade", "--json"]) == 0
+    assert main(["--repo", str(repo.root), "upgrade", "--json"], github=FakeGitHub()) == 0
     (record,) = json.loads(capsys.readouterr().out)
     assert record["id"] == "changelog-fragments"
     assert record["table"] == "changelog" and record["line"] == 'fragments = "changelog.d"'

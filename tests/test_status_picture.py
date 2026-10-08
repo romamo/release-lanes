@@ -251,6 +251,7 @@ class Fake:
             ("gh", "repo"): "main\n",
             ("gh", "release"): '{"tagName": "v1.0.0", "publishedAt": "2026-10-06T12:00:00Z"}',
             ("gh", "api"): '{"data": {"search": {"nodes": []}}}',  # spec 012's AGENT_AS_PERSON search
+            ("gh", "issue"): "[]",  # spec 014's shipmill-upgrade issues
         }
         return subprocess.CompletedProcess(cmd, 0, answers[(cmd[0], cmd[1])], "")
 

@@ -5,9 +5,10 @@ import importlib.util
 import re
 import sys
 import tomllib
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from shipmill import cli_command, fragments
 from shipmill.agent_as_person import NAME as AGENT_AS_PERSON
@@ -15,13 +16,16 @@ from shipmill.agent_as_person import Flagged
 from shipmill.autonomy import HOLD_LABEL, Autonomy, Hold
 from shipmill.changelog import Changelog
 from shipmill.config import config_path
+from shipmill.config import read as read_config
 from shipmill.errors import ReleaseError
 from shipmill.gate import skills_dir
-from shipmill.github import GitHub
+from shipmill.github import UPGRADE_LABEL, GitHub
 from shipmill.gitrepo import REMOTE, Git
 from shipmill.land import BLOCKING_BRANCH, WORK_PREFIX, blocked
 from shipmill.policy import BumpFrom, Lane, Policy, VersionFiles
 from shipmill.stamp import project_version
+from shipmill.upgrades import WORKFLOW as UPGRADE_WORKFLOW
+from shipmill.upgrades import offers, pending
 
 CALLER = Path(".github") / "workflows" / "release.yml"
 OPERATE_CALLER = Path(".github") / "workflows" / "operate.yml"  # calls shipmill's operate.yml on a schedule
@@ -104,10 +108,12 @@ def doctor(
     github: GitHub | None = None,
     plugins: PluginRows | None = None,
     people: PeopleReader | None = None,
+    repo: str | None = None,
 ) -> list[Check]:
-    """github reads the open hold; None (no gh) reports that it can't. plugins reads the
-    shipmill plugin's installs on this host; None checks none. people reads spec 012's
-    AGENT_AS_PERSON items, only when [agents] app_id is set; None checks none"""
+    """github reads the open hold and the shipmill-upgrade issues; None (no gh) reports that
+    it can't. plugins reads the shipmill plugin's installs on this host; None checks none.
+    people reads spec 012's AGENT_AS_PERSON items, only when [agents] app_id is set; None
+    checks none. repo, owner/name, links an upgrade's issue; None names it by number"""
     checks: list[Check] = []
 
     def add(ok: bool, name: str, detail: str, warn: bool = False) -> None:
@@ -125,6 +131,7 @@ def doctor(
         add(True, "roadmap", f"{policy.roadmap}; read by the product-intake skill")
     autonomy, hold = _autonomy(policy, github, root / CALLER)
     checks.extend(autonomy)
+    checks.extend(_upgrades(policy, read_config(found), github, root / CALLER, repo))
     if (operated := _operate(policy, hold, root, _operate_caller(root))) is not None:
         checks.append(operated)
 
@@ -221,7 +228,7 @@ def doctor(
         uses_bot = all(re.search(rf"uses:\s*\S*/\.github/workflows/{name}\b", text) for name in _BOT_WORKFLOWS)
         add(uses_bot, "workflow", f"{CALLER} calls prepare.yml and land.yml")
         for m in _LOCAL_USES.finditer(text):
-            if m["file"] in _BOT_WORKFLOWS:  # the bot's own, when a repository hosts it
+            if m["file"] in (*_BOT_WORKFLOWS, UPGRADE_WORKFLOW):  # the bot's own, when a repository hosts it
                 continue
             ci = root / ".github" / "workflows" / m["file"]
             ok = ci.is_file() and _takes_input(ci.read_text(encoding="utf-8"), "workflow_call", "ref")
@@ -383,6 +390,46 @@ def _autonomy(policy: Policy, github: GitHub | None, caller: Path) -> tuple[list
         )
         checks.append(Check("WARN", "permissions", detail))
     return checks, hold
+
+
+def _upgrades(
+    policy: Policy, raw: Mapping[str, Any], github: GitHub | None, caller: Path, repo: str | None
+) -> list[Check]:
+    """Spec 014: each pending upgrade with its fix, the open issue's link or the --apply
+    command, as a PASS: an upgrade is an offer, never a failure. When `upgrade` is propose or
+    act and one is pending, a WARN when no caller job runs shipmill's upgrade.yml with
+    `issues: write` (D-9); a WARN when the issues can't be read"""
+    if not pending(raw):
+        return []
+    if github is None:
+        return [Check("WARN", "upgrades", f"can't read the {UPGRADE_LABEL} issues: gh isn't installed")]
+    try:
+        found = offers(raw, github.labelled_issues(UPGRADE_LABEL))
+    except ReleaseError as exc:
+        return [Check("WARN", "upgrades", f"can't read the {UPGRADE_LABEL} issues: {exc}")]
+    checks = []
+    for offer in found:
+        upgrade = offer.upgrade
+        if offer.issue is None:
+            fix = f"{cli_command()} upgrade --apply {upgrade.id}"
+        else:
+            fix = f"https://github.com/{repo}/issues/{offer.issue}" if repo else f"#{offer.issue}"
+        detail = f"{upgrade.id} pending (shipmill {upgrade.version}): {upgrade.changes}; fix: {fix}"
+        checks.append(Check("PASS", "upgrade", detail))
+    if not found or policy.autonomy.upgrade is Autonomy.OBSERVE or not caller.is_file():
+        return checks
+    grants = _job_grants(caller.read_text("utf-8"), UPGRADE_WORKFLOW, "issues")
+    why = f"upgrade autonomy is {policy.autonomy.upgrade} and {len(found)} upgrade(s) pending"
+    if grants is None:
+        detail = (
+            f"{why}, but no job in {CALLER} calls shipmill's {UPGRADE_WORKFLOW}, so no issue proposes them:"
+            f" add the upgrade job `{cli_command()} init` writes, with `issues: write`"
+        )
+        checks.append(Check("WARN", "permissions", detail))
+    elif grants is False:
+        detail = f"{why}, but the job in {CALLER} that calls {UPGRADE_WORKFLOW} grants no `issues: write`: add it"
+        checks.append(Check("WARN", "permissions", detail))
+    return checks
 
 
 def _operate_caller(root: Path) -> Path:

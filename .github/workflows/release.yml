@@ -66,3 +66,13 @@ jobs:
       contents: write
       actions: write
       issues: write
+
+  upgrade:
+    needs: [prepare, ci, land]
+    if: ${{ !cancelled() && !inputs.dry-run }}
+    uses: ./.github/workflows/upgrade.yml
+    with:
+      tool: "."
+    permissions:
+      contents: read
+      issues: write
