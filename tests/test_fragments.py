@@ -4,6 +4,7 @@ and rc releases"""
 
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -14,7 +15,7 @@ from shipmill.doctor import doctor
 from shipmill.errors import ReleaseError
 from shipmill.land import prepare
 from shipmill.planner import Decision, Event, Hotfix, Proposal
-from shipmill.policy import Lane, Style
+from shipmill.policy import Lane, Policy, Style
 from shipmill.propose import propose
 from shipmill.version import Version
 
@@ -568,3 +569,35 @@ def test_s013_17_a_folder_older_than_the_key_is_still_read(repo: Repo) -> None:
     early = commit_on_main(repo, "Add the folder before the key")
     use_fragments(repo)
     assert [f.path for f in fragments.at_revision(repo.git, repo.policy, early)] == [f"{FOLDER}/1-a.md"]
+
+
+ROOT = Path(__file__).resolve().parents[1]
+# the skills spec 013's Skills section lists, each telling a PR to add a fragment when the config sets it
+SKILL_PROSE = (
+    "skills/github-issue-resolve/SKILL.md",
+    "skills/github-issue-triage/references/implementer-brief.md",
+    "skills/github-pr-triage/references/reviewer-brief.md",
+    "skills/github-pr-triage/SKILL.md",
+    "skills/github-pr-triage/references/landing.md",
+    "skills/shipmill-setup/SKILL.md",
+)
+
+
+@pytest.mark.parametrize("path", SKILL_PROSE)
+def test_s013_16_the_skills_tell_a_pr_to_add_a_fragment_when_the_config_sets_it(path: str) -> None:
+    text = " ".join((ROOT / path).read_text(encoding="utf-8").split())
+    assert "[changelog] fragments" in text or 'fragments = "changelog.d"' in text, path
+    assert "fragment" in text.replace("[changelog] fragments", ""), path
+    assert "`CHANGELOG.md` alone" in text, path
+
+
+def test_s013_16_shipmill_itself_adds_fragments() -> None:
+    policy = Policy.load(ROOT / ".github" / "shipmill.toml")
+    assert policy.fragments == FOLDER
+    assert (ROOT / FOLDER / "README.md").is_file()
+    rules = " ".join((ROOT / "CLAUDE.md").read_text(encoding="utf-8").split())
+    assert "adds its own changelog entry as a new fragment, `changelog.d/<issue>-<slug>.md`" in rules
+    assert "adds its own entry under `## [Unreleased]`" not in rules
+    # the folder reads, alongside the entries still under Unreleased
+    changelog = Changelog((ROOT / policy.changelog).read_text(encoding="utf-8"), policy.style)
+    changelog.pending(fragments.entries(fragments.in_checkout(ROOT, policy)))

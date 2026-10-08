@@ -2,7 +2,10 @@
 """CHANGELOG safety for rebases (Keep a Changelog layout, `## [Unreleased]` then `## [X]`).
 
 check --base REF   exit 1 if lines added (or removed) since REF fall outside Unreleased, or if
-                   Unreleased has a bullet with no ### heading or the same ### heading twice
+                   Unreleased has a bullet with no ### heading or the same ### heading twice.
+                   When .github/shipmill.toml sets [changelog] fragments (spec 013), also exit 1
+                   on a line added under Unreleased since REF (the entry goes in a fragment
+                   instead) and on a fragment added or changed since REF that fails to read
 move --base REF    move entries added since REF that sit in a released section under Unreleased,
                    each under its own ### heading (created in Keep a Changelog order if missing);
                    an entry right under a ## heading goes under the nearest ### heading above it
@@ -19,7 +22,12 @@ import argparse
 import re
 import subprocess
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python 3.10: the [changelog] table is read line by line instead
+    tomllib = None
 
 UNRELEASED = "## [Unreleased]"
 RELEASE = re.compile(r"^## \[")
@@ -108,6 +116,182 @@ def released_removals(base: str, path: Path, removed: list[int]) -> tuple[bool, 
     return has_unreleased, [n for n in removed if not old_start < n < old_end]
 
 
+CONFIG = PurePosixPath(".github/shipmill.toml")
+STYLES = ("keep-a-changelog", "dash")
+FRAGMENT_README = "README.md"  # keeps the folder in git; never a fragment
+FRAGMENT_SUFFIX = ".md"
+# the plain form read on Python 3.10: a table header, or key = "string", each with an optional comment
+PLAIN_HEADER = re.compile(r"^\[\s*([A-Za-z0-9_.-]+)\s*\]\s*(?:#.*)?$")
+PLAIN_KEY = re.compile(r"""^([A-Za-z0-9_-]+)\s*=\s*(?:"([^"\\]*)"|'([^']*)')\s*(?:#.*)?$""")
+PLAIN_DOTTED = re.compile(r"^changelog\s*[.=]")  # [changelog] keys written outside its table
+BRANCH_FRAGMENT = re.compile(r"^\d+-[A-Za-z0-9._-]+$")  # a branch's last part that names a fragment
+
+
+def git_root(cwd: Path) -> Path:
+    top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, cwd=cwd)
+    if top.returncode != 0:
+        fail(f"not in a git checkout: {top.stderr.strip()}")
+    return Path(top.stdout.strip())
+
+
+def plain_changelog(text: str, where: str) -> dict[str, str]:
+    """The [changelog] table of the config's plain form, for Python 3.10: its lines must be
+    key = "string"; other tables are skipped"""
+    table: dict[str, str] = {}
+    current: str | None = ""  # "" before any header; None in an array of tables
+    for number, line in enumerate(text.splitlines(), 1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("[["):
+            current = None
+            continue
+        header = PLAIN_HEADER.match(stripped)
+        if header is not None:
+            current = header.group(1)
+            continue
+        if stripped.startswith("["):  # a quoted header such as ["changelog"]: never skipped silently
+            fail(f"{where}: line {number}: can't read the header {stripped!r} on Python 3.10: write a bare [name]")
+        if current == "" and PLAIN_DOTTED.match(stripped):
+            fail(f"{where}: line {number}: can't read {stripped!r} on Python 3.10: write a [changelog] table")
+        if current != "changelog":
+            continue
+        found = PLAIN_KEY.match(stripped)
+        if found is None:
+            fail(f'{where}: line {number}: can\'t read {stripped!r} on Python 3.10: write key = "string" lines')
+        key = found.group(1)
+        if key in table:
+            fail(f"{where}: line {number}: {key} is set twice")
+        table[key] = found.group(2) if found.group(2) is not None else found.group(3)
+    return table
+
+
+def fragments_config(root: Path) -> tuple[str, str] | None:
+    """The [changelog] fragments folder and style of the checkout's config; None when there is
+    no config or it sets no fragments"""
+    path = root / CONFIG
+    if not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8")
+    where = str(CONFIG)
+    if tomllib is None:
+        table: object = plain_changelog(text, where)
+    else:
+        try:
+            table = tomllib.loads(text).get("changelog", {})
+        except tomllib.TOMLDecodeError as exc:
+            fail(f"{where}: not TOML: {exc}")
+    if not isinstance(table, dict):
+        fail(f"{where}: changelog must be a table")
+    if "fragments" not in table:
+        return None
+    folder = table["fragments"]
+    posix = PurePosixPath(folder) if isinstance(folder, str) else None
+    if (
+        posix is None
+        or not folder
+        or folder == "."
+        or posix.is_absolute()
+        or ".." in posix.parts
+        or posix.as_posix() != folder
+    ):
+        example = "such as 'changelog.d'"
+        fail(f"{where}: [changelog] fragments is a folder relative to the repo root, {example}; got {folder!r}")
+    style = table.get("style")
+    if style not in STYLES:
+        fail(f"{where}: [changelog] style must be one of {', '.join(STYLES)}; got {style!r}")
+    return folder, style
+
+
+def fragment_problem(text: str, style: str, path: str) -> str | None:
+    """Why a fragment fails to read, as shipmill's reader (src/shipmill/changelog.py,
+    fragment_entries) says it, or None when it reads"""
+    lines = text.splitlines()
+    if not any(line.strip() for line in lines):
+        return f"{path}: an empty fragment; it holds the entries a PR adds, as under Unreleased"
+    for n, line in enumerate(lines, 1):
+        if line.startswith("## "):
+            return f"{path}:{n}: a '## ' heading; a fragment holds only what goes under Unreleased: {line!r}"
+    entries = 0
+    heading = False
+    in_entry = False
+    for n, line in enumerate(lines, 1):
+        if style == "dash":
+            if line.startswith(CATEGORY):
+                entries, in_entry = entries + 1, True
+            elif not in_entry and line.strip():
+                return f"{path}:{n}: text outside a '### ' entry: {line!r}"
+            continue
+        if line.startswith(CATEGORY):
+            heading, in_entry = True, False
+        elif line.startswith(BULLET):
+            if not heading:
+                return f"{path}:{n}: an entry has no '### ' category heading: {line!r}"
+            entries, in_entry = entries + 1, True
+        elif not line.strip():
+            continue
+        elif not (in_entry and line[0].isspace()):
+            return f"{path}:{n}: text outside a '- ' entry: {line!r}"
+    if not entries:
+        return f"{path}: the fragment holds no entry"
+    return None
+
+
+def changed_fragments(root: Path, base: str, folder: str) -> list[str]:
+    """The files under folder added or changed since base, untracked ones included, as paths
+    relative to the repo root"""
+    diff = subprocess.run(
+        ["git", "diff", "--name-only", "-z", "--no-renames", "--diff-filter=AM", base, "--", f"{folder}/"],
+        capture_output=True,
+        text=True,
+        cwd=root,
+    )
+    if diff.returncode != 0:
+        fail(f"git diff failed: {diff.stderr.strip()}")
+    untracked = subprocess.run(
+        ["git", "ls-files", "-z", "--others", "--exclude-standard", "--", f"{folder}/"],
+        capture_output=True,
+        text=True,
+        cwd=root,
+    )
+    if untracked.returncode != 0:
+        fail(f"git ls-files failed: {untracked.stderr.strip()}")
+    return sorted({p for p in (diff.stdout + untracked.stdout).split("\0") if p})
+
+
+def fragment_problems(root: Path, base: str, folder: str, style: str) -> tuple[int, list[str]]:
+    """How many fragments added or changed since base read, and why the others don't, as
+    shipmill's reader (src/shipmill/fragments.py, read) says it"""
+    if not (root / folder).is_dir():
+        fail(f"[changelog] fragments names {folder}, which is not a folder in {root}")
+    good = 0
+    problems: list[str] = []
+    for path in changed_fragments(root, base, folder):
+        name = path[len(folder) + 1 :]
+        if "/" in name:
+            problems.append(f"{path}: a fragment sits right in {folder}, not in a subfolder")
+        elif name == FRAGMENT_README:
+            continue
+        elif not name.endswith(FRAGMENT_SUFFIX) or name == FRAGMENT_SUFFIX:
+            problems.append(
+                f"{path}: not a fragment; a file in {folder} is a <name>{FRAGMENT_SUFFIX} or {FRAGMENT_README}"
+            )
+        elif (problem := fragment_problem((root / path).read_text(encoding="utf-8"), style, path)) is not None:
+            problems.append(problem)
+        else:
+            good += 1
+    return good, problems
+
+
+def fragment_to_write(root: Path, folder: str) -> str:
+    """The fragment an entry added under Unreleased belongs in: named after the branch when
+    it reads as <issue>-<slug>, else the convention"""
+    branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, cwd=root)
+    last = branch.stdout.strip().rsplit("/", 1)[-1] if branch.returncode == 0 else ""
+    name = last if BRANCH_FRAGMENT.match(last) else "<issue>-<slug>"
+    return f"{folder}/{name}{FRAGMENT_SUFFIX}"
+
+
 def cmd_check(path: Path, base: str, allow_released_edits: bool) -> int:
     lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
     start, end = unreleased_range(lines)
@@ -124,9 +308,30 @@ def cmd_check(path: Path, base: str, allow_released_edits: bool) -> int:
     shape = heading_problems(lines, start, end)
     for problem in shape:
         print(problem)
-    if outside or edited or shape:
+    root = git_root(path.parent)
+    config = fragments_config(root)
+    under: list[int] = []
+    unread: list[str] = []
+    good = 0
+    if config is not None:
+        folder, style = config
+        under = [n for n in added if start < n < end and lines[n - 1].strip()]
+        for n in under:
+            print(f"added under Unreleased, line {n}: {lines[n - 1].rstrip()}")
+        if under:
+            print(
+                f"[changelog] fragments is set: move the entry into a new fragment, {fragment_to_write(root, folder)},"
+                " and leave the CHANGELOG alone"
+            )
+        good, unread = fragment_problems(root, base, folder, style)
+        for problem in unread:
+            print(problem)
+    if outside or edited or shape or under or unread:
         return 1
-    print(f"ok: {len(added)} added line(s), all under Unreleased (lines {start}-{end - 1})")
+    if config is None:
+        print(f"ok: {len(added)} added line(s), all under Unreleased (lines {start}-{end - 1})")
+    else:
+        print(f"ok: no entry added under Unreleased; {good} fragment(s) added or changed in {config[0]}, each reads")
     return 0
 
 

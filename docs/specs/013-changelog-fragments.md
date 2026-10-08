@@ -1,6 +1,6 @@
 # S-013: Changelog fragments
 
-status: approved
+status: built
 
 ## Problem
 
@@ -200,3 +200,21 @@ fragment instead.
 - shipmill/shipmill#291: S-013-17
 
 ## Verification
+
+- S-013-1: ran `test_s013_1_without_fragments_plan_stamp_and_notes_are_unchanged` in `tests/test_lanes.py`, which pins the plan's outputs, the stamped files and CHANGELOG, and the notes of the existing fixtures whole with no `fragments` key, and the rest of `tests/test_lanes.py` unchanged; all pass
+- S-013-2: ran `test_s013_2_a_missing_folder_fails_plan_and_doctor_with_exit_2`, `python -m shipmill plan` and `doctor` exit 2 with `[changelog] fragments names changelog.d, which is not a folder` on stderr
+- S-013-3: ran the `test_s013_3` tests, `shipmill plan` exits 2 naming the file and line for an empty fragment, text outside an entry, a bullet with no `### ` heading, a `## ` heading, a subfolder, a `.txt` file, and a heading with no entry; a `README.md` holding prose is skipped
+- S-013-4: ran the `test_s013_4` tests, an `### Added` fragment alone plans `1.1.0rc1` and a `### Fixed` one `1.0.1rc1` under the fixture's `[bump]` lists; with neither the rc lane skips with `rc: nothing pending under Unreleased or in changelog.d`
+- S-013-5: ran `test_s013_5_the_planner_reads_fragments_at_the_revision_not_the_checkout`, a fragment only in the working tree leaves the skip, and a committed fragment deleted from the working tree still plans
+- S-013-6: ran `test_s013_6_a_released_fragment_is_not_pending_and_doctor_names_it`, a fragment whose entry `1.0.0` holds is not pending, and `doctor` warns with `git rm changelog.d/1-old.md`
+- S-013-7: ran `test_s013_7_a_stable_release_writes_unreleased_then_fragments_and_deletes_them`, the `1.1.0` section holds the Unreleased entry, then `10-b.md` and `2-a.md` in file-name order, grouped under `### Fixed` and `### Added`; the release commit deletes both and keeps `README.md`
+- S-013-8: ran `test_s013_8_a_promotion_folds_unreleased_fragments_and_rc_sections_once`, the stable section folds Unreleased, the fragment, and the rc sections, `Fix B (#2)` once, no rc section left
+- S-013-9: ran `test_s013_9_dev_and_rc_releases_leave_the_folder_and_notes_list_fragments`, the rc and dev release commits change nothing under `changelog.d`, and `shipmill notes` and the GitHub release for each list the pending fragments' entries
+- S-013-10: ran the `test_s013_10` tests, a hotfix's section holds exactly the fragments and Unreleased entries its merges added (a renamed fragment adds none, an edited one adds only its new entry), the release branch gets no fragment file, and a merge that adds neither fails as before; without `fragments` hotfixes are unchanged
+- S-013-11: ran the `test_s013_11` tests, `shipmill sync` deletes on main the fragments the hotfix released, and exits 2 naming the entry when the section holds one that is in neither Unreleased nor a fragment on main
+- S-013-12: ran `test_s013_12_dash_fragments_are_pending_and_released`, a dash fragment of `### <title>` blocks plans a patch rc, and the stable release writes the block into `1.0.1` and deletes the file
+- S-013-13: ran the `test_s013_13` tests in `tests/test_setup.py` through `shipmill init` and `shipmill init --no-fragments`: the first writes `fragments = "changelog.d"` and `changelog.d/README.md` (whose example reads as a fragment), the second neither; `doctor` reports no FAIL and `shipmill plan` exits 0 both ways; an existing `README.md` is kept
+- S-013-14: ran the `test_s013_14` tests in `tests/test_changelog_guard.py`, `changelog_guard.py check --base main` exits 1 on a line added under Unreleased (naming `changelog.d/12-a-fix.md` from the branch) and on each of the S-013-3 bad fragments, with the same words `src/shipmill/fragments.py` raises on the same file, and 0 on well-formed fragments, committed or untracked; without `fragments` its behaviour is unchanged; `test_s013_14_on_python_3_10` runs it under `uv run --python 3.10`
+- S-013-15: ran `test_s013_15_two_branches_that_each_add_a_fragment_merge_with_no_conflict`, two branches off one base each adding a fragment merge into each other with no conflict, while the same two entries written under Unreleased conflict
+- S-013-16: read the six skill files under Skills, each says that with `[changelog] fragments` set a PR adds a fragment and leaves `CHANGELOG.md` alone; `.github/shipmill.toml` sets `fragments = "changelog.d"`, `changelog.d/README.md` exists, `CLAUDE.md`'s rule names the fragment; the `test_s013_16` tests in `tests/test_fragments.py` check each. On this branch, `shipmill plan` and `doctor` read `changelog.d/274-fragments-init-guard-skills.md` alongside the Unreleased entries
+- S-013-17: ran the `test_s013_17` tests, the stable promotion of an rc cut before the folder plans and releases, `shipmill notes` runs against a tag older than the folder, and a revision whose own config sets the key and lacks the folder, or HEAD, still exits 2 naming it

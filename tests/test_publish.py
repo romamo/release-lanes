@@ -117,7 +117,7 @@ def test_s010_4_stable_and_hotfix_dispatch_publish_and_doctor_passes(tmp_path: P
     dispatched = {lane: rule.dispatch for lane, rule in policy.lanes.items()}
     assert dispatched == {Lane.STABLE: ("move-major-tag.yml", "publish.yml"), Lane.HOTFIX: ("publish.yml",)}
     # doctor on a copy of the repo's release files: no origin to ask, no tags to count from
-    for name in (".github", ".claude-plugin"):
+    for name in (".github", ".claude-plugin", "changelog.d"):
         shutil.copytree(ROOT / name, tmp_path / name)
     for name in ("CHANGELOG.md", "pyproject.toml"):
         shutil.copy(ROOT / name, tmp_path / name)

@@ -10,7 +10,7 @@ Review GitHub PR #{N} of {owner/repo} ("{title}", fixes #{issue}). The repo is a
 {context: what the PR claims, what it's stacked on, whether the default branch has moved, and any peer session working near it (don't touch its worktree)}
 
 1. `git fetch origin && git fetch origin pull/{N}/head:review-{N} && git checkout review-{N}`. Rebase onto origin/{default} locally and report which files conflicted and how you resolved each:
-   - CHANGELOG: keep every entry from both sides, and check that new entries sit under Unreleased, not inside a released section
+   - CHANGELOG: keep every entry from both sides, and check that new entries sit under Unreleased, not inside a released section. {When `.github/shipmill.toml` sets `[changelog] fragments`: the PR adds its entry as a new fragment in that folder and leaves `CHANGELOG.md` alone; `changelog_guard.py check --base origin/{default}` must exit 0, and on a line added under Unreleased move the entry into the fragment it names}
    - A count or version both sides changed: recompute it from each side's baseline and confirm by running the test
 2. Run the project's checks in the foreground (timeout 600000 ms): {check_commands}. Known flaky tests: {flakes}. For any other failure, say whether it also fails on origin/{default}.
 3. Read `git diff origin/{default}...HEAD` and the linked issue (`gh issue view {issue}`). Look for:
@@ -35,7 +35,7 @@ Post-merge review of GitHub PR #{N} of {owner/repo} ("{title}"). It is already m
 
 1. `git fetch origin && git checkout -B review-{N} origin/{default}`. Find what landed: `gh pr view {N} --json commits,mergeCommit,body`, plus any follow-up commits touching the same code ({follow_ups}).
 2. {pr_specific_risks}. Also check it composes with PRs that merged next to it and touched the same code ({neighbours}).
-3. Run the project's checks, then fix each real bug on review-{N} with a regression test (the CHANGELOG entry goes under Unreleased → Fixed).
+3. Run the project's checks, then fix each real bug on review-{N} with a regression test (the CHANGELOG entry goes under Unreleased → Fixed, or in a new fragment under `### Fixed` when `.github/shipmill.toml` sets `[changelog] fragments`).
 4. Final report, under 250 words: CLEAN / BUGS FOUND, findings with file:line, test results, HEAD SHA.
 ```
 

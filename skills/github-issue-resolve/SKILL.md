@@ -31,7 +31,7 @@ Reproduce the claim from the code, not from the issue's excerpt:
 1. Open the cited file and lines on the current default branch; the issue may reference an older commit
 2. Check the dependency's real API with the installed version, e.g. `uv run python -c "import inspect, pkg.mod as m; print(inspect.signature(m.fn))"`
 3. Grep for existing tests that touch the same symbol. A test that looks contradictory (e.g. asserts a kwarg is *absent*) may cover a different code path; read it before concluding
-4. Check `git log -S"<symbol>"` when behaviour looks intentionally removed, and the default branch's CHANGELOG `Unreleased` and recent commits for work on the same symptom: main may already fix it fully, partly, or with a different design. Graft onto main's design rather than adding a second mechanism
+4. Check `git log -S"<symbol>"` when behaviour looks intentionally removed, and the default branch's CHANGELOG `Unreleased` (and its fragments folder, when the config sets `[changelog] fragments`) and recent commits for work on the same symptom: main may already fix it fully, partly, or with a different design. Graft onto main's design rather than adding a second mechanism
 5. If the fix relies on a dependency feature, confirm the minimum pinned version provides it (list published versions from PyPI JSON; do not guess)
 
 Pick one verdict:
@@ -82,6 +82,7 @@ A gate session (its prompt carries the `Gate session:` or `Headless:` paragraph)
 2. If a dependency floor must rise, update the manifest and lockfile (`uv lock`)
 3. Add a regression test that fails before the fix and passes after, using the issue's repro shape (e.g. both the old-behaviour and new-behaviour cases)
 4. Follow project and global rules (fail fast, no monkeypatching, `uv run`)
+5. If the repo keeps a CHANGELOG, add the change's entry, ending with the issue ref `(#N)`. When `.github/shipmill.toml` sets `[changelog] fragments` (such as `fragments = "changelog.d"`), write it as a new fragment, `<folder>/<issue>-<slug>.md`, holding what would have gone under Unreleased in the CHANGELOG's style (a `### Fixed` heading and its `- ` entry), and leave `CHANGELOG.md` alone: a stable release writes the fragments into it. Otherwise add it under the CHANGELOG's Unreleased heading, in the right subsection
 
 ## Phase 5: Verify against a baseline
 

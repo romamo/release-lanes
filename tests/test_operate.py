@@ -471,6 +471,7 @@ def test_shipmills_own_pages_environment_and_operate_caller_pass_doctor(repo: Re
     for path in (SHIPMILL / ".github").rglob("*"):
         if path.is_file():
             repo.write(str(path.relative_to(SHIPMILL)), path.read_text(encoding="utf-8"))
+    repo.write("changelog.d/README.md", (SHIPMILL / "changelog.d" / "README.md").read_text(encoding="utf-8"))
     checks = {c.name: (c.status, c.detail) for c in doctor(repo.root, repo.github)}
     assert checks["operate"] == (
         "PASS",

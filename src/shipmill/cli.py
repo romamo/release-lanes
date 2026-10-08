@@ -17,7 +17,8 @@
   upgrade         list the config upgrades this repo hasn't decided or declined (spec 014); --apply <id>
                   makes one's edit in the checkout and commits nothing; --propose opens or updates
                   one shipmill-upgrade issue per pending upgrade, as land.yml runs it after a release
-  init            write a starting policy and the calling workflow (--operate: the operate one)
+  init            write a starting policy, the calling workflow, and changelog.d/README.md for changelog
+                  fragments (--no-fragments: no fragments; --operate: only the operate workflow)
   gate            start a Claude Code session for the repo only when its state needs one; each tick,
                   held or not, prunes the worktrees that landed, as `worktrees --prune` does
   worktrees       list the repository's worktrees, each REMOVABLE once its work landed, or KEPT and why;
@@ -276,6 +277,11 @@ def _parser() -> argparse.ArgumentParser:
     p.add_argument("--ci", default="ci.yml", help="the CI workflow a release commit must pass (default: ci.yml)")
     p.add_argument("--force", action="store_true", help="overwrite existing files")
     p.add_argument(
+        "--no-fragments",
+        action="store_true",
+        help="leave [changelog] fragments unset and write no changelog.d/README.md: each PR edits the CHANGELOG",
+    )
+    p.add_argument(
         "--operate",
         action="store_true",
         help=f"write only {OPERATE_CALLER}, which runs shipmill operate every 10 minutes",
@@ -436,7 +442,7 @@ def main(
         print(f"next: run `{cli_command()} doctor`")
         return 0
     if args.command == "init":
-        initialized = init(root, args.ci, args.force)
+        initialized = init(root, args.ci, args.force, fragments=not args.no_fragments)
         for path in initialized.written:
             print(f"wrote {path.relative_to(root)}")
         print(f"next: review the policy, then run `{cli_command()} doctor`")

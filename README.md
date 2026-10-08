@@ -88,7 +88,8 @@ Prefer to set it up by hand, or want only the release lanes without agents? Foll
 | `stable` | `1.5.0` | an rc that soaked without a blocker | weekly, a milestone, or by hand |
 | `hotfix` | `1.4.1` | `release/1.4` plus the pull requests you name | by hand only |
 
-Every pull request adds its own CHANGELOG entry; the entries decide the next version.
+Every pull request adds its own CHANGELOG entry, as a fragment file by default so pull
+requests don't conflict on it; the entries decide the next version.
 Installers skip `dev` and `rc` unless asked, so a user who needs a fix today pins the
 pre-release while everyone else gets stable releases that real users already ran.
 
@@ -112,7 +113,8 @@ the policy keys to change between minor versions; the CHANGELOG says how.
 
 Issues and pull requests are welcome. A new feature starts as a spec in
 [`docs/specs/`](https://github.com/shipmill/shipmill/tree/main/docs/specs); every pull
-request adds its own entry under `## [Unreleased]` in the CHANGELOG. The checks CI runs are
+request adds its own changelog entry as a new file in
+[`changelog.d/`](https://github.com/shipmill/shipmill/tree/main/changelog.d). The checks CI runs are
 listed in [CLAUDE.md](https://github.com/shipmill/shipmill/blob/main/CLAUDE.md).
 
 ## License
