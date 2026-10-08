@@ -89,18 +89,22 @@ def test_s005_7_an_unanswered_question_reads_needs_decision_and_is_no_action(ts:
     assert "NEEDS_DECISION" not in ts.ACTION  # so it never makes the script exit 1
 
 
-def test_s005_7_a_reply_reads_the_state_it_would_without_the_label(ts: ModuleType) -> None:
+def test_s005_7_a_reply_reads_decided_until_the_label_comes_off(ts: ModuleType) -> None:
+    # #309: an answered question is work of its own, an action; once the session acting on
+    # it removes the label, the issue reads the state it would without the label
     answered = issue(comment("Triage: implement"), comment(QUESTION), comment("1"))
-    unlabelled = issue(comment("Triage: implement"), comment(QUESTION), labels=())
-    assert state(ts, answered) == state(ts, unlabelled) == "NEEDS_PR"
-    assert state(ts, issue(comment(QUESTION), comment("go with 2"))) == "NEW"
+    assert ts.gated(answered, None, False) == ("DECIDED", "answered by @amy")
+    assert "DECIDED" in ts.ACTION
+    unlabelled = issue(comment("Triage: implement"), comment(QUESTION), comment("1"), labels=())
+    assert state(ts, unlabelled) == "NEEDS_PR"
+    assert state(ts, issue(comment(QUESTION), comment("go with 2"))) == "DECIDED"
 
 
 def test_s005_7_needs_decision_masks_other_states_only_while_it_waits(ts: ModuleType) -> None:
     postponed = ("needs-decision", "postponed")
     assert state(ts, issue(comment("Triage: postpone"), comment(QUESTION), labels=postponed)) == "NEEDS_DECISION"
     replied = issue(comment("Triage: postpone"), comment(QUESTION), comment("ok"), labels=postponed)
-    assert state(ts, replied) == "POSTPONED"
+    assert state(ts, replied) == "DECIDED"
 
 
 # -- S-005-8: the question and the reply
@@ -110,7 +114,7 @@ def test_s005_8_without_bot_login_the_question_is_the_newest_marker_comment(ts: 
     assert state(ts, issue(comment(QUESTION), comment("2"), comment(QUESTION))) == "NEEDS_DECISION"
     # the marker counts only as the first line: a quote of it further down is no question
     quoted = issue(comment(QUESTION), comment(f"About this:\n{MARKER}\nI pick 1"))
-    assert state(ts, quoted) == "NEW"
+    assert state(ts, quoted) == "DECIDED"
     # a comment carrying the marker never answers: it is a newer question
     assert state(ts, issue(comment(QUESTION), comment(f"{MARKER}\nstill?"))) == "NEEDS_DECISION"
 
@@ -118,7 +122,7 @@ def test_s005_8_without_bot_login_the_question_is_the_newest_marker_comment(ts: 
 @pytest.mark.parametrize("association", ["OWNER", "MEMBER", "COLLABORATOR"])
 def test_s005_8_a_trusted_comment_is_a_reply(ts: ModuleType, association: str) -> None:
     item = issue(comment(QUESTION), comment("1", by="bob", association=association))
-    assert state(ts, item) == "NEW"
+    assert state(ts, item) == "DECIDED"
     # with an App, the person's marker comment is newer than any bot question: no question
     assert state(ts, item, bot_login=BOT) == "NEEDS_DECISION"
 
@@ -134,12 +138,12 @@ def test_s005_8_any_other_author_association_never_replies(ts: ModuleType, assoc
 def test_s005_8_with_bot_login_the_question_is_the_bots_newest_marker_comment(ts: ModuleType) -> None:
     asked = comment(QUESTION, by=BOT, association="NONE")
     assert state(ts, issue(asked), bot_login=BOT) == "NEEDS_DECISION"
-    assert state(ts, issue(asked, comment("1")), bot_login=BOT) == "NEW"
+    assert state(ts, issue(asked, comment("1")), bot_login=BOT) == "DECIDED"
     # the bot's own later comment is never a reply, whatever its association
     later = comment("Still waiting", by=BOT, association="MEMBER")
     assert state(ts, issue(asked, later), bot_login=BOT) == "NEEDS_DECISION"
     # a later plain bot comment is no question, so the reply stands; a marked one asks again
-    assert state(ts, issue(asked, comment("1"), later), bot_login=BOT) == "NEW"
+    assert state(ts, issue(asked, comment("1"), later), bot_login=BOT) == "DECIDED"
     assert state(ts, issue(asked, comment("1"), asked), bot_login=BOT) == "NEEDS_DECISION"
     # logins compare as GitHub does, without case
     assert state(ts, issue(asked), bot_login="Shipmill-O[bot]") == "NEEDS_DECISION"
@@ -155,10 +159,10 @@ def test_s005_8_an_outsiders_marker_comment_never_reparks_an_answered_issue(ts: 
     # #184, input 1: the reply stands, whatever an outsider posts after it
     for association in ("NONE", "CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR"):
         item = issue(comment(QUESTION), comment("1"), comment(QUESTION, by="eve", association=association))
-        assert state(ts, item) == "NEW"
+        assert state(ts, item) == "DECIDED"
     # a deleted author (GitHub's ghost) is never a question either
     ghost = {"body": QUESTION, "createdAt": "2026-10-06T10:00:00Z", "author": None, "authorAssociation": "NONE"}
-    assert state(ts, issue(comment(QUESTION), comment("1"), ghost)) == "NEW"
+    assert state(ts, issue(comment(QUESTION), comment("1"), ghost)) == "DECIDED"
 
 
 def test_s005_8_an_outsiders_marker_comment_alone_is_no_question(ts: ModuleType) -> None:
@@ -184,7 +188,8 @@ def test_s005_8_with_bot_login_a_bot_question_then_a_trusted_reply_no_longer_wai
     item = issue(triaged, comment(QUESTION, by=BOT, association="NONE"))
     assert ts.gated(item, BOT, False) == ("NEEDS_DECISION", "waits on a reply")
     item["comments"]["nodes"].append(comment("go with 1", by="bob", association="COLLABORATOR"))
-    assert ts.gated(item, BOT, False) is None
+    assert ts.gated(item, BOT, False) == ("DECIDED", "answered by @bob")
+    item["labels"]["nodes"] = []  # the session acting on the reply removed the label
     assert state(ts, item, bot_login=BOT) == "NEEDS_PR"
 
 
@@ -349,6 +354,72 @@ def test_existing_intake_rows_keep_their_shape(ws: ModuleType) -> None:
         {"state": "ISSUES_OPEN", "subject": "o/r", "detail": "TRIAGED #5", "agent": False},  # #182
         {"state": "PRS_OPEN", "subject": "o/r", "detail": "#3 #4", "agent": False},
     ]
+
+
+# -- #309: an answered question is DECIDED, work for the next tick
+
+# the shape of a maintainer's answer that links an open issue as context, not as a blocker
+ANSWER = "3 — no change here: close this issue; the long-run problem goes to spec/spec#83 (§79, PR #84), next"
+
+
+def answered_item() -> dict[str, Any]:
+    """The bot's question, then an OWNER's answer naming an open issue"""
+    asked = comment(QUESTION, by=BOT, association="CONTRIBUTOR")
+    return issue(comment("Triage: implement", by=BOT, association="CONTRIBUTOR"), asked, comment(ANSWER))
+
+
+def test_309_an_answer_linking_an_open_issue_reads_decided_not_blocked(ts: ModuleType) -> None:
+    item = answered_item()
+    open_ = {("spec", "spec", 83): "OPEN"}
+    assert ts.gated(item, BOT, False) == ("DECIDED", "answered by @amy")
+    assert ts.gated(item, BOT, True) == ("DECIDED", "answered by @amy")  # the bot's issue is trusted
+    # the answer is no hold line: without the label, the issue reads its verdict, not BLOCKED
+    item["labels"]["nodes"] = []
+    assert ts.classify_open(item, "Triage:", "postponed", open_, None, REPO)[0] == "NEEDS_PR"
+
+
+def test_309_an_unanswered_question_still_reads_needs_decision(ts: ModuleType) -> None:
+    item = answered_item()
+    item["comments"]["nodes"].pop()
+    assert ts.gated(item, BOT, False) == ("NEEDS_DECISION", "waits on a reply")
+    # nor does a reply by an outsider, or the bot's own comment, decide it
+    for later in (comment("3", by="eve", association="NONE"), comment("3", by=BOT, association="MEMBER")):
+        assert ts.gated(issue(*item["comments"]["nodes"], later), BOT, False)[0] == "NEEDS_DECISION"
+
+
+def test_309_untrusted_is_still_read_before_decided(ts: ModuleType) -> None:
+    item = answered_item()
+    item["author"], item["authorAssociation"] = author("eve"), "NONE"
+    assert ts.gated(item, BOT, True) == ("UNTRUSTED", "opened by @eve (none)")
+    assert ts.gated(item, BOT, False)[0] == "DECIDED"
+
+
+def test_309_a_decided_issue_is_issues_work_not_needs_decision(ws: ModuleType) -> None:
+    found = rows(ws, ws.intake("o/r", 1, triage((7, "DECIDED"), (9, "BLOCKED")), [], comments({})))
+    assert found["ISSUES"] == {
+        "state": "ISSUES",
+        "subject": "o/r",
+        "detail": "DECIDED #7",
+        "agent": True,
+        "fix": found["ISSUES"]["fix"],
+    }
+    assert "NEEDS_DECISION" not in found
+    assert found["ISSUES_OPEN"]["detail"] == "BLOCKED #9"
+    assert "DECIDED" in ws.TRIAGE_ACTION
+
+
+def test_309_the_gate_starts_a_session_for_a_decided_item_inside_the_retry_window(ws: ModuleType) -> None:
+    def work(out: str, last: Launch | None) -> Any:
+        text = "\n".join(json.dumps(r.json()) for r in ws.intake("o/r", 1, out, [], comments({})))
+        return decide(parse_findings(text), [], last, NOW, DAY)
+
+    # s1 started 15 minutes ago for #12, while #7 waited on its question
+    before = work(triage((12, "NEW"), (7, "NEEDS_DECISION")), None)
+    last = Launch(fingerprint(before.work), "s1", NOW - dt.timedelta(minutes=15))
+    assert work(triage((12, "NEW"), (7, "BLOCKED")), last).action is Action.UNCHANGED  # the bug
+    after = work(triage((12, "NEW"), (7, "DECIDED")), last)
+    assert after.action is Action.LAUNCH
+    assert [f.detail for f in after.work] == ["DECIDED #7; NEW #12"]
 
 
 # -- S-005-17: the reference and the headless rules

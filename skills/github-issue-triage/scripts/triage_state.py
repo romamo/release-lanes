@@ -16,10 +16,13 @@ For each open issue:
   BLOCKED          labelled blocked, or a comment says it is on hold / blocked /
                    waiting on an upstream issue that is still open, or on a pull
                    request (such as a spec PR) that is still open. The hold line
-                   names it as owner/repo#N or its URL anywhere on the line, or
-                   as a plain #N (this repo) right after "waits on", "waiting on",
-                   "depends on", "blocked by", "blocked on", "decided in", or
-                   "on hold until" (a #N elsewhere on the line is context). Or,
+                   names it as owner/repo#N or its URL anywhere in the hold
+                   phrase's sentence, or as a plain #N (this repo) right after
+                   "waits on", "waiting on", "depends on", "blocked by", "blocked
+                   on", "decided in", or "on hold until" (a #N elsewhere on the
+                   line is context). A sentence ends at ".", "!", or "?" followed
+                   by a space and a capital letter, so a hold word in one sentence
+                   of a paragraph doesn't hold on a link in another (#309). Or,
                    once triaged, its body has a "Depends on owner/repo#N" line (or
                    "#N" anywhere on that line, the same repo: a build issue split
                    from a spec) naming an issue still open; an untriaged issue
@@ -47,9 +50,13 @@ For each open issue:
                    question); a reply is a newer comment without the marker by an OWNER,
                    MEMBER, or COLLABORATOR (other than the --bot-login). A marker comment
                    by anyone else never counts. A labelled issue with no question waits
-                   too, until the label comes off. Once answered, the issue reads the
-                   state it would without the label
-  UNTRUSTED        with --trusted-only, an issue whose author is neither an OWNER,
+                   too, until the label comes off
+  DECIDED          labelled needs-decision and its question has a reply: act on the
+                   reply and remove the label (references/needs-decision.md), after
+                   which the issue reads its usual state. Read right after
+                   NEEDS_DECISION, before any other state, so an answer that links an
+                   open issue doesn't read BLOCKED (#309)
+  UNTRUSTED       with --trusted-only, an issue whose author is neither an OWNER,
                    MEMBER, or COLLABORATOR nor the --bot-login, whatever it would read
                    otherwise: an unattended session leaves it to an interactive one (D-16)
 
@@ -71,8 +78,8 @@ ready to start (NEEDS_PR or UNBLOCKED), oldest first; with --json, as one JSON o
 --bot-login names the login shipmill's sessions write as (an App's <slug>[bot]).
 
 Exit 0 when nothing needs action, 1 when any issue is NEW, NEEDS_PR, UNBLOCKED, UNFILLED,
-SPEC_REFUSED, REVISIT, DONE_NOT_CLOSED, or SUSPECT_CLOSE (never for NEEDS_DECISION or
-UNTRUSTED), 2 on bad input (an issue with more than 100
+SPEC_REFUSED, REVISIT, DONE_NOT_CLOSED, DECIDED, or SUSPECT_CLOSE (never for NEEDS_DECISION
+or UNTRUSTED), 2 on bad input (an issue with more than 100
 labels) or a gh failure. It pages past 100 open issues and an issue's 50 comments or 50
 cross-references, and back through tags to the newest stable one, with one query when
 nothing is capped. A page GitHub rejects for its resource limits is asked again at half
@@ -282,8 +289,23 @@ DECISION_MARKER = "<!-- shipmill:needs-decision -->"  # the first line of a sess
 # The author associations whose comment answers a question, and whose issue an unattended
 # session works on (D-16); CONTRIBUTOR, FIRST_TIMER, NONE, and the rest never count
 TRUSTED = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
-ACTION = {"NEW", "NEEDS_PR", "UNBLOCKED", "UNFILLED", "SPEC_REFUSED", "REVISIT", "DONE_NOT_CLOSED", "SUSPECT_CLOSE"}
+ACTION = {
+    "NEW",
+    "NEEDS_PR",
+    "UNBLOCKED",
+    "UNFILLED",
+    "SPEC_REFUSED",
+    "REVISIT",
+    "DONE_NOT_CLOSED",
+    "DECIDED",
+    "SUSPECT_CLOSE",
+}
 HOLD = re.compile(r"\b(?:on hold|blocked|waits? on|waiting on|pending|depends on)\b", re.IGNORECASE)
+# Where a sentence of a comment line ends: a hold phrase holds only on the links of its own
+# sentence, so "a command whose run length depends on its input" in one sentence of a
+# paragraph doesn't hold on an issue another sentence of it names (#309). "e.g. #5" and
+# "github.com" don't end one: a sentence ends only before a capital letter
+SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
 UPSTREAM = re.compile(r"(?:https://github\.com/)?(?P<owner>[\w.-]+)/(?P<name>[\w.-]+)(?:#|/issues/|/pull/)(?P<num>\d+)")
 # A plain #N right after a hold phrase names the issue or pull request of the repo itself
 # that the hold waits on; a #N elsewhere on the line ("#59 stays open") is only context
@@ -499,13 +521,15 @@ def upstream_refs(issue: dict[str, Any], repo: tuple[str, str]) -> list[tuple[st
 
 def hold_refs(issue: dict[str, Any], repo: tuple[str, str]) -> dict[tuple[str, str, int], int]:
     """Each issue or pull request a hold comment names, with the index of the newest
-    comment naming it; a plain #N after a hold phrase is one of repo's own (owner, name)"""
+    comment naming it: an owner/repo#N or URL in a sentence with a hold phrase, or a plain
+    #N right after one, which is one of repo's own (owner, name)"""
     refs: dict[tuple[str, str, int], int] = {}
     for i, c in enumerate(issue["comments"]["nodes"]):
         for line in c["body"].splitlines():
-            if HOLD.search(line):
-                refs.update(((m["owner"], m["name"], int(m["num"])), i) for m in UPSTREAM.finditer(line))
-                refs.update(((*repo, int(m["num"])), i) for m in SAME_REPO.finditer(line))
+            for sentence in SENTENCE.split(line):
+                if HOLD.search(sentence):
+                    refs.update(((m["owner"], m["name"], int(m["num"])), i) for m in UPSTREAM.finditer(sentence))
+                    refs.update(((*repo, int(m["num"])), i) for m in SAME_REPO.finditer(sentence))
     return refs
 
 
@@ -697,8 +721,9 @@ def trusted(author: str, association: str, bot_login: str | None) -> bool:
 
 
 def gated(issue: dict[str, Any], bot_login: str | None, trusted_only: bool) -> tuple[str, str] | None:
-    """UNTRUSTED (with trusted_only), then NEEDS_DECISION, each read before any other state;
-    None when neither holds, and the issue reads as classify_open says"""
+    """UNTRUSTED (with trusted_only), then NEEDS_DECISION or DECIDED, each read before any
+    other state; None when none holds, and the issue reads as classify_open says. DECIDED
+    comes first so the reply is acted on, whatever its text links (#309)"""
     author, association = login(issue.get("author")), str(issue.get("authorAssociation") or "NONE")
     if trusted_only and not trusted(author, association, bot_login):
         return "UNTRUSTED", f"opened by @{author} ({association.lower()})"
@@ -707,9 +732,12 @@ def gated(issue: dict[str, Any], bot_login: str | None, trusted_only: bool) -> t
             (login(c.get("author")), str(c.get("authorAssociation") or "NONE"), c["body"])
             for c in issue["comments"]["nodes"]
         ]
+        asked = question(comments, bot_login)
         if waits_on_decision(comments, bot_login):
-            asked = question(comments, bot_login) is not None
-            return "NEEDS_DECISION", "waits on a reply" if asked else "labelled, no question"
+            return "NEEDS_DECISION", "waits on a reply" if asked is not None else "labelled, no question"
+        # it no longer waits, so it has a question and a reply after it: the newest reply
+        reply = next(c for c in reversed(comments) if replies(c, bot_login))
+        return "DECIDED", f"answered by @{reply[0]}"
     return None
 
 
@@ -801,6 +829,7 @@ def main() -> int:
     order = [
         "SUSPECT_CLOSE",
         "DONE_NOT_CLOSED",
+        "DECIDED",
         "UNBLOCKED",
         "UNFILLED",
         "SPEC_REFUSED",

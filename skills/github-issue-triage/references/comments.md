@@ -54,7 +54,7 @@ Triage: **opportunity**. {What the request asks for, in one sentence}: a new cap
 
 ## Feature
 
-A feature waits for its spec ([spec-gate.md](spec-gate.md)). Keep "On hold" and the spec PR's `owner/repo#N` on one line, so `triage_state.py` reports BLOCKED until the spec merges and UNBLOCKED after. Don't use the word "implement" in this comment: the script reads the latest triage comment's verdict from it.
+A feature waits for its spec ([spec-gate.md](spec-gate.md)). Keep "On hold" and the spec PR's `owner/repo#N` in one sentence of one line, so `triage_state.py` reports BLOCKED until the spec merges and UNBLOCKED after. Don't use the word "implement" in this comment: the script reads the latest triage comment's verdict from it.
 
 ```markdown
 Triage: **feature**. {What the new behaviour is, in one or two sentences, and why it isn't a bug fix or a contract tweak.}
@@ -104,7 +104,7 @@ I'd go with {n} because {reason}.{ Filed upstream as <owner/repo#N>.}
 
 ## Hold (blocked on something outside the repo)
 
-Keep "On hold" and the upstream link on one line, because `triage_state.py` reads that line to report BLOCKED and later UNBLOCKED:
+Keep "On hold" and the upstream link in one sentence of one line, because `triage_state.py` reads that sentence to report BLOCKED and later UNBLOCKED. A sentence ends at ".", "!", or "?" before a capital letter, so a hold word elsewhere in a paragraph doesn't hold on the links it names:
 
 ```markdown
 On hold: {why, e.g. #PR goes below the spec's default of 5 rotated files}, decided in {owner/repo#N}. {What stays ready meanwhile, e.g. "#59 stays open, rebased onto main".}

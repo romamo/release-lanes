@@ -65,7 +65,7 @@ A marker comment from any other author never counts, so an outsider can't re-par
 
 ## Taking up an answered item
 
-Once a trusted person replies, the item reads as the state it would without the label (NEW, NEEDS_PR, UNBLOCKED, and so on), so it is work again. The session that takes it up:
+Once a trusted person replies, `triage_state.py` reads an issue as DECIDED, an action read before any other state, so `watch_state.py` lists it in ISSUES and the gate starts a session on the next tick, whatever the reply links. A pull request reads as open work again (PRS_OPEN). Once the label is off, the item reads its usual state (NEW, NEEDS_PR, UNBLOCKED, and so on). The session that takes it up:
 
 1. Reads the reply. A reply that answers none of the options, or asks something back, is a new question: ask again with this protocol
 2. Removes the `needs-decision` label before it acts on the answer: `gh issue edit <n> --remove-label needs-decision` (or `gh pr edit`)
