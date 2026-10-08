@@ -197,7 +197,7 @@ MESSAGES: dict[str, str] = {
     "operate integer": "shipmill.toml [operate]: rollback_after must be an integer, got '3'",
     "operate empty label": "shipmill.toml [operate]: incident_label must not be empty",
     "operate a table": "shipmill.toml: operate must be a table, got 1",
-    "autonomy unknown key": "shipmill.toml [autonomy]: unknown keys ['releases']; allowed: ['deploy', 'intake', 'release', 'rollback']",
+    "autonomy unknown key": "shipmill.toml [autonomy]: unknown keys ['releases']; allowed: ['deploy', 'intake', 'release', 'rollback', 'upgrade']",
     "autonomy level": "shipmill.toml [autonomy]: release must be one of ['observe', 'propose', 'act'], got 'auto'",
     "autonomy level a string": "shipmill.toml [autonomy]: rollback must be one of ['observe', 'propose', 'act'], got True",
     "autonomy deploy a table": "shipmill.toml [autonomy]: deploy is a table of environments, such as deploy.production = 'propose'",

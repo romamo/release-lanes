@@ -343,7 +343,9 @@ def test_doctor_reports_autonomy_and_the_hold(repo: Repo) -> None:
     assert found["autonomy"][1].startswith(
         "release act, deploy.production propose, rollback act; any other deploy environment act"
     )
-    assert found["autonomy"][1].endswith("; intake propose in the product-intake skill")
+    assert found["autonomy"][1].endswith(
+        "; intake propose in the product-intake skill; upgrade propose for config upgrades"
+    )
     repo.github.holds = ["#7 Investigating"]
     found = checks(repo, repo.github)
     assert found["hold"][0] == "WARN" and found["hold"][1].startswith(f"held by {HOLD_LABEL} #7")

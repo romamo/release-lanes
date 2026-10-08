@@ -285,6 +285,7 @@ release = "propose"               # observe | propose | act
 deploy.production = "act"         # per deploy environment; an unlisted one acts
 rollback = "act"
 intake = "propose"                # observe | propose: the product-intake skill
+upgrade = "propose"               # observe | propose | act: config upgrades
 ```
 
 - **`release = "observe"`**: a due lane is reported in the run summary ("is due, but release
@@ -299,6 +300,13 @@ intake = "propose"                # observe | propose: the product-intake skill
 - **`intake`** (the product-intake skill) defaults to `propose`: it opens and updates
   opportunity issues, and only the maintainer accepts or declines one, so `act` is refused.
   `observe` reports the groups it would make
+- **`upgrade`** (config upgrades, spec 014) defaults to `propose`: a feature a shipmill
+  release adds that needs an opt-in in this file, such as `[changelog] fragments`, is the
+  maintainer's to accept. `shipmill upgrade` lists the upgrades the config hasn't decided
+  (writing the key by hand, with any value, decides it), and `shipmill upgrade --apply <id>`
+  adds the upgrade's line at the end of its table, keeping the rest of the file byte for
+  byte, creates the files it owns, and commits nothing. An open hold turns `act` into
+  `propose`
 - **The stop switch**: any open issue labelled `shipmill-hold` turns every `act` into
   `propose` for the repository. One label, no commit, so it works from a phone. While it is
   open no release happens by itself, the run summary names the hold, and a lane started by
@@ -360,6 +368,7 @@ The workflows call these; you can run them locally too.
 | `sync` | Bring a stable release made off main into main, to recover a failed sync |
 | `notes` | Print a release's notes |
 | `settle-minutes` | Print how long to wait after a push |
+| `upgrade` | List the config upgrades this repo hasn't decided; `--apply <id>` makes one's edit in the checkout, `--json` |
 | `gate` | Start a Claude Code session for a repo only when its state needs one, with the config's `[agents]` prompt ([agent modes](design/agent-modes.md)) |
 | `launchd` | Run `gate` for a dedicated checkout every few minutes on a Mac |
 

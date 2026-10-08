@@ -14,6 +14,8 @@
   status          say whether the factory works or is stuck: a verdict, then a short summary with
                   a line per reason and a direct link per item; --rows for github-ship-watch's
                   table, --json for its JSON lines
+  upgrade         list the config upgrades this repo hasn't decided (spec 014); --apply <id> makes one's
+                  edit in the checkout and commits nothing
   init            write a starting policy and the calling workflow (--operate: the operate one)
   gate            start a Claude Code session for the repo only when its state needs one; each tick,
                   held or not, prunes the worktrees that landed, as `worktrees --prune` does
@@ -87,6 +89,7 @@ from shipmill.app_gh import GhRunner, as_app, as_host, find_gh, named_repo, run_
 from shipmill.app_install import WAIT_SECONDS, guide
 from shipmill.autonomy import Hold
 from shipmill.config import CONFIG_PATH, config_path
+from shipmill.config import read as read_config
 from shipmill.doctor import CALLER, OPERATE_CALLER, doctor, read_plugin_rows
 from shipmill.errors import ReleaseError
 from shipmill.gate import (
@@ -117,6 +120,7 @@ from shipmill.planner import Event, Hotfix, Planner, Proposal
 from shipmill.policy import Lane, Policy
 from shipmill.propose import close_released, propose, run_url
 from shipmill.stamp import notes, sync
+from shipmill.upgrades import UpgradeId, apply, find, pending
 from shipmill.version import Version
 from shipmill.worktrees import ClaudeSessions, Sessions, judge, prune, table
 from shipmill.worktrees import report as worktrees_report
@@ -250,6 +254,14 @@ def _parser() -> argparse.ArgumentParser:
     shown = p.add_mutually_exclusive_group()
     shown.add_argument("--rows", action="store_true", help="print github-ship-watch's table instead")
     shown.add_argument("--json", action="store_true", help="print github-ship-watch's JSON lines instead")
+
+    p = sub.add_parser("upgrade", help=f"list the config upgrades {CONFIG_PATH} hasn't decided (spec 014)")
+    p.add_argument(
+        "--apply",
+        metavar="ID",
+        help="make the upgrade's edit in the checkout: the config line and its files; no commit",
+    )
+    p.add_argument("--json", action="store_true", help="print the result as JSON")
 
     p = sub.add_parser("init", help=f"write {CONFIG_PATH} and {CALLER}")
     p.add_argument("--ci", default="ci.yml", help="the CI workflow a release commit must pass (default: ci.yml)")
@@ -407,6 +419,8 @@ def main(
         return _app_create(root, args, api or UrllibApi(), signer or Openssl(), ask=ask)
     if args.command == "status":
         return _status(root, args, state or run_state, api or UrllibApi(), signer or Openssl())
+    if args.command == "upgrade":
+        return _upgrade(root, args)
     hub = github or GhCli(root)
     if args.command == "init" and args.operate:
         print(f"wrote {init_operate(root, args.force).relative_to(root)}")
@@ -893,6 +907,42 @@ def _app_install(
     if args.json:
         print(json.dumps(guided.record(app_id, repos), indent=2))
     return 1 if missing else 0
+
+
+def _upgrade(root: Path, args: argparse.Namespace) -> int:
+    """List the pending upgrades, or apply one: its edit in the checkout, nothing committed"""
+    if args.apply is not None:
+        applied = apply(root, find(UpgradeId(args.apply)))
+        upgrade = applied.upgrade
+        if args.json:
+            record = {
+                "id": str(upgrade.id),
+                "config": CONFIG_PATH.as_posix(),
+                "line": upgrade.line,
+                "created": [p.as_posix() for p in applied.created],
+                "kept": [p.as_posix() for p in applied.kept],
+            }
+            print(json.dumps(record, indent=2))
+            return 0
+        print(f"added {upgrade.line} to [{upgrade.table}] in {CONFIG_PATH}")
+        for path in applied.created:
+            print(f"wrote {path.as_posix()}")
+        for path in applied.kept:
+            print(f"kept {path.as_posix()}: it already exists")
+        print("next: review the diff, commit it on a branch, and open a pull request")
+        return 0
+    upgrades = pending(read_config(config_path(root)))
+    if args.json:
+        print(json.dumps([u.record() for u in upgrades], indent=2))
+        return 0
+    if not upgrades:
+        print("no pending upgrades")
+    for upgrade in upgrades:
+        print(f"{upgrade.id} (shipmill {upgrade.version}): {upgrade.changes}")
+        print(f"  adds: [{upgrade.table}] {upgrade.line}")
+        print(f"  off: {upgrade.off}")
+        print(f"  apply: `{cli_command()} upgrade --apply {upgrade.id}`")
+    return 0
 
 
 def _launchd(root: Path, args: argparse.Namespace) -> int:
