@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-10-08
+
 ### Added
 
 - Spec 014: config upgrades. shipmill proposes a feature that needs an opt-in in a repo's
@@ -1158,7 +1160,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.35.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.36.0...HEAD
+[0.36.0]: https://github.com/shipmill/shipmill/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/shipmill/shipmill/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/shipmill/shipmill/compare/v0.33.2...v0.34.0
 [0.33.2]: https://github.com/shipmill/shipmill/compare/v0.33.1...v0.33.2
