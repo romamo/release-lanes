@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Protocol
 
 from shipmill.changelog import Entry, fragment_entries
-from shipmill.config import CONFIG_PATH, loads
+from shipmill.config import CONFIG_PATH, Table, loads
 from shipmill.errors import ReleaseError
 from shipmill.gitrepo import Git
 from shipmill.policy import Policy, Style
@@ -136,23 +136,37 @@ def at_revision(git: Git, policy: Policy, rev: str) -> list[Fragment]:
     if policy.fragments is None:
         return []
     source = AtRevision(git, rev)
-    if not source.has(policy.fragments) and _predates_fragments(git, rev):
+    # HEAD is the revision shipmill runs on: a missing folder there fails whatever its config says
+    if not source.has(policy.fragments) and git.sha(rev) != git.sha("HEAD") and not _sets_fragments(git, rev):
         return []
     return read(source, policy.fragments, policy.style)
 
 
-def _predates_fragments(git: Git, rev: str) -> bool:
-    """Whether rev, whose tree lacks the folder, is older than fragments: it isn't HEAD, the
-    revision shipmill runs on, and its own config, read through git, doesn't set [changelog]
-    fragments or doesn't exist. A config there that fails to read fails here (D-27)"""
-    if git.sha(rev) == git.sha("HEAD"):
-        return False
+def in_stamped_checkout(git: Git, policy: Policy) -> list[Fragment]:
+    """The fragments a stable stamp releases, from the clean checkout at the release's base;
+    none when the policy sets no fragments folder, or when that commit predates the folder:
+    its tree has no folder and its own config doesn't set [changelog] fragments (D-27)"""
+    if policy.fragments is None:
+        return []
+    if not AtRevision(git, "HEAD").has(policy.fragments) and not _sets_fragments(git, "HEAD"):
+        return []
+    return in_checkout(git.root, policy)
+
+
+def _sets_fragments(git: Git, rev: str) -> bool:
+    """Whether rev's own config, read through git, sets [changelog] fragments. Only that key
+    is read: the rest of an older config may not pass today's schema, and needn't. A config
+    there that isn't TOML, or whose [changelog] or fragments has the wrong type, fails (D-27)"""
     path = CONFIG_PATH.as_posix()
     text = git.show(rev, path)
     if text is None:
-        return True
-    where = f"{path} at {rev[:12]}"
-    return Policy.parse(loads(text, where), where).fragments is None
+        return False
+    where = f"{path} at {git.sha(rev)[:12]}"
+    changelog = Table(loads(text, where), where).table("changelog", optional=True)
+    if "fragments" not in changelog.raw:
+        return False
+    changelog.string("fragments")
+    return True
 
 
 def added_by(git: Git, policy: Policy, merge: str) -> list[Fragment]:

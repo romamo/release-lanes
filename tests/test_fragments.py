@@ -476,6 +476,26 @@ def test_s013_17_the_promotion_of_an_rc_cut_before_the_folder_plans(repo: Repo) 
     assert (decision.action, str(decision.version), decision.base) == ("release", "1.1.0", rc.base)
 
 
+def test_s013_17_the_promotion_of_an_rc_cut_before_the_folder_releases(repo: Repo) -> None:
+    """plan, prepare, and land: the stamp at the rc's base, which predates the folder, reads
+    no fragments, and main keeps its folder after the sync"""
+    rc = rc_before_fragments(repo)
+    decision = plan(repo, at_day(4), event=Event.MANUAL, lane=Lane.STABLE)
+    sha = release(repo, decision)
+    assert repo.git.first_parent(sha) == rc.base
+    assert released_section(repo, sha, "1.1.0") == "### Added\n\n- Feature A (#1)\n"
+    assert folder_files(repo, sha) == []
+    assert folder_files(repo, repo.git.sha("origin/main")) == ["changelog.d/README.md"]
+
+
+def test_s013_17_a_stable_stamp_whose_base_config_sets_the_key_still_needs_the_folder(repo: Repo) -> None:
+    repo.merge(1, "Added", "Feature A")
+    use_fragments(repo, readme=False)
+    base = repo.git.sha()
+    with pytest.raises(ReleaseError, match=f"names {FOLDER}, which is not a folder in"):
+        prepare(repo.git, repo.policy, Lane.STABLE, Version.parse("1.1.0"), base, at_day(1).date(), (), (), commit=True)
+
+
 def test_s013_17_notes_run_against_a_tag_older_than_the_folder(repo: Repo, capsys: pytest.CaptureFixture[str]) -> None:
     rc_before_fragments(repo)
     assert main(["--repo", str(repo.root), "notes", "--version", "1.1.0rc1"], repo.github) == 0
@@ -513,19 +533,33 @@ def test_s013_17_the_current_revision_still_needs_the_folder(repo: Repo) -> None
 
 
 @pytest.mark.parametrize(
-    ("config", "error"),
+    ("change", "error"),
     [
-        ("name = [\n", r"^\.github/shipmill\.toml at [0-9a-f]{12}: "),
-        ('surprise = "key"\n', r"^\.github/shipmill\.toml at [0-9a-f]{12}: unknown keys \['surprise'\]"),
+        (("[changelog]\n", "[changelog\n"), r"^\.github/shipmill\.toml at [0-9a-f]{12}: "),
+        (
+            ("[changelog]\n", "[changelog]\nfragments = 1\n"),
+            r"^\.github/shipmill\.toml at [0-9a-f]{12} \[changelog\]: fragments must be a string, got 1",
+        ),
     ],
 )
-def test_s013_17_a_revision_whose_config_fails_to_read_fails(repo: Repo, config: str, error: str) -> None:
+def test_s013_17_a_revision_whose_config_fails_to_read_fails(repo: Repo, change: tuple[str, str], error: str) -> None:
     good = repo.read(repo.policy_file)
-    repo.write(repo.policy_file, config if config.startswith("name = [") else config + good)
+    assert change[0] in good
+    repo.write(repo.policy_file, good.replace(*change, 1))
     broken = commit_on_main(repo, "Break the config")
     use_fragments(repo, policy=good)
     with pytest.raises(ReleaseError, match=error):
         fragments.at_revision(repo.git, repo.policy, broken)
+
+
+def test_s013_17_only_the_key_is_read_from_an_older_config(repo: Repo) -> None:
+    """A config valid when it was committed may not pass today's schema; only [changelog]
+    fragments is read from it"""
+    good = repo.read(repo.policy_file)
+    repo.write(repo.policy_file, 'retired_key = "since removed"\n' + good)
+    older = commit_on_main(repo, "A config with a key today's schema rejects")
+    use_fragments(repo, policy=good)
+    assert fragments.at_revision(repo.git, repo.policy, older) == []
 
 
 def test_s013_17_a_folder_older_than_the_key_is_still_read(repo: Repo) -> None:

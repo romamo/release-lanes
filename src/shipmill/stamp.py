@@ -136,7 +136,7 @@ def stamp(
         changelog = Changelog(path.read_text(encoding="utf-8"), policy.style)
         found: list[fragments.Fragment] = []
         if lane is Lane.STABLE:
-            found = fragments.in_checkout(root, policy)
+            found = fragments.in_stamped_checkout(git, policy)  # none at a base older than the folder (D-27)
             # Unreleased, the fragments, and the version's rc sections (D-25, spec 013)
             entries = changelog.promoted(version, fragments.entries(found))
         path.write_text(

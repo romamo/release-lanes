@@ -15,12 +15,14 @@ bot.
 
 ### Fixed
 
-- A repo that turns on `[changelog] fragments` mid-cycle can plan the stable promotion of
-  an rc cut before the folder existed, and run `shipmill notes` and proposals against an
-  older tag or base: a revision other than HEAD whose tree has no fragments folder, and
-  whose own `.github/shipmill.toml` doesn't set the key, reads as no fragments; HEAD and a
-  revision whose config sets the key still exit 2 naming the folder, and a config there
-  that fails to read fails (D-27) (#291)
+- A repo that turns on `[changelog] fragments` mid-cycle can plan and release the stable
+  promotion of an rc cut before the folder existed, and run `shipmill notes` and proposals
+  against an older tag or base: a revision whose tree has no fragments folder, and whose
+  own `.github/shipmill.toml` doesn't set the key, reads as no fragments, and the stable
+  stamp applies that to the base it releases; HEAD when planning, and a revision whose
+  config sets the key, still exit 2 naming the folder. Only `[changelog] fragments` is
+  read from that revision's config, so an older config's retired keys don't block it;
+  malformed TOML or a `fragments` that isn't a string fails (D-27) (#291)
 
 ## [0.39.0] - 2026-10-08
 
