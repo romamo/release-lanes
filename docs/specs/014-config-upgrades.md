@@ -45,9 +45,11 @@ A new key in the existing `[autonomy]` table (`src/shipmill/autonomy.py`), read 
 other stages:
 
 - `observe`: only `shipmill doctor` and `shipmill status` list the pending upgrades
-- `propose` (the default): an issue per pending upgrade, and a pull request that turns it on;
-  a person merges it
-- `act`: the same pull request, merged by github-pr-triage on green CI like any other
+- `propose` (the default): an issue per pending upgrade; an agent session asks the
+  maintainer through the needs-decision protocol (D-21) and opens the pull request only
+  when the answer accepts it
+- `act`: no question: the agent session opens the pull request at once, and
+  github-pr-triage merges it on green CI like any other
 
 An open hold turns act into propose, as for every stage (D-8). A maintainer who wants every
 future upgrade without a click sets `upgrade = "act"` once; the first upgrade PR's body says
@@ -71,12 +73,16 @@ The release workflow (`.github/workflows/release.yml`), which every client alrea
 runs `shipmill upgrade --propose` in the job that already has `issues: write`. Each issue:
 
 - carries the label `shipmill-upgrade` and a first line marker `<!-- shipmill-upgrade:
-  <id> -->`; one issue per id, opened once and kept up to date, as release proposals are
+  <id> <version> -->`, the version being the release that last changed the upgrade; one issue per id, opened once and kept up to date, as release proposals are
   (`src/shipmill/propose.py`)
-- says what the upgrade changes and why, shows the exact config lines, and gives the two
-  ways to accept: merge the pull request an agent opens, or run `shipmill upgrade --apply
-  <id>` and open one
-- says how to decline: close the issue
+- says what the upgrade changes and why, shows the exact config lines, and gives the ways
+  to accept: answer the agent's question on the issue, or run `shipmill upgrade --apply
+  <id>` and open the pull request yourself
+- says how to decline: answer so, or close the issue
+
+The release workflow posts no question itself: a comment by the workflow's
+`github-actions[bot]` is neither the gate's App nor an OWNER, MEMBER, or COLLABORATOR, so
+`watch_state.py` and `triage_state.py` would never read it as a needs-decision question.
 
 Closing the issue, as completed or not planned, without the upgrade in the config is a
 decline: no issue for that id is opened again, and `shipmill upgrade` stops listing it. A
@@ -84,20 +90,54 @@ config that holds the key closes its open issue as completed on the next run. `d
 about `issues: write` only when `upgrade` is `propose` or `act` and an upgrade is pending
 (D-9).
 
+### The question
+
+An agent session that sees an open `shipmill-upgrade` issue with no needs-decision answer
+and no pull request (`skills/github-ship-watch/scripts/watch_state.py` state
+`UPGRADE_PENDING`, an action row) asks the maintainer with the needs-decision protocol
+(`skills/github-issue-triage/references/needs-decision.md`), under `propose` only:
+
+```markdown
+<!-- shipmill:needs-decision -->
+@<login> Decision needed: turn on <id> (<one line on what it changes>)?
+
+1. Turn it on (recommended): <what users get>
+2. Turn it on, and take every future upgrade without asking: also sets `[autonomy] upgrade = "act"`
+3. Not now: ask again after the next shipmill release that changes this upgrade
+4. Never: close this issue; shipmill won't propose it again
+
+Reply here with a number or your own answer; shipmill takes this up on the tick after your reply.
+```
+
+As the protocol says, a gate session posts it as the App with the `needs-decision` label,
+and an interactive one also asks the same question with AskUserQuestion; a session the
+user started by hand asks only in the session and posts the answer on the issue as
+`Decision by @<login>, given in chat; relayed by <agent>` (spec 012), so the decision lives
+on GitHub either way. While the label is on, `watch_state.py` lists the issue in its
+NEEDS_DECISION row, not as `UPGRADE_PENDING`, and starts no session for it.
+
+The session that takes up the answer removes the label and:
+
+- 1: opens the pull request (below)
+- 2: opens it with `upgrade = "act"` added to `[autonomy]` too
+- 3: leaves the issue open and adds a `shipmill-upgrade-later` label; `upgrade --propose`
+  removes that label, and the question is asked again, only when a newer shipmill release
+  changes the upgrade's text or edit
+- 4, or a reply that declines in its own words: closes the issue as not planned, a decline
+
 ### Upgrade pull requests
 
-An agent session that sees an open `shipmill-upgrade` issue with no pull request
-(`skills/github-ship-watch/scripts/watch_state.py` state `UPGRADE_PENDING`, an action row)
-runs `shipmill upgrade --apply <id>` on a branch `shipmill/upgrade-<id>`, adds a CHANGELOG
-entry when the repo's rules ask for one, and opens the pull request as the App (spec 012)
-with `Closes #<issue>`. `skills/github-ship-watch/SKILL.md` gives the steps.
+Accepted (or under `act`, at once), the session runs `shipmill upgrade --apply <id>` on a
+branch `shipmill/upgrade-<id>`, adds a CHANGELOG entry when the repo's rules ask for one,
+and opens the pull request as the App (spec 012) with `Closes #<issue>` and a line naming
+the decision it carries out (`Accepted by @<login> in #<issue>`, or `[autonomy] upgrade =
+"act"`). `skills/github-ship-watch/SKILL.md` gives the steps.
 
-A pull request closed unmerged is a decline too: the session closes its issue as not
-planned and opens no new one.
-
-github-pr-triage (`skills/github-pr-triage/SKILL.md`) merges an upgrade pull request only
-when `[autonomy] upgrade` is `act` and no hold is open; under `propose` it reviews and
-reports it as waiting on the maintainer and never merges it.
+github-pr-triage (`skills/github-pr-triage/SKILL.md`) merges an upgrade pull request on
+green CI when its issue holds an accepting answer from an OWNER, MEMBER, or COLLABORATOR,
+or when `[autonomy] upgrade` is `act`, and never while a hold is open; any other upgrade
+pull request waits for a person to merge it. A pull request closed unmerged is a decline
+too: the session closes its issue as not planned and opens no new one.
 
 ### `status` and `doctor`
 
@@ -133,12 +173,25 @@ upgrade is an offer, not a problem.
   `propose` or `act` and an upgrade is pending (D-9), and pending upgrades alone never make
   it exit 1
 - S-014-10: `watch_state.py` reports `UPGRADE_PENDING` as an action row for an open
-  `shipmill-upgrade` issue with no open pull request closing it, and reports nothing for
-  one that has a pull request
-- S-014-11: the github-ship-watch and github-pr-triage skills say how an upgrade pull
-  request is opened (as the App, branch `shipmill/upgrade-<id>`, `Closes #<issue>`), that
-  a closed-unmerged one is a decline, and that it merges only under `act` with no hold
-- S-014-12: `shipmill status` lists each pending upgrade with its issue link or the
+  `shipmill-upgrade` issue with neither the `needs-decision` label, the
+  `shipmill-upgrade-later` label, nor an open pull request closing it; with the
+  `needs-decision` label it lists the issue in NEEDS_DECISION instead, and after a trusted
+  reply it reports `UPGRADE_PENDING` again
+- S-014-11: the github-ship-watch skill asks the question above under `propose`, with the
+  four options in that order, through the needs-decision protocol, and asks nothing under
+  `act`; each answer leads to the outcome the spec gives it (pull request, pull request
+  with `upgrade = "act"`, `shipmill-upgrade-later`, issue closed as not planned)
+- S-014-12: the upgrade pull request is opened as the App on `shipmill/upgrade-<id>` with
+  `Closes #<issue>` and the line naming the decision; a closed-unmerged one closes its
+  issue as not planned
+- S-014-13: github-pr-triage merges an upgrade pull request on green CI only when its issue
+  holds an accepting answer from an OWNER, MEMBER, or COLLABORATOR or `upgrade` is `act`,
+  never while a hold is open, and otherwise reports it as waiting on the maintainer
+- S-014-14: `upgrade --propose` removes `shipmill-upgrade-later` from an issue only when the
+  installed shipmill's version of that upgrade is newer than the one the issue was last
+  asked about, which the issue's marker records (`<!-- shipmill-upgrade: <id> <version>
+  -->`)
+- S-014-15: `shipmill status` lists each pending upgrade with its issue link or the
   `--apply` command as its fix
 
 ## Out of scope
@@ -159,6 +212,7 @@ upgrade is an offer, not a problem.
 - D-9: doctor warns about `issues: write` only where it is needed
 - D-10: the maintainer accepts or declines; shipmill proposes
 - D-14: agent sessions write as the App
+- D-21: every question a gate session asks goes through the needs-decision protocol
 
 ## Issues
 
