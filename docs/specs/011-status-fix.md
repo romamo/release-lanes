@@ -6,7 +6,7 @@ status: approved
 
 `shipmill status` (specs 008 and 009) names what is wrong but often not what to do about
 it. The update hint from #233 is the model: a `SHIPMILL_OUTDATED` row prints the exact
-command, scoped to the folder it must run in (D-22). Most other rows stop at the fact
+command, scoped to the folder it must run in (D-23). Most other rows stop at the fact
 (`to land #409`, `parked #26`, `WORKTREE_STALE ... 1 commit(s) not landed`, `BOT_FAILED
 failure: <url>`), so a person has to work out the fix, and an agent reading `--json` has
 nothing to run or propose. Nothing stops the next new check from shipping without a hint
@@ -23,7 +23,7 @@ writes nothing (spec 008), and the watch's repairs stay its "watch" scope.
 
 ### A fix works from any folder
 
-Every command in a fix names its target, so it works wherever the reader runs it (D-22):
+Every command in a fix names its target, so it works wherever the reader runs it (D-23):
 a `gh` command names the repo (`-R owner/name`, or the repo as its argument), a `git`
 command names its checkout (`git -C <path>`), and a command that only works in one folder
 says so (`in <folder>: ...`, as `SHIPMILL_OUTDATED` already does). A fix is built from
@@ -230,13 +230,13 @@ waiting it is unchanged.
 
 - D-3: prose calls the release automation shipmill
 - D-4: the fixes name `.github/shipmill.toml` as the one config file
-- D-12: a stale worktree is the person's to finish or remove; the fix says how, never does it
+- D-24: a stale worktree is the person's to finish or remove; the fix says how, never does it
 - D-14: `status` writes nothing, so it still runs as the user's `gh`
 - D-15: a hold is the person's to lift; its fix is the decision and the close command
 - D-16: a fix never quotes untrusted issue or pull request text, and untrusted items go to
   an interactive session
 - D-19: a gate without an App is unfinished setup; its fix is the App step
-- D-22: each fix works when run where it says, as the plugin update's already does
+- D-23: each fix works when run where it says, as the plugin update's already does
 
 ## Issues
 
