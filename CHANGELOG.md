@@ -7,6 +7,12 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- Decision D-26: when a stable release folds its rc sections, prose before an rc
+  section's first `### ` heading is dropped, and any other text outside an entry still
+  fails the fold (#283)
+
 ## [0.38.0] - 2026-10-08
 
 ### Added

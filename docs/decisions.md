@@ -211,3 +211,11 @@ entry that supersedes it, never by editing an old one.
 - Why: A repo that moved to shipmill from a release bot that wrote rc sections had an empty Unreleased at every rc's base, so stable promotion skipped and 1.0.0 could not release (romamo/treaty); one stable section shows everything since the last stable, and the per-rc history stays in the rc tags and their GitHub releases
 - Applies to: src/shipmill/planner.py, src/shipmill/changelog.py, src/shipmill/stamp.py, CHANGELOG, stable lane
 - Enforced by: the planner and changelog tests (with the implementing PR)
+
+## D-26: The stable fold drops an rc section's intro prose
+
+- Decided: 2026-10-08, in shipmill/shipmill#283
+- Rule: When a stable release folds its rc sections (D-25), prose that sits before the first '### ' heading of an rc section is dropped; any other text outside an entry (between entries, a '#### ' heading, a numbered list) still fails the fold
+- Why: An intro line describes that rc, not the stable release, and earlier release bots wrote one per rc (treaty has 36); text anywhere else may be part of an entry, and the fold removes the section, so it must fail rather than vanish
+- Applies to: src/shipmill/changelog.py, the stable fold
+- Enforced by: review
