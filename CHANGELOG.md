@@ -7,6 +7,8 @@ bot.
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-10-08
+
 ### Changed
 
 - Decision D-23, superseding D-22: with `[agents] plugin_update = true` the gate updates
@@ -1103,7 +1105,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.33.2...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.34.0...HEAD
+[0.34.0]: https://github.com/shipmill/shipmill/compare/v0.33.2...v0.34.0
 [0.33.2]: https://github.com/shipmill/shipmill/compare/v0.33.1...v0.33.2
 [0.33.1]: https://github.com/shipmill/shipmill/compare/v0.33.0...v0.33.1
 [0.33.0]: https://github.com/shipmill/shipmill/compare/v0.32.2...v0.33.0

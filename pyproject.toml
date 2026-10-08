@@ -1,6 +1,6 @@
 [project]
 name = "shipmill"
-version = "0.33.2"
+version = "0.34.0"
 description = "The open-source AI software factory for GitHub: agents triage issues and land pull requests, and release lanes publish, deploy, and roll back by policy"
 readme = "README.md"
 license = "MIT"
