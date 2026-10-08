@@ -421,11 +421,19 @@ def gh_read(cmd: Sequence[str]) -> bool:
         return False
     if cmd[1] != "api":
         return cmd[2] in {"list", "view"}
-    for flag in ("-X", "--method"):
-        if flag in cmd:
-            at = list(cmd).index(flag) + 1
-            return at < len(cmd) and cmd[at].upper() == "GET"
-    return not any(flag in cmd for flag in GH_FIELDS)
+    words = list(cmd)
+    method = None  # the last -X wins, as gh reads it: "-X POST", "-XPOST", "--method=POST"
+    fields = False  # "-f x", "-fx", "--field=x", "--input=x"
+    for at, word in enumerate(words):
+        if word in ("-X", "--method"):
+            method = words[at + 1] if at + 1 < len(words) else ""
+        elif word.startswith("--method="):
+            method = word.partition("=")[2]
+        elif word.startswith("-X"):
+            method = word[2:]
+        elif word.split("=")[0] in GH_FIELDS or word[:2] in ("-f", "-F"):
+            fields = True
+    return method.upper() == "GET" if method is not None else not fields
 
 
 def transient(cmd: Sequence[str], proc: subprocess.CompletedProcess[str]) -> bool:
