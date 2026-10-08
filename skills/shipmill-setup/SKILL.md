@@ -266,7 +266,11 @@ or the tags are wrong; fix those, not the version.
    because github-pr-triage's stacked merges rely on GitHub retargeting a stacked PR when
    the branch under it is deleted, and without it merged branches pile up. `--fix`
    enables the plugin, keeping every other key, creates the missing labels, and turns the
-   setting on, all on GitHub at once; commit the settings change in a follow-up PR. A
+   setting on, all on GitHub at once; commit the settings change in a follow-up PR. With
+   `[agents] app_id` set it creates the labels as the App, through `shipmill gh` run by
+   uvx (spec 012); the setting stays on the host's `gh`, since the App has no
+   Administration permission. A `shipmill gh` exit 2 stops `--fix`: report it, and never
+   create the labels with plain `gh` instead. A
    plugin turned off on purpose
    (`PLUGIN_DISABLED`) is the user's call; ask before changing it. With the plugin
    enabled, each install on this host that is behind the latest release reads

@@ -58,12 +58,16 @@ Labels (the triage skills and shipmill read them):
   LABELS_MISSING   some of postponed, blocked, shipmill-hold, the config's
                    blocker_label (default release-blocker), and, with an [agents]
                    section in either mode, needs-decision don't exist; --fix creates
-                   them on GitHub
+                   them on GitHub, as the App through `uvx --from
+                   git+https://github.com/shipmill/shipmill@v0 shipmill gh` when [agents]
+                   sets app_id (spec 012), else with plain gh; a `shipmill gh` exit 2
+                   stops --fix, never retried with plain gh
   LABELS_OK        all exist
 
 Branches (the repo setting delete_branch_on_merge; github-pr-triage's stacked merges rely
 on GitHub retargeting a stacked PR when the branch under it is deleted):
-  BRANCH_DELETE_OFF  merged PR branches stay on GitHub; --fix turns the setting on
+  BRANCH_DELETE_OFF  merged PR branches stay on GitHub; --fix turns the setting on, with
+                     plain gh even with app_id set: the App has no Administration permission
   BRANCH_DELETE_ON   GitHub deletes a PR's branch when it merges
 
 Landing (the config's [agents] prs: whether the gate lands open pull requests; read the way
@@ -80,7 +84,8 @@ AGENTS_UNPREFIXED, PLUGIN_OUTDATED, SKILL_SHADOWED, and LANDING_OFF included), 2
 input, a malformed settings.json or config (its [agents] read as github-ship-watch reads
 it), an [agents] prs that isn't a TOML boolean, both config files, a git or gh failure (a failed
 read of the repo setting never reads as off), or a malformed `claude plugin list --json`.
-Needs git and an authenticated gh; claude on PATH to read the plugin's installs. Python
+Needs git and an authenticated gh, uvx for --fix's labels with app_id set, and claude on PATH
+to read the plugin's installs. Python
 3.10+, standard library only.
 """
 
@@ -356,12 +361,26 @@ def labels_row(missing: list[str], wanted: dict[str, tuple[str, str]]) -> Row:
 
 
 def create_labels(
-    repo: str, wanted: dict[str, tuple[str, str]], missing: list[str], gh: Callable[[list[str]], str] = run
+    repo: str,
+    wanted: dict[str, tuple[str, str]],
+    missing: list[str],
+    write: list[str],
+    gh: Callable[[list[str]], str] = run,
 ) -> None:
-    """--fix: create each missing label with its color and description"""
+    """--fix: create each missing label with its color and description, through write (the
+    writing gh, `shipmill gh` with [agents] app_id set); a failure stops, never retried"""
     for name in missing:
         color, description = wanted[name]
-        gh(["gh", "label", "create", name, "-R", repo, "--color", color, "--description", description])
+        gh([*write, "label", "create", name, "-R", repo, "--color", color, "--description", description])
+
+
+def gh_writer(repo_dir: Path, ws: ModuleType) -> list[str]:
+    """watch_state.py's writing gh for the checkout (spec 012, #290); a config it refuses fails"""
+    try:
+        found: list[str] = ws.gh_writer(repo_dir)
+    except ws.Refused as refused:
+        fail(str(refused).removeprefix("error: "))
+    return found
 
 
 def existing_labels(repo: str) -> set[str]:
@@ -475,6 +494,9 @@ def main() -> int:
     args = parser.parse_args()
     repo_dir: Path = args.repo_dir.resolve()
     check_checkout(args.repo, repo_dir)
+    ws = watch_module()
+    # before any change, so a config that can't be read stops --fix with nothing made
+    write = gh_writer(repo_dir, ws) if args.fix else ["gh"]
 
     settings_path = repo_dir / SETTINGS
     settings = load_settings(settings_path)
@@ -487,10 +509,9 @@ def main() -> int:
     have = existing_labels(args.repo)
     missing = [name for name in wanted if name not in have]
     if args.fix:
-        create_labels(args.repo, wanted, missing)
+        create_labels(args.repo, wanted, missing, write)
         missing = []
 
-    ws = watch_module()
     rows = [
         release_row(repo_dir),
         agents_row(repo_dir),
