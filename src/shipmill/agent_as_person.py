@@ -59,7 +59,8 @@ def marked(body: str) -> bool:
 
 
 def search(repo: str, since: dt.datetime) -> str:
-    return f"repo:{repo} updated:>={since.astimezone(dt.UTC):%Y-%m-%dT%H:%M:%SZ}"
+    """Sorted by update, as search's default best-match order isn't the newest ITEMS"""
+    return f"repo:{repo} updated:>={since.astimezone(dt.UTC):%Y-%m-%dT%H:%M:%SZ} sort:updated-desc"
 
 
 def command(repo: str, since: dt.datetime) -> list[str]:

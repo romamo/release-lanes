@@ -116,7 +116,8 @@ def test_s012_7_one_search_counts_marked_items_by_a_user_in_the_last_7_days() ->
     assert found.urls == FLAGGED  # newest first; a Bot's, an older one's, and an unmarked one's left out
     (cmd,) = gh.seen
     assert cmd[:3] == ["gh", "api", "graphql"]
-    assert cmd[-1] == "q=repo:acme/web updated:>=2026-09-30T12:00:00Z"
+    # sorted, or search's best-match order returns 100 that aren't the most recently updated
+    assert cmd[-1] == "q=repo:acme/web updated:>=2026-09-30T12:00:00Z sort:updated-desc"
     detail = found.detail()
     assert detail.startswith(f"4 item(s) of the last 7 days carry an agent's marker but a person wrote them: {URL}/")
     assert " ".join(FLAGGED[:3]) + " and 1 more;" in detail
