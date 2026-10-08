@@ -34,6 +34,9 @@ fragments = "changelog.d"
 
 `fragments` is a folder relative to the repo root. Unset, shipmill behaves exactly as
 today. Set, the folder must exist; a missing folder is an error that names it (exit 2).
+A revision older than the folder is the exception (D-27): when its tree has no folder and
+its own config doesn't set the key, it has no fragments, so a repo that turns fragments
+on mid-cycle can still promote an rc cut before it and run `notes` against an older tag.
 
 ### A fragment
 
@@ -167,6 +170,11 @@ fragment instead.
   with no conflict (a git-level test, no GitHub)
 - S-013-16: the skills listed under Skills tell a PR to add a fragment when the config sets
   `fragments`; shipmill's own config sets it, and its `CLAUDE.md` rule names fragments
+- S-013-17: with `fragments` set in the current config, a revision whose tree has no
+  fragments folder and whose own config doesn't set the key reads as no fragments: the
+  stable promotion of an rc cut before the folder existed plans, and `shipmill notes`
+  against a tag older than the folder runs; a revision whose own config sets the key and
+  lacks the folder still exits 2 naming it (D-27)
 
 ## Out of scope
 
@@ -182,11 +190,13 @@ fragment instead.
 
 - D-4: the setting is a key in `.github/shipmill.toml`'s `[changelog]` table
 - D-25: a stable promotion folds its version's rc sections; fragments join that fold
+- D-27: a revision older than the fragments folder has no fragments
 
 ## Issues
 
 - shipmill/shipmill#272: S-013-1, S-013-2, S-013-3, S-013-4, S-013-5, S-013-6, S-013-7, S-013-8, S-013-9, S-013-12
 - shipmill/shipmill#273: S-013-10, S-013-11
 - shipmill/shipmill#274: S-013-13, S-013-14, S-013-15, S-013-16
+- shipmill/shipmill#291: S-013-17
 
 ## Verification

@@ -7,6 +7,12 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- Decision D-27: with `[changelog] fragments` set, a revision whose tree has no fragments
+  folder and whose own config doesn't set the key has no fragments; spec 013 gets
+  S-013-17 for it (#291)
+
 ## [0.39.0] - 2026-10-08
 
 ### Changed

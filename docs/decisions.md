@@ -219,3 +219,11 @@ entry that supersedes it, never by editing an old one.
 - Why: An intro line describes that rc, not the stable release, and earlier release bots wrote one per rc (treaty has 36); text anywhere else may be part of an entry, and the fold removes the section, so it must fail rather than vanish
 - Applies to: src/shipmill/changelog.py, the stable fold
 - Enforced by: review
+
+## D-27: A revision older than the fragments folder has no fragments
+
+- Decided: 2026-10-08, in shipmill/shipmill#291
+- Rule: When shipmill reads fragments at a revision whose tree has no fragments folder and whose own config doesn't set [changelog] fragments, it counts no fragments there; the current revision, and any revision whose config sets the key, still exit 2 naming a missing folder (S-013-2)
+- Why: A repo that turns fragments on mid-cycle must still promote an rc cut before the folder existed and run notes against an older tag; a revision that itself asked for fragments and lacks the folder is still a mistake that must fail
+- Applies to: src/shipmill/fragments.py, src/shipmill/planner.py, src/shipmill/propose.py, src/shipmill/stamp.py, changelog fragments
+- Enforced by: review
