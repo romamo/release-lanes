@@ -73,6 +73,23 @@ its whole diff (`git diff <merge-base> <tip>`) matches one commit in the window,
 without `CHANGELOG.md`. landed.py matches commit by commit, so a multi-commit PR squashed
 into one reads NOT LANDED there; this rule closes that gap without trusting the PR state.
 
+When review force-pushed the pull request (a rebase, an amend, a part dropped) before it was
+squash-merged, none of those rules can see the worktree's commits, which are in no merged
+history. So a branch also landed when its tip is, or was before a force-push, the head of a
+merged pull request whose head branch is the worktree's branch name or its upstream branch
+on origin (added in #244). A merged pull request's heads are its head when merged, its
+commits, and the commit before and after each of its force-pushes
+(`HeadRefForcePushedEvent` in its timeline); they are matched by commit SHA, never by the
+branch name alone, so a merged pull request from an earlier use of the same name proves
+nothing. When the tip is not one of them but an earlier commit of the branch is, that commit
+and every commit before it landed with the pull request, and only the commits after the
+newest such one count as not landed. All of it comes from one `gh api graphql` request per
+run, made before judging and only when some worktree's branch holds a commit
+`origin/<default>` doesn't: for each such branch name and upstream name, the newest 20
+merged pull requests with that head, each with its last 100 commits and its last 100
+force-pushes. A gh failure, or an answer shipmill can't read, exits 2 and removes nothing,
+as a failing `gh pr list` does.
+
 **Live sessions.** The command runs `claude agents --json` (no `--cwd`, which filters to
 background sessions only) and reads every row's `cwd`. On this machine it prints a JSON
 array of the active sessions, interactive and background, each with `pid`, `cwd`, `kind`,
@@ -162,6 +179,7 @@ a failing plan does.
 - S-002-17: `watch_state.py` reports one report-only `WORKTREE_STALE` row (agent false, not an action) per KEPT shipmill worktree older than 7 days, naming its path and reason, and none for the main checkout, the current checkout, or a worktree that is not a shipmill worktree
 - S-002-18: `skills/github-ship-watch/SKILL.md` documents the `WORKTREE_STALE` row, and `skills/shipmill-setup/SKILL.md`'s gate section documents the gate's prune and `shipmill worktrees`, and the github-issue-resolve, github-pr-triage, and github-issue-triage skills each say that the worktrees a session leaves behind once it exits are the gate's prune's to remove
 - S-002-19: a candidate worktree that holds another worktree of the repository inside it, even under an ignored path, is KEPT as `holds worktree <path>`, its path relative to the main checkout (added in #131)
+- S-002-20: a candidate worktree whose branch tip is, or was before a force-push, the head of a merged pull request whose head branch is its branch or that branch's upstream, matched by commit SHA, and that passes every other check, is REMOVABLE; one with commits after such a head is KEPT as `<N> commit(s) not landed`, counting only those commits; the merged pull requests are read in one request before judging, and a failing read exits 2 and removes nothing (added in #244)
 
 ## Out of scope
 
@@ -183,6 +201,7 @@ a failing plan does.
 - shipmill/shipmill#123: S-002-12, S-002-13, S-002-14
 - shipmill/shipmill#124: S-002-15, S-002-16
 - shipmill/shipmill#125: S-002-17, S-002-18
+- shipmill/shipmill#244: S-002-20
 
 ## Verification
 
@@ -210,3 +229,4 @@ so `gh pr list` and `claude agents --json` ran for real) with one worktree per c
 - S-002-17: `watch_state.py shipmill/shipmill --repo-dir <scratch>/tmp/shipmill-gate --json` printed `WORKTREE_STALE` rows with `agent: false` for `tmp/wt-dirty` (`uncommitted changes; created 9d ago`) and `tmp/wt-wip` (`1 commit(s) not landed; created 10d ago`) and none for `.`, `tmp/shipmill-gate`, the 2-day-old detached worktree, or the REMOVABLE one; WORKTREE_STALE is in neither `ACTION` nor `AGENT`, and the gate's dry run counted it as no work; holds
 - S-002-18: `test_s002_18_the_skills_document_the_report_and_the_gates_prune` reads the five SKILL.md files: github-ship-watch's repair and agent tables list WORKTREE_STALE, shipmill-setup's The gate describes the prune and `shipmill worktrees`, and github-issue-resolve, github-pr-triage, and github-issue-triage each say the worktrees a session leaves behind once it exits are the gate's prune's to remove (D-12); holds
 - S-002-19: `tmp/wt-outer` holding the worktree `tmp/wt-outer/tmp/wt-inner` (under the ignored `tmp/`) read `holds worktree tmp/wt-outer/tmp/wt-inner`; holds
+- S-002-20: the GraphQL read against romamo/treaty for `feat/54-audit-false` returned #75 with heads `7a275f8` and the force-pushed-away `b2e3b25`, the worktree's only commit; the treaty case, a rebased and review-fixed squash merge through an upstream of another name, a commit after the merged head (`1 commit(s) not landed`), a reused branch name, and a failing read, by the tests; holds

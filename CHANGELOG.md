@@ -32,6 +32,15 @@ bot.
   numbered list) stops the release with an error naming it rather than lose that text. A
   CHANGELOG without rc sections releases as before (#243)
 
+### Fixed
+
+- `shipmill worktrees` and the gate's prune no longer keep a worktree forever as
+  `<N> commit(s) not landed` when review force-pushed its pull request before a squash
+  merge: a branch also landed when its tip is, or was before a force-push, the head of a
+  merged pull request from that branch or its upstream, matched by commit SHA; commits made
+  after that head still keep it, counted alone. The merged pull requests come from one
+  `gh api graphql` read per run, and a failed read exits 2 and removes nothing (#244)
+
 ## [0.33.2] - 2026-10-07
 
 ### Fixed

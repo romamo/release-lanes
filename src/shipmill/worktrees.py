@@ -1,8 +1,9 @@
 """Which worktrees of a repository provably landed, and why the others stay (spec S-002).
 
 Each worktree gets one verdict, REMOVABLE or KEPT; a KEPT one carries the first check it
-failed, in the spec's order. Judging reads git, `claude agents --json`, and one `gh pr list`,
-and changes nothing but the fetched `origin/<default>`. Pruning removes the REMOVABLE ones
+failed, in the spec's order. Judging reads git, `claude agents --json`, one `gh pr list`, and
+one GraphQL read of the merged pull requests from the worktrees' branches, and changes nothing
+but the fetched `origin/<default>`. Pruning removes the REMOVABLE ones
 of that same judgement, each with the local branch it held, and nothing else.
 """
 
@@ -18,7 +19,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from shipmill.errors import ReleaseError
-from shipmill.github import GitHub, PullRequest
+from shipmill.github import GitHub, MergedPull, PullRequest
 from shipmill.gitrepo import REMOTE, Git
 
 FLOOR = dt.timedelta(hours=24)  # a younger worktree may belong to a session that hasn't committed yet
@@ -216,8 +217,11 @@ class Landing:
         loose_id = self._one(loose_patch)
         return loose_id is not None and loose_id in loose
 
-    def unlanded(self, branch: str) -> int:
-        """How many of the branch's commits are not on onto; 0 when its whole diff landed as one commit"""
+    def unlanded(self, branch: str, merged_heads: frozenset[str] = frozenset()) -> int:
+        """How many of the branch's commits are not on onto; 0 when its whole diff landed as one
+        commit. merged_heads are the commits that were, at some point, the head of a merged pull
+        request from this branch: a commit of the branch that is one of them landed with it, and so
+        did every commit before it, so only the commits after the newest such one can count"""
         tip = f"{HEADS}{branch}"
         commits = self.git.run("rev-list", "--no-merges", f"{self.onto}..{tip}").split()
         # rev-list leaves out every commit onto holds, so ancestry needs no check of its own
@@ -228,6 +232,11 @@ class Landing:
         ]
         if not missing or self._squashed(tip):
             return 0
+        if merged_heads:
+            held = [c for c in self.git.run("rev-list", f"{self.onto}..{tip}").split() if c in merged_heads]
+            if held:
+                after = set(self.git.run("rev-list", "--no-merges", tip, "--not", self.onto, *held).split())
+                missing = [c for c in missing if c in after]
         return len(missing)
 
     def _squashed(self, tip: str) -> bool:
@@ -289,6 +298,7 @@ class _Context:
     roots: tuple[Path, ...]
     live: tuple[LiveSession, ...]
     pulls: tuple[PullRequest, ...]
+    merged: tuple[MergedPull, ...]
     upstream: dict[str, str]
     landing: Landing
 
@@ -321,14 +331,27 @@ def _reason(ctx: _Context, tree: Worktree, path: Path, age: dt.timedelta | None)
             return f"holds worktree {os.path.relpath(other, ctx.main)}"
     if Git(path).run("status", "--porcelain", "--untracked-files=all").strip():
         return "uncommitted changes"
-    unlanded = ctx.landing.unlanded(tree.branch)
+    names = {tree.branch, ctx.upstream.get(tree.branch, tree.branch)}
+    merged_heads = frozenset[str]().union(*(pr.heads for pr in ctx.merged if pr.head in names))
+    unlanded = ctx.landing.unlanded(tree.branch, merged_heads)
     if unlanded:
         return f"{unlanded} commit(s) not landed"
-    heads = {tree.branch, ctx.upstream.get(tree.branch, tree.branch)}
     for pr in ctx.pulls:
-        if pr.head in heads:
+        if pr.head in names:
             return f"open PR #{pr.number}"
     return None
+
+
+def _ahead(git: Git, trees: Iterable[Worktree], default: str, onto: str, upstream: dict[str, str]) -> list[str]:
+    """The branch names, local and upstream, of the worktrees whose branch holds a commit onto
+    doesn't: the only ones a merged pull request can prove landed"""
+    names = set()
+    for tree in trees:
+        if tree.branch is None or tree.branch == default:
+            continue
+        if not git.ok("merge-base", "--is-ancestor", f"{HEADS}{tree.branch}", onto):
+            names.update({tree.branch, upstream.get(tree.branch, tree.branch)})
+    return sorted(names)
 
 
 def _hours(age: dt.timedelta) -> int:
@@ -337,14 +360,17 @@ def _hours(age: dt.timedelta) -> int:
 
 def judge(git: Git, github: GitHub, sessions: Sessions, now: dt.datetime) -> list[Judged]:
     """Every worktree of the repository whose checkout git names, with its verdict, in git's
-    order (the main checkout first). Reads the live sessions and the open pull requests
-    before judging anything, so a failure of either judges nothing"""
+    order (the main checkout first). Reads the live sessions, the open pull requests, and the
+    merged ones from the worktrees' branches before judging anything, so a failure of any
+    judges nothing"""
     default = git.default_branch()
     onto = f"refs/remotes/{REMOTE}/{default}"
     git.run("fetch", "-q", REMOTE, f"+{HEADS}{default}:{onto}")
     live = tuple(sessions.live())
     pulls = tuple(github.open_pull_requests())
     trees = parse_worktrees(git.run("worktree", "list", "--porcelain", "-z"))
+    upstream = upstreams(git)
+    merged = tuple(github.merged_pull_requests(_ahead(git, trees, default, onto, upstream)))
     resolved = [t.path.resolve() for t in trees]
     common = Path(git.run("rev-parse", "--path-format=absolute", "--git-common-dir").strip())
     created = created_times(common)
@@ -356,7 +382,8 @@ def judge(git: Git, github: GitHub, sessions: Sessions, now: dt.datetime) -> lis
         roots=tuple(resolved),
         live=tuple(LiveSession(s.name, s.cwd.resolve()) for s in live),
         pulls=pulls,
-        upstream=upstreams(git),
+        merged=merged,
+        upstream=upstream,
         landing=Landing(git, onto),
     )
     judged = []
