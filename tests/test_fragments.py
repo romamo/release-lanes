@@ -278,10 +278,11 @@ def test_a_proposal_lists_the_fragments_at_its_base(repo: Repo) -> None:
     proposal = Proposal(Lane.RC, Version.parse("1.1.0rc1"), base, "release autonomy is propose")
     (done,) = propose(repo.git, repo.policy, repo.github, (proposal,))
     assert "#### Added\n\n- Feature A (#1)\n" in repo.github.issues[done.issue].body
-    empty = Proposal(Lane.RC, Version.parse("1.1.0rc1"), repo.git.sha("v1.0.0"), "release autonomy is propose")
+    # proves: S-013-17
+    older = Proposal(Lane.RC, Version.parse("1.1.0rc1"), repo.git.sha("v1.0.0"), "release autonomy is propose")
     repo.github.issues.clear()
-    with pytest.raises(ReleaseError, match="not a folder at"):  # v1.0.0 predates the folder
-        propose(repo.git, repo.policy, repo.github, (empty,))
+    (done,) = propose(repo.git, repo.policy, repo.github, (older,))  # v1.0.0 predates the folder: none there
+    assert "Nothing pending under Unreleased or in changelog.d." in repo.github.issues[done.issue].body
 
 
 def test_fragment_entries_read_like_unreleased() -> None:
@@ -456,3 +457,80 @@ def test_s013_10_a_hotfix_ships_the_entry_its_merge_added_to_another_fragment(re
     left = fragments.at_revision(repo.git, repo.policy, repo.git.sha("origin/main"))
     assert [f.path for f in left] == [f"{FOLDER}/1-a.md"]
     assert [e.text for e in on_main.pending(fragments.entries(left))] == ["- Feature A, not ready (#1)"]
+
+
+def rc_before_fragments(repo: Repo) -> Decision:
+    """Release 1.1.0rc1 with no fragments configured, then turn fragments on; the rc's plan"""
+    repo.merge(1, "Added", "Feature A")
+    rc = plan(repo, at_day(1))
+    assert (rc.lane, str(rc.version)) == (Lane.RC, "1.1.0rc1")
+    release(repo, rc)
+    use_fragments(repo)
+    return rc
+
+
+def test_s013_17_the_promotion_of_an_rc_cut_before_the_folder_plans(repo: Repo) -> None:
+    rc = rc_before_fragments(repo)
+    assert repo.git.show(rc.base, FOLDER) is None
+    decision = plan(repo, at_day(4), event=Event.MANUAL, lane=Lane.STABLE)
+    assert (decision.action, str(decision.version), decision.base) == ("release", "1.1.0", rc.base)
+
+
+def test_s013_17_notes_run_against_a_tag_older_than_the_folder(repo: Repo, capsys: pytest.CaptureFixture[str]) -> None:
+    rc_before_fragments(repo)
+    assert main(["--repo", str(repo.root), "notes", "--version", "1.1.0rc1"], repo.github) == 0
+    assert capsys.readouterr().out == "Changes since v1.0.0:\n\n### Added\n\n- Feature A (#1)\n"
+
+
+def test_s013_17_a_revision_whose_config_sets_the_key_still_needs_the_folder(repo: Repo) -> None:
+    use_fragments(repo, readme=False)
+    asked = repo.git.sha()
+    repo.git.run("tag", "-a", "v1.1.0rc1", "-m", "rc", asked)
+    add_fragment(repo, "1-a.md", "### Added\n\n- Feature A (#1)\n")  # HEAD has the folder now
+    done = subprocess.run(
+        [sys.executable, "-m", "shipmill", "--repo", str(repo.root), "notes", "--version", "1.1.0rc1"],
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 2, (done.stdout, done.stderr)
+    assert f"[changelog] fragments names {FOLDER}, which is not a folder at v1.1.0rc1" in done.stderr
+    proposal = Proposal(Lane.RC, Version.parse("1.1.0rc1"), asked, "release autonomy is propose")
+    with pytest.raises(ReleaseError, match=f"names {FOLDER}, which is not a folder at"):
+        propose(repo.git, repo.policy, repo.github, (proposal,))
+
+
+def test_s013_17_the_current_revision_still_needs_the_folder(repo: Repo) -> None:
+    """HEAD is the revision shipmill runs on: a missing folder fails there even when only the
+    checkout's config sets the key"""
+    repo.write(
+        repo.policy_file,
+        repo.read(repo.policy_file).replace("[changelog]\n", f'[changelog]\nfragments = "{FOLDER}"\n', 1),
+    )
+    with pytest.raises(ReleaseError, match=f"names {FOLDER}, which is not a folder at"):
+        fragments.at_revision(repo.git, repo.policy, "HEAD")
+    with pytest.raises(ReleaseError, match=f"names {FOLDER}, which is not a folder at"):
+        fragments.at_revision(repo.git, repo.policy, "v1.0.0")  # v1.0.0 is HEAD here
+
+
+@pytest.mark.parametrize(
+    ("config", "error"),
+    [
+        ("name = [\n", r"^\.github/shipmill\.toml at [0-9a-f]{12}: "),
+        ('surprise = "key"\n', r"^\.github/shipmill\.toml at [0-9a-f]{12}: unknown keys \['surprise'\]"),
+    ],
+)
+def test_s013_17_a_revision_whose_config_fails_to_read_fails(repo: Repo, config: str, error: str) -> None:
+    good = repo.read(repo.policy_file)
+    repo.write(repo.policy_file, config if config.startswith("name = [") else config + good)
+    broken = commit_on_main(repo, "Break the config")
+    use_fragments(repo, policy=good)
+    with pytest.raises(ReleaseError, match=error):
+        fragments.at_revision(repo.git, repo.policy, broken)
+
+
+def test_s013_17_a_folder_older_than_the_key_is_still_read(repo: Repo) -> None:
+    repo.git.run("checkout", "-q", "main")
+    repo.write(f"{FOLDER}/1-a.md", "### Added\n\n- Feature A (#1)\n")
+    early = commit_on_main(repo, "Add the folder before the key")
+    use_fragments(repo)
+    assert [f.path for f in fragments.at_revision(repo.git, repo.policy, early)] == [f"{FOLDER}/1-a.md"]

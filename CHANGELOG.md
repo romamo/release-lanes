@@ -13,6 +13,15 @@ bot.
   folder and whose own config doesn't set the key has no fragments; spec 013 gets
   S-013-17 for it (#291)
 
+### Fixed
+
+- A repo that turns on `[changelog] fragments` mid-cycle can plan the stable promotion of
+  an rc cut before the folder existed, and run `shipmill notes` and proposals against an
+  older tag or base: a revision other than HEAD whose tree has no fragments folder, and
+  whose own `.github/shipmill.toml` doesn't set the key, reads as no fragments; HEAD and a
+  revision whose config sets the key still exit 2 naming the folder, and a config there
+  that fails to read fails (D-27) (#291)
+
 ## [0.39.0] - 2026-10-08
 
 ### Changed
