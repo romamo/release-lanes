@@ -18,6 +18,20 @@ bot.
 - Decision D-25: a stable promotion folds its version's rc sections in the CHANGELOG into
   the stable section, and never skips as nothing pending while they hold entries (#243)
 
+### Fixed
+
+- A repo that moved to shipmill with `[X.Y.ZrcN]` sections in its CHANGELOG, written by
+  an earlier release bot, could never promote X.Y.Z: the stable lane skipped with "nothing
+  pending under Unreleased". A stable release now counts the rc sections of its version
+  (newer than the last stable section) as pending together with Unreleased, writes the
+  X.Y.Z section with all their entries merged under their headings (Unreleased first, then
+  the rc sections newest first, each entry once), and removes the rc sections and their
+  compare links; the GitHub release notes and a release proposal list the same entries.
+  When a promotion still skips, the reason names the rc sections it found or says there
+  were none. An rc section holding text that is not an entry (prose, a `####` heading, a
+  numbered list) stops the release with an error naming it rather than lose that text. A
+  CHANGELOG without rc sections releases as before (#243)
+
 ## [0.33.2] - 2026-10-07
 
 ### Fixed

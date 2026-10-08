@@ -204,8 +204,16 @@ class Planner:
         # an rc tagged on main itself (a release commit) is its own base
         on_main = self.git.is_ancestor(rc.commit, "HEAD")
         base = rc.commit if on_main else self.git.first_parent(rc.commit)
-        if not self.changelog_at(base).pending():
-            return f"{rc.name}'s base has nothing pending under Unreleased"
+        # the rc sections of version an earlier release bot wrote are pending too (D-25)
+        changelog = self.changelog_at(base)
+        if not changelog.promoted(version):
+            sections = changelog.rc_sections(version)
+            found = (
+                f"its rc sections {', '.join(f'[{v}]' for v in sections)} hold no entries"
+                if sections
+                else f"no [{version}rcN] section"
+            )
+            return f"{rc.name}'s base has nothing pending under Unreleased, and {found}"
         return _Candidate(version, base, f"promotes {rc.name}, soaked {(self.now - rc.date).days} day(s)")
 
     def _hotfix(self, hotfix: Hotfix) -> _Candidate:

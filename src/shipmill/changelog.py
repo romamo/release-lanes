@@ -86,6 +86,39 @@ class Changelog:
     def versions(self) -> list[Version]:
         return [s.version for s in self._segments if s.version is not None]
 
+    def rc_sections(self, version: Version) -> list[Version]:
+        """The [X.Y.ZrcN] sections of stable version X.Y.Z newer than the last stable section,
+        newest first: a release bot before shipmill wrote them, and a stable release of
+        version folds them into its own section (D-25)"""
+        if not version.is_stable:
+            raise ReleaseError(f"only a stable version has rc sections to fold, not {version}")
+        floor = max((v for v in self.versions() if v.is_stable), default=None)
+        return sorted(
+            (
+                v
+                for v in self.versions()
+                if v.pre == "rc" and v.dev is None and v.release == version and (floor is None or v > floor)
+            ),
+            reverse=True,
+        )
+
+    def promoted(self, version: Version) -> list[Entry]:
+        """What a stable release of version holds: the pending Unreleased entries, then the
+        entries of its rc sections, newest section first, each entry once (D-25)"""
+        return list(dict.fromkeys([*self.pending(), *self._folded(version)]))
+
+    def _folded(self, version: Version) -> list[Entry]:
+        """The entries of version's rc sections, newest section first. Folding removes the
+        sections, so text that is not an entry (prose, a '#### ' heading, a numbered list)
+        fails here rather than vanish"""
+        return [
+            e
+            for rc in self.rc_sections(version)
+            for e in _entries(
+                self.section(rc).splitlines(), self.style, strict=True, where=f"{rc}, folded into {version}"
+            )
+        ]
+
     def section(self, version: Version) -> str:
         found = [s for s in self._segments if s.version == version]
         if len(found) != 1:
@@ -111,27 +144,42 @@ class Changelog:
     def release(self, version: Version, date: dt.date, entries: Sequence[Entry], *, from_unreleased: bool) -> str:
         """The CHANGELOG text with entries moved out of Unreleased into a section for version.
         With from_unreleased, every entry must be under Unreleased; otherwise (a hotfix's
-        entries on its release branch) the ones that are get removed."""
+        entries on its release branch) the ones that are get removed. The rc sections of
+        version are folded in: entries must hold every one of their entries, which may come
+        from them as well as from Unreleased, and the sections are removed (D-25)."""
         if not version.is_stable:
             raise ReleaseError(f"only a stable release gets a CHANGELOG section, not {version}")
         if not entries:
             raise ReleaseError(f"no entries to release as {version}")
         if version in self.versions():
             raise ReleaseError(f"the CHANGELOG already has a section for {version}")
+        rcs = self.rc_sections(version)
+        folded = set(rcs)
+        held = self._folded(version)
         current = self.unreleased()
-        if from_unreleased and (missing := [e for e in entries if e not in current]):
+        moved = set(entries)
+        if from_unreleased and (missing := [e for e in entries if e not in current and e not in held]):
+            where = f"Unreleased or an rc section of {version}" if folded else "Unreleased"
             raise ReleaseError(
                 f"{len(missing)} released entr{'y is' if len(missing) == 1 else 'ies are'} no longer under "
-                f"Unreleased as released (edited after the release was cut?): {missing[0].text.splitlines()[0]!r}"
+                f"{where} as released (edited after the release was cut?): {missing[0].text.splitlines()[0]!r}"
             )
-        moved = set(entries)
+        if dropped := [e for e in held if e not in moved]:
+            raise ReleaseError(
+                f"{version} folds its rc sections, but {len(dropped)} of their entries are not in the release:"
+                f" {dropped[0].text.splitlines()[0]!r}"
+            )
         remaining = [e for e in current if e not in moved]
         new_heading = (
             f"## [{version}] - {date.isoformat()}"
             if self.style is Style.KEEP_A_CHANGELOG
             else f"## {version} — {date.isoformat()}"
         )
-        older = [s.version for s in self._segments if s.version is not None and s.version < version]
+        older = [
+            s.version
+            for s in self._segments
+            if s.version is not None and s.version < version and s.version not in folded
+        ]
         insert_before = max(older) if older else None
         out: list[str] = []
         placed = False
@@ -139,6 +187,8 @@ class Changelog:
             if segment.version is not None and segment.version == insert_before and not placed:
                 out.append(_block(new_heading, self.render(entries)))
                 placed = True
+            if segment.version in folded:
+                continue
             if segment.unreleased:
                 out.append(_block(segment.heading, self.render(remaining)))
             elif segment.heading:
@@ -149,11 +199,13 @@ class Changelog:
             out.append(_block(new_heading, self.render(entries)))
         text = "".join(out).rstrip("\n") + "\n"
         if self.style is Style.KEEP_A_CHANGELOG:
-            text += "\n" + "\n".join(self._linked(version, insert_before)) + "\n"
+            text += "\n" + "\n".join(self._linked(version, insert_before, folded)) + "\n"
         return text
 
-    def _linked(self, version: Version, previous: Version | None) -> list[str]:
-        links = list(self._links)
+    def _linked(self, version: Version, previous: Version | None, folded: set[Version]) -> list[str]:
+        """The links with version's added and the folded rc sections' removed"""
+        gone = tuple(f"[{rc}]: " for rc in folded)
+        links = [line for line in self._links if not line.startswith(gone)]
         index = next((i for i, line in enumerate(links) if line.startswith("[Unreleased]: ")), None)
         m = None if index is None else _COMPARE.match(links[index].split(": ", 1)[1])
         if index is None or m is None or not m["range"].endswith("...HEAD"):

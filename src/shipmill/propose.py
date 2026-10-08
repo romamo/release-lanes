@@ -81,7 +81,10 @@ def propose(git: Git, policy: Policy, github: GitHub, proposals: tuple[Proposal,
         text = git.show(proposal.base, policy.changelog)
         if text is None:
             raise ReleaseError(f"no {policy.changelog} at {proposal.base[:12]}")
-        wanted = body(policy, proposal, Changelog(text, policy.style).pending())
+        changelog = Changelog(text, policy.style)
+        # a stable release holds its rc sections too (D-25)
+        entries = changelog.promoted(proposal.version) if proposal.version.is_stable else changelog.pending()
+        wanted = body(policy, proposal, entries)
         fix = f"change `issues: read` to `issues: write` on the prepare job in {CALLER}"
         number, outcome = upsert(github, marker(proposal.lane), title(proposal), wanted, fix)
         done.append(Proposed(proposal, number, outcome))

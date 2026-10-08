@@ -127,7 +127,7 @@ def stamp(
     if lane in (Lane.STABLE, Lane.HOTFIX):
         changelog = Changelog(path.read_text(encoding="utf-8"), policy.style)
         if lane is Lane.STABLE:
-            entries = changelog.pending()
+            entries = changelog.promoted(version)  # Unreleased plus its rc sections (D-25)
         path.write_text(
             changelog.release(version, date, entries, from_unreleased=lane is Lane.STABLE), encoding="utf-8"
         )
