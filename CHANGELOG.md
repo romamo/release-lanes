@@ -7,6 +7,14 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- Spec 013: changelog fragments, opt in with `[changelog] fragments = "changelog.d"`: each
+  pull request adds its own `<number>-<slug>.<heading>.md` file instead of a line under
+  Unreleased, so PRs stop conflicting on `CHANGELOG.md`; pending reads Unreleased plus the
+  fragments, and a stable or hotfix release folds them into its section and deletes them
+  (#256)
+
 ## [0.35.0] - 2026-10-08
 
 ### Added
