@@ -30,6 +30,14 @@ Write the decision block for the person who owes the answer, not for the impleme
 
 In a gate session (its prompt carries the gate's `Gate session:` or `Headless:` paragraph), the block never sits in the verdict: the verdict keeps "Waits on your decision below" and the question follows as its own comment, the [needs-decision protocol](needs-decision.md)'s, with the marker as its first line and the `needs-decision` label on the issue (D-21). Without the marker and the label, the scripts read the issue as work and the gate keeps starting sessions for it.
 
+An answer the user gives in the session (to this block, to a PR's "decisions for you", or to a needs-decision question) goes on the item before you act on it. Posted as the App (`shipmill gh` with `[agents] app_id` set), its first line is `Decision by @<login>, relayed by <agent>`, so the thread tells the person's decision from agent text; `<login>` is the person who answered and `<agent>` names the tool (`Claude Code`):
+
+```markdown
+Decision by @{login}, relayed by {agent}
+
+{The option chosen, or the user's own words}
+```
+
 Once the PR is up:
 
 ```markdown

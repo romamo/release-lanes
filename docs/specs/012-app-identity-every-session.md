@@ -1,6 +1,6 @@
 # S-012: Every agent session writes to GitHub as the App
 
-status: approved
+status: built
 
 ## Problem
 
@@ -120,3 +120,13 @@ when its author is the App. With `app_id` unset neither reads anything for this.
 - shipmill/shipmill#264: S-012-7, S-012-8
 
 ## Verification
+
+- S-012-1: read `_cache` and `cache_outside` and ran the `test_s012_1` tests in `tests/test_app_gh.py`, a token outside a checkout cached in `$XDG_CACHE_HOME/shipmill/<owner>/<repo>/app-token.json` (`~/.cache` with it unset or empty) with mode `0600`, spec 004's path inside a checkout
+- S-012-2: read `_gh` in `src/shipmill/cli.py` and ran the `test_s012_2` tests, a fake and a real `gh` on `PATH` get exactly the arguments and a token limited to the `-R`/`--repo` repo else `origin`'s, `shipmill gh` exits with `gh`'s code
+- S-012-3: ran the `test_s012_3` tests, a missing key, a key readable by group or others, an App not installed, and a missing permission each raise naming the cause and the fix, `python -m shipmill gh` exits 2, `gh` never runs
+- S-012-4: ran `test_s012_4_without_app_id_gh_runs_as_the_host_with_no_gh_token_and_no_mint` with no config, `[agents]` without `app_id`, `[release]` only, and no checkout, `gh` gets the arguments, no `GH_TOKEN` though the caller's was empty, no token minted, nothing printed
+- S-012-5: read the six `SKILL.md` files, each says it once under "Write as the App when the repo has one", with the uvx form for headless gate sessions; the `test_s012_5` tests in `tests/test_app_gh_docs.py` pass and check these six are every skill
+- S-012-6: read `needs-decision.md` and `comments.md` under `skills/github-issue-triage/references/`, the only copies, each gives the answer comment's first line as `Decision by @<login>, relayed by <agent>`; the `test_s012_6` tests pass
+- S-012-7: read `src/shipmill/agent_as_person.py` and ran the `test_s012_7` tests, `status` prints the WARN row and `doctor` the WARN check with the count, at most three URLs, and the `shipmill gh` fix; a `Bot` author or an item older than 7 days isn't counted
+- S-012-8: ran the `test_s012_8` tests, with no `app_id` neither `status` nor `doctor` makes the search or prints the row
+- S-012-9: read `docs/install.md` (Give the sessions their own identity) and shipmill-setup's The gate, step 3, both document `shipmill gh`, the no-checkout cache folder, and that the App covers sessions a person starts; `test_s012_9_the_setup_docs_document_shipmill_gh` passes

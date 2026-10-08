@@ -34,6 +34,7 @@ There is no `act`: shipmill refuses it, since an opportunity is a proposal by na
 4. **Never accept, decline, or close for the maintainer.** Intake writes opportunities and comments; the `planned` label and the close are the maintainer's. Don't close requests either, a pure duplicate included: it gets the `duplicate` label and a link
 5. **Bugs and contract changes aren't feedback.** The script already leaves out issues triage gave an implement, feature, duplicate, or won't fix verdict. If an untriaged issue is a bug, leave it to github-issue-triage rather than grouping it. A request triage handed over with its **opportunity** verdict is feedback: group it like any other
 6. **GitHub data only** (D-6's spirit): issues, discussions, and reactions. No external tracker, survey, or analytics source
+7. **Write as the App when the repo has one.** When `.github/shipmill.toml` sets `[agents] app_id`, every `gh` call that writes (an issue, a comment, a label, a pull request, a review, a merge, a release) runs as `shipmill gh <the same arguments>` from the repo's checkout, in every session, gated or started by hand, so its author is the App's bot, not the maintainer (spec 012, D-14). When `shipmill` isn't on PATH, and in a headless gate session, whose allowlist has `Bash(uvx *)` and no bare `shipmill`, run `uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill gh ...`. Reads may keep plain `gh`. A `shipmill gh` that exits 2 is a stop: report its message and never retry the write with plain `gh`
 
 ## The script
 

@@ -15,6 +15,13 @@ bot.
   false)`; with none waiting it reads as before. A row's `fix` from `watch_state.py --json`
   enters neither the gate's fingerprint nor its session prompt, so a new fix starts no
   session (#260)
+- The six skills that write to GitHub run every `gh` call that writes as `shipmill gh`
+  when the repo's config sets `[agents] app_id`, in every session, gated or started by
+  hand, and stop on its exit 2 instead of retrying with plain `gh`; a decision a person
+  gives in the session is posted with the first line `Decision by @<login>, relayed by
+  <agent>`; `docs/install.md` and shipmill-setup document `shipmill gh`, the no-checkout
+  token cache, and that the App's identity covers the sessions a person starts. Spec 012
+  is built (#263)
 
 ## [0.36.0] - 2026-10-08
 

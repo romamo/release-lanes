@@ -442,6 +442,21 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
    works on other repos (fleet mode) fails there, since the token is limited to this one.
    A gate without `app_id` (one set up before D-19) still runs: its sessions launch as
    before, as the host's `gh` login, and the two reports above flag it until it is set
+
+   The App's identity covers the sessions a person starts too, not only the gate's (spec
+   012). `$CR gh <gh's arguments>` runs `gh` as the App when the checkout's config sets
+   `app_id`: it mints or reuses the same token, limited to the `-R` repo or else `origin`'s,
+   and exits with `gh`'s code; any failure to get the token exits 2 naming the fix and never
+   runs `gh`. With no `app_id` it runs `gh` as the host's login. `$CR app-token` works with
+   no checkout too, caching under `$XDG_CACHE_HOME/shipmill/<owner>/<repo>/app-token.json`
+   (`~/.cache` when `XDG_CACHE_HOME` is unset), mode `0600`. **Write as the App when the
+   repo has one:** with `[agents] app_id` set, every `gh` call that writes (an issue, a
+   comment, a label, a pull request, a review, a merge, a release) runs as `shipmill gh
+   <the same arguments>` (`$CR gh`) from the repo's checkout, in every session, gated or
+   started by hand, this skill's own included once `app_id` merges. Reads may keep plain
+   `gh`. A `shipmill gh` that exits 2 is a stop: report its message and never retry the
+   write with plain `gh`. `shipmill status` and `doctor` flag agent text a person's login
+   posted in the last 7 days as `AGENT_AS_PERSON`
 4. **Interactive or headless (asked every time, D-20).** On a machine nobody watches, a
    session that asks a question holds the repo until someone attaches. Ask whether anyone
    watches this one, with step 3's App question, and write the answer in `[agents]`:

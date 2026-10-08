@@ -14,6 +14,8 @@ A workflow for turning a GitHub issue into a verified verdict and, if warranted,
 
 **Gate sessions and Headless:** a session whose prompt carries the gate's `Gate session:` or `Headless:` paragraph, or where AskUserQuestion is unavailable, may have nobody attached. A product decision, a departure from a spec or a `D-n`, or a tool call that was denied becomes github-issue-triage's [needs-decision protocol](../github-issue-triage/references/needs-decision.md) first: a marked comment on the issue or PR mentioning the user and the `needs-decision` label. Interactive (`Gate session:`), also ask with AskUserQuestion; an answer there is posted on the item, the label comes off, and the work goes on. Headless, leave the item alone. A session the user started by hand asks with AskUserQuestion only. Taking up an answered item, remove the label before acting on the reply.
 
+**Write as the App when the repo has one.** When `.github/shipmill.toml` sets `[agents] app_id`, every `gh` call that writes (an issue, a comment, a label, a pull request, a review, a merge, a release) runs as `shipmill gh <the same arguments>` from the repo's checkout, in every session, gated or started by hand, so its author is the App's bot, not the maintainer (spec 012, D-14). When `shipmill` isn't on PATH, and in a headless gate session, whose allowlist has `Bash(uvx *)` and no bare `shipmill`, run `uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill gh ...`. Reads may keep plain `gh`, such as Phase 1's. A `shipmill gh` that exits 2 is a stop: report its message and never retry the write with plain `gh`.
+
 ## Phase 1: Read the issue
 
 ```bash

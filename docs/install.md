@@ -385,6 +385,27 @@ or reuses a token through `shipmill app-token`, cached in `shipmill/app-token.js
 never falls back to your login. The gate's own reads still use your `gh` login. Remove
 `app_id` and sessions launch as before, as your `gh` login
 
+The App's identity covers the sessions you start yourself too, not only the gate's. The
+shipmill skills run every `gh` call that writes (an issue, a comment, a label, a pull
+request, a review, a merge, a release) as `shipmill gh` when `app_id` is set, in every
+session, and stop rather than retry with plain `gh` when it fails. You can use it by hand
+the same way:
+
+```bash
+shipmill gh issue comment 250 --body-file tmp/comment.md
+shipmill gh pr create -R owner/repo --title "..." --body-file tmp/pr.md
+```
+
+Everything after `gh` goes to `gh` unchanged. With `app_id` set in the checkout's
+`.github/shipmill.toml`, it mints or reuses a token limited to the `-R` repo, else to
+`origin`'s, runs `gh` with it, and exits with `gh`'s code; a missing key, a key others can
+read, an App not installed on the repo, or a missing permission exits 2 naming the fix,
+and `gh` never runs. With no `app_id` it runs `gh` as your login. `shipmill app-token`
+works outside a checkout too: there it caches the token in
+`$XDG_CACHE_HOME/shipmill/<owner>/<repo>/app-token.json` (`~/.cache` when
+`XDG_CACHE_HOME` is unset), mode `0600`. `shipmill status` and `doctor` warn
+`AGENT_AS_PERSON` when agent text went out under a person's login in the last 7 days
+
 ### Run it headless
 
 Optional, for a machine nobody watches. By default a session that asks you something
