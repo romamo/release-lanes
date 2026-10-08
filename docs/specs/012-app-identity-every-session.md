@@ -115,4 +115,8 @@ when its author is the App. With `app_id` unset neither reads anything for this.
 
 ## Issues
 
+- shipmill/shipmill#262: S-012-1, S-012-2, S-012-3, S-012-4
+- shipmill/shipmill#263: S-012-5, S-012-6, S-012-9
+- shipmill/shipmill#264: S-012-7, S-012-8
+
 ## Verification
