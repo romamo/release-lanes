@@ -7,6 +7,12 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- Spec 011: every row and summary line of `shipmill status` that waits on you or is stuck
+  ends with its fix, an exact command scoped to where it runs or the decision to make;
+  `--json` carries it as a `fix` field, and a test fails on a row without one (#242)
+
 ## [0.34.0] - 2026-10-08
 
 ### Changed
