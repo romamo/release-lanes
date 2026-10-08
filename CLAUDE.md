@@ -34,8 +34,10 @@ uvx --from actionlint-py actionlint .github/workflows/*.yml
 
 ## Rules
 
-- Every pull request adds its own entry under `## [Unreleased]` in `CHANGELOG.md` (Keep a
-  Changelog); never write a version section by hand, the release workflow stamps it
+- Every pull request adds its own changelog entry as a new fragment,
+  `changelog.d/<issue>-<slug>.md`, holding a `### <heading>` and its `- ` entry (Keep a
+  Changelog), and leaves `CHANGELOG.md` alone (spec 013); never write a version section by
+  hand, the release workflow writes the fragments into it
 - Check a change against every entry in `docs/decisions.md` whose "Applies to" it touches.
   Change a rule by adding a new `D-N` that supersedes it, never by editing an old one
 - A feature starts as a spec `docs/specs/NNN-<slug>.md` from `TEMPLATE.md`, merged before

@@ -1,8 +1,19 @@
 """The github-pr-triage skill's CHANGELOG guard, on real rebases in a scratch repo"""
 
+import importlib.util
+import re
+import shutil
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
+from types import ModuleType
+
+import pytest
+
+from shipmill.errors import ReleaseError
+from shipmill.fragments import InCheckout, read
+from shipmill.policy import Style
 
 SCRIPT = Path(__file__).resolve().parents[1] / "skills" / "github-pr-triage" / "scripts" / "changelog_guard.py"
 
@@ -271,3 +282,177 @@ def test_move_refuses_an_entry_with_no_heading_anywhere_above(tmp_path: Path) ->
     assert move.returncode == 2
     assert "no ### heading above them" in move.stderr
     assert (root / "CHANGELOG.md").read_text() == misplaced
+
+
+# Changelog fragments (spec 013): with [changelog] fragments set, a PR's entry goes in a new
+# fragment, so check fails a line added under Unreleased and a fragment that fails to read
+
+FOLDER = "changelog.d"
+FRAGMENTS_README = "# Changelog fragments\n\nOne file per pull request.\n"
+# arrays, an array of tables, and comments: the plain form Python 3.10 reads skips all of them
+CONFIG = """\
+name = "demo"  # the repo
+mode = "release"
+
+[changelog]
+style = "keep-a-changelog"  # as the CHANGELOG
+fragments = 'changelog.d'
+
+[bump]
+minor = ["Added", "Changed"]
+
+[[version_lines]]
+file = "README.md"
+pattern = '[changelog]'
+"""
+GOOD = "### Added\n\n- Feature (#12)\n  more of it\n\n### Fixed\n\n- A fix (#12)\n"
+# the fragments shipmill's reader refuses (tests/test_fragments.py, S-013-3), with its words
+BAD = [
+    ("1-empty.md", "\n\n", "changelog.d/1-empty.md: an empty fragment"),
+    ("2-prose.md", "### Added\n\n- Feature A (#2)\n\nSome prose\n", "changelog.d/2-prose.md:5: text outside"),
+    ("3-bare.md", "- Feature A (#3)\n", "changelog.d/3-bare.md:1: an entry has no '### ' category heading"),
+    ("4-version.md", "## [Unreleased]\n\n### Added\n\n- A (#4)\n", "changelog.d/4-version.md:1: a '## ' heading"),
+    ("sub/5-nested.md", "### Added\n\n- A (#5)\n", "changelog.d/sub/5-nested.md: a fragment sits right in"),
+    ("6-text.txt", "### Added\n\n- A (#6)\n", "changelog.d/6-text.txt: not a fragment"),
+    ("7-heading-only.md", "### Added\n", "changelog.d/7-heading-only.md: the fragment holds no entry"),
+    ("8-indented.md", "### Added\n\n  stray\n", "changelog.d/8-indented.md:3: text outside a '- ' entry"),
+]
+
+
+def with_fragments(tmp_path: Path, config: str = CONFIG) -> Path:
+    """A repo whose config sets [changelog] fragments, on a PR branch named after its issue"""
+    root = scratch(tmp_path, BEFORE)
+    (root / ".github").mkdir()
+    (root / ".github" / "shipmill.toml").write_text(config)
+    (root / FOLDER).mkdir()
+    (root / FOLDER / "README.md").write_text(FRAGMENTS_README)
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "Use changelog fragments")
+    git(root, "switch", "-q", "-c", "fix/12-a-fix")
+    return root
+
+
+def add(root: Path, name: str, text: str) -> None:
+    path = root / FOLDER / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", f"Add {name}")
+
+
+def guard_310(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    """The guard on Python 3.10, as a skill may run it, with no tomllib"""
+    uv = shutil.which("uv")
+    assert uv is not None, "uv runs the skill scripts"
+    command = [uv, "run", "--no-project", "--python", "3.10", "python", str(SCRIPT), *args]
+    return subprocess.run(command, cwd=cwd, capture_output=True, text=True, check=False)
+
+
+def guard_module() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("changelog_guard", SCRIPT)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_s013_14_a_line_added_under_unreleased_fails_naming_the_fragment(tmp_path: Path) -> None:
+    root = with_fragments(tmp_path)
+    commit(root, BEFORE.replace("- A\n", "- A\n- B (#12)\n"), "entry under Unreleased")
+    done = guard(root, "check", "--base", "main")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "added under Unreleased, line 8: - B (#12)" in done.stdout
+    assert "move the entry into a new fragment, changelog.d/12-a-fix.md," in done.stdout
+
+
+def test_s013_14_a_well_formed_fragment_passes(tmp_path: Path) -> None:
+    root = with_fragments(tmp_path)
+    add(root, "12-a-fix.md", GOOD)
+    (root / FOLDER / "13-untracked.md").write_text("### Fixed\n\n- Another (#13)\n")
+    done = guard(root, "check", "--base", "main")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "2 fragment(s) added or changed in changelog.d, each reads" in done.stdout
+
+
+@pytest.mark.parametrize(("name", "text", "error"), BAD)
+def test_s013_14_a_fragment_that_fails_to_read_fails_as_shipmill_reads_it(
+    tmp_path: Path, name: str, text: str, error: str
+) -> None:
+    root = with_fragments(tmp_path)
+    add(root, name, text)
+    done = guard(root, "check", "--base", "main")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert error in done.stdout
+    # shipmill's reader refuses the same file in the same words
+    with pytest.raises(ReleaseError, match=f"^{re.escape(error)}"):
+        read(InCheckout(root), FOLDER, Style.KEEP_A_CHANGELOG)
+
+
+def test_s013_14_dash_style_fragments_read_as_shipmill_reads_them(tmp_path: Path) -> None:
+    root = with_fragments(tmp_path, CONFIG.replace('"keep-a-changelog"', '"dash"'))
+    add(root, "12-good.md", "### A titled entry (#12)\n\nIts body.\n")
+    assert guard(root, "check", "--base", "main").returncode == 0
+    add(root, "13-bad.md", "Prose first\n\n### A titled entry (#13)\n")
+    done = guard(root, "check", "--base", "main")
+    error = "changelog.d/13-bad.md:1: text outside a '### ' entry: 'Prose first'"
+    assert done.returncode == 1 and error in done.stdout
+    with pytest.raises(ReleaseError, match=f"^{re.escape(error)}"):
+        read(InCheckout(root), FOLDER, Style.DASH)
+
+
+def test_s013_14_without_fragments_a_line_under_unreleased_still_passes(tmp_path: Path) -> None:
+    root = with_fragments(tmp_path, CONFIG.replace("fragments = 'changelog.d'\n", ""))
+    commit(root, BEFORE.replace("- A\n", "- A\n- B (#12)\n"), "entry under Unreleased")
+    (root / FOLDER / "1-empty.md").write_text("\n")  # not read: the config sets no fragments
+    done = guard(root, "check", "--base", "main")
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert done.stdout.startswith("ok: 1 added line(s), all under Unreleased")
+
+
+def test_s013_14_a_missing_folder_or_a_bad_setting_is_bad_input(tmp_path: Path) -> None:
+    root = with_fragments(tmp_path)
+    git(root, "rm", "-q", "-r", FOLDER)
+    done = guard(root, "check", "--base", "main")
+    assert done.returncode == 2 and "[changelog] fragments names changelog.d, which is not a folder" in done.stderr
+    (root / ".github" / "shipmill.toml").write_text(CONFIG.replace("'changelog.d'", "'../out'"))
+    done = guard(root, "check", "--base", "main")
+    assert done.returncode == 2 and "fragments is a folder relative to the repo root" in done.stderr
+
+
+def test_s013_14_on_python_3_10(tmp_path: Path) -> None:
+    root = with_fragments(tmp_path)
+    add(root, "12-a-fix.md", GOOD)
+    done = guard_310(root, "check", "--base", "main")
+    assert done.returncode == 0, done.stdout + done.stderr
+    add(root, "3-bare.md", "- Feature A (#3)\n")
+    commit(root, BEFORE.replace("- A\n", "- A\n- B (#12)\n"), "entry under Unreleased")
+    done = guard_310(root, "check", "--base", "main")
+    assert done.returncode == 1, done.stdout + done.stderr
+    assert "added under Unreleased, line 8: - B (#12)" in done.stdout
+    assert "changelog.d/3-bare.md:1: an entry has no '### ' category heading" in done.stdout
+
+
+def test_the_plain_form_reads_the_changelog_table_as_tomllib_does() -> None:
+    """Python 3.10's reader, on this example and on shipmill's own config"""
+    own = (SCRIPT.parents[3] / ".github" / "shipmill.toml").read_text()
+    for text in (CONFIG, own):
+        assert guard_module().plain_changelog(text, "config") == tomllib.loads(text)["changelog"]
+
+
+def test_s013_15_two_branches_that_each_add_a_fragment_merge_with_no_conflict(tmp_path: Path) -> None:
+    root = with_fragments(tmp_path)
+    git(root, "switch", "-q", "-c", "a", "main")
+    add(root, "20-one.md", "### Added\n\n- One (#20)\n")
+    git(root, "switch", "-q", "-c", "b", "main")
+    add(root, "21-two.md", "### Added\n\n- Two (#21)\n")
+    git(root, "merge", "-q", "--no-edit", "a")  # b takes a
+    git(root, "switch", "-q", "a")
+    git(root, "merge", "-q", "--no-edit", "b")  # and a takes b back
+    assert sorted(p.name for p in (root / FOLDER).iterdir()) == ["20-one.md", "21-two.md", "README.md"]
+    # the same two entries written under Unreleased conflict: what fragments avoid
+    git(root, "switch", "-q", "-c", "c", "main")
+    commit(root, BEFORE.replace("- A\n", "- A\n- One (#20)\n"), "one")
+    git(root, "switch", "-q", "-c", "d", "main")
+    commit(root, BEFORE.replace("- A\n", "- A\n- Two (#21)\n"), "two")
+    merged = subprocess.run(["git", "merge", "--no-edit", "c"], cwd=root, capture_output=True, text=True, check=False)
+    assert merged.returncode != 0 and "CONFLICT" in merged.stdout

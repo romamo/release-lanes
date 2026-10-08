@@ -1,5 +1,6 @@
 """Write a starting policy and the calling workflow into a repository, from what it has:
-its CHANGELOG style, its version file, and its default branch"""
+its CHANGELOG style, its version file, and its default branch; and, unless told not to, the
+changelog fragments folder the policy names (spec 013)"""
 
 import tomllib
 from dataclasses import dataclass
@@ -11,6 +12,7 @@ from shipmill.doctor import CALLER, OPERATE_CALLER
 from shipmill.errors import ReleaseError
 from shipmill.gitrepo import Git
 from shipmill.policy import Style, VersionFiles
+from shipmill.upgrades import DASH_EXAMPLE, FRAGMENTS, KEEP_A_CHANGELOG_EXAMPLE, fragments_readme
 
 BOT_REPO = "shipmill/shipmill"
 BOT_REF = "v0"
@@ -55,7 +57,19 @@ def detect(root: Path) -> Detected:
     return Detected(name, branch, style, version_files)
 
 
-def policy_text(d: Detected) -> str:
+def fragments_readme_text(style: Style) -> str:
+    """The fragments folder's README.md, its example in the CHANGELOG's style (spec 013)"""
+    return fragments_readme(KEEP_A_CHANGELOG_EXAMPLE if style is Style.KEEP_A_CHANGELOG else DASH_EXAMPLE)
+
+
+def policy_text(d: Detected, fragments: bool = True) -> str:
+    """The starting policy; fragments: it sets [changelog] fragments (spec 013)"""
+    folder = (
+        "# Each pull request adds its entry as a file in this folder instead of editing the CHANGELOG;\n"
+        f'# a stable release writes them into its section and deletes them\nfragments = "{FRAGMENTS}"\n'
+        if fragments
+        else ""
+    )
     if d.style is Style.KEEP_A_CHANGELOG:
         bump = (
             '[bump]\nfrom = "headings"\nmajor = ["Breaking"]\n'
@@ -86,7 +100,7 @@ version_files = "{d.version_files}"
 [changelog]
 path = "CHANGELOG.md"
 style = "{d.style}"
-
+{folder}
 {bump}
 [gates]
 # An open issue with this label holds the listed lanes
@@ -280,15 +294,19 @@ class Initialized:
     written: tuple[Path, ...]
 
 
-def init(root: Path, ci: str, force: bool) -> Initialized:
-    """Write .github/shipmill.toml and the caller workflow. Either one already there refuses
-    without force; with force, the files are overwritten."""
+def init(root: Path, ci: str, force: bool, fragments: bool = True) -> Initialized:
+    """Write .github/shipmill.toml and the caller workflow, and with fragments the fragments
+    folder's README.md (spec 013). The policy or the caller already there refuses without
+    force; with force, they are overwritten. A README.md already in the folder is kept."""
     d = detect(root)
-    files = ((root / CONFIG_PATH, policy_text(d)), (root / CALLER, caller_text(d, ci)))
+    files = [(root / CONFIG_PATH, policy_text(d, fragments)), (root / CALLER, caller_text(d, ci))]
     present = [path for path, _ in files if path.exists()]
     if present and not force:
         names = ", ".join(str(p.relative_to(root)) for p in present)
         raise ReleaseError(f"{names} {'exists' if len(present) == 1 else 'exist'}; pass --force to overwrite")
+    readme = root / FRAGMENTS / "README.md"
+    if fragments and not readme.exists():
+        files.append((readme, fragments_readme_text(d.style)))
     for path, text in files:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")

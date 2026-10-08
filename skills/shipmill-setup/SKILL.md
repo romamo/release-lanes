@@ -126,6 +126,7 @@ recommendation:
 | Bump rule | `from = "headings"` for keep-a-changelog | `from = "paths"` when headings are topics, such as a spec |
 | Where releases go | `github_release = true`; `dispatch = ["publish.yml"]` | per lane; pre-releases are marked pre-release |
 | Holds | `release-blocker` holding `rc` and `stable` | create the label; add `freeze` ranges for holidays |
+| Changelog fragments | on: `[changelog] fragments = "changelog.d"` | each PR adds its entry as a file `changelog.d/<issue>-<slug>.md` instead of editing `CHANGELOG.md`, so PRs stop conflicting on it; a stable release writes them into its section and deletes them. Off (`init --no-fragments`): each PR edits Unreleased |
 
 A project that only wants "release after merges stop" uses a single
 `[lanes.stable]` with `quiet_minutes = 30` and no `promote_from`.
@@ -230,8 +231,13 @@ library with no environments.
 $CR init --ci <ci-file>.yml
 ```
 
-This writes `.github/shipmill.toml` (dry-run) and `.github/workflows/release.yml`.
-Edit the policy to the user's choices from step 3, then add `version_lines` and
+This writes `.github/shipmill.toml` (dry-run) and `.github/workflows/release.yml`, and,
+for changelog fragments, `fragments = "changelog.d"` in the policy's `[changelog]` table
+and `changelog.d/README.md`, which keeps the folder in git and is never read as a fragment.
+When the user turned fragments off, run `$CR init --ci <ci-file>.yml --no-fragments`, which
+writes neither. Tell the user that once fragments are on, every PR adds its entry as a new
+fragment and leaves `CHANGELOG.md` alone, and update the repo's own contributor rules
+(CLAUDE.md, AGENTS.md, CONTRIBUTING.md) that say to edit Unreleased. Edit the policy to the user's choices from step 3, then add `version_lines` and
 `after_stamp` (for uv projects `["uv lock --check"]`; for a project with a docs check that
 reads the version, that command too).
 
@@ -557,6 +563,11 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
   of their version, which folds their entries into its own section and removes them (D-25);
   the prose before an rc section's first `### ` heading is dropped, and any other text
   outside an entry fails the fold (D-26)
+- A repo already on shipmill moves onto changelog fragments by setting `fragments =
+  "changelog.d"` in `[changelog]` and adding the folder with a `README.md`, nothing else:
+  `$CR upgrade --apply changelog-fragments` does both. Entries already under Unreleased stay
+  there and release alongside the fragments, and a tag or an rc cut before the folder
+  existed reads as having no fragments (D-27)
 - A project in an rc series (`1.0.0rc9`) continues it: the next rc is `1.0.0rc10`, and the
   stable lane promotes to `1.0.0`. If the user wants 1.0.0 to be a deliberate step, leave
   stable without triggers so it only runs by hand

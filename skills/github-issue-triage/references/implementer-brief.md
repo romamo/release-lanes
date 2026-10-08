@@ -8,7 +8,7 @@ Repo {owner/repo} (remote origin), {one line: what the project is and its releas
 Follow the github-issue-resolve skill's phases 2 to 6 (verify the claim on the current default branch, implement with a regression test, verify, commit, push, PR), with these overrides:
 - Do NOT comment on, label, or close issues, and do NOT merge. Report back instead
 - Before pushing, all of these must pass: {check_commands, with any env var the checks need}. {snapshot or regeneration notes, e.g. public-API snapshot, generated docs}
-- {If the repo keeps a CHANGELOG: an entry under its unreleased heading, in the right subsection, ending with the issue ref `(#N)`. Omit this line otherwise}
+- {If the repo keeps a CHANGELOG and `.github/shipmill.toml` sets `[changelog] fragments`: CHANGELOG: add the entry as a new fragment, `{fragments folder}/{N}-{slug}.md`, holding what would go under Unreleased in the CHANGELOG's style (a `### Fixed` heading and its `- ` entry), ending with the issue ref `(#N)`, and leave `CHANGELOG.md` alone; `changelog_guard.py check` fails a line added under Unreleased. If it keeps one without fragments: an entry under its unreleased heading, in the right subsection, ending with the issue ref `(#N)`. Omit this line otherwise}
 - Commits: named paths only (`git commit -m "..." -- <paths>`), with a message ending {attribution line}
 - PR body: summary, test notes, `Fixes #N`, ending {PR attribution line}
 - Keep gh calls to a handful and never poll: the API rate limit is shared

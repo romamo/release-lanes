@@ -4,13 +4,15 @@ from pathlib import Path
 import pytest
 
 from shipmill import UVX, cli_command
+from shipmill.changelog import fragment_entries
 from shipmill.cli import main
 from shipmill.config import config_path
 from shipmill.doctor import doctor
 from shipmill.errors import ReleaseError
 from shipmill.init import init
-from shipmill.policy import Lane, Policy
+from shipmill.policy import Lane, Policy, Style
 from shipmill.roadmap import RoadmapConfig
+from shipmill.upgrades import FRAGMENTS_README
 
 from .conftest import Repo
 
@@ -45,6 +47,7 @@ def test_init_writes_a_policy_doctor_accepts(repo: Repo) -> None:
     assert [p.relative_to(repo.root).as_posix() for p in written] == [
         ".github/shipmill.toml",
         ".github/workflows/release.yml",
+        "changelog.d/README.md",
     ]
     policy = Policy.load(written[0])
     assert (policy.name, policy.branch, policy.style.value, policy.version_files.value) == (
@@ -63,6 +66,53 @@ def test_init_writes_a_policy_doctor_accepts(repo: Repo) -> None:
     assert checks["policy"] == checks["workflow"] == checks["ci"] == checks["changelog"] == "PASS"
     with pytest.raises(ReleaseError, match="shipmill.toml, .github/workflows/release.yml exist; pass --force"):
         init(repo.root, "ci.yml", force=False)
+
+
+@pytest.mark.parametrize("no_fragments", [False, True])
+def test_s013_13_init_writes_fragments_unless_told_not_to_and_doctor_passes(
+    repo: Repo, capsys: pytest.CaptureFixture[str], no_fragments: bool
+) -> None:
+    (repo.root / ".github" / "shipmill.toml").unlink()
+    repo.write(".github/workflows/ci.yml", CI)
+    argv = ["--repo", str(repo.root), "init", *(["--no-fragments"] if no_fragments else [])]
+    assert main(argv) == 0
+    readme = repo.root / "changelog.d" / "README.md"
+    text = repo.read(".github/shipmill.toml")
+    policy = Policy.load(config_path(repo.root))
+    if no_fragments:
+        assert "fragments" not in text and policy.fragments is None
+        assert not readme.parent.exists()
+        assert "wrote changelog.d/README.md" not in capsys.readouterr().out
+    else:
+        assert '\nfragments = "changelog.d"\n' in text and policy.fragments == "changelog.d"
+        assert "wrote changelog.d/README.md" in capsys.readouterr().out
+        assert readme.read_text(encoding="utf-8") == FRAGMENTS_README
+        # the README's example reads as a fragment in the CHANGELOG's style; the README itself never does
+        example = FRAGMENTS_README.split("```markdown\n", 1)[1].split("```", 1)[0]
+        assert fragment_entries(example, Style.KEEP_A_CHANGELOG, "example")
+    repo.git.run("add", "-A")
+    repo.git.run("commit", "-q", "-m", "shipmill init")
+    checks = {c.name: c.status for c in doctor(repo.root)}
+    assert "FAIL" not in checks.values(), checks
+    assert checks["policy"] == checks["workflow"] == checks["ci"] == checks["changelog"] == "PASS"
+    assert main(["--repo", str(repo.root), "plan", "--event", "workflow_dispatch"]) == 0
+
+
+def test_s013_13_init_keeps_a_fragments_readme_already_there(repo: Repo) -> None:
+    repo.write("changelog.d/README.md", "# Ours\n")
+    written = init(repo.root, "ci.yml", force=True).written
+    assert "changelog.d/README.md" not in [p.relative_to(repo.root).as_posix() for p in written]
+    assert repo.read("changelog.d/README.md") == "# Ours\n"
+
+
+def test_init_writes_a_dash_style_fragments_example(repo: Repo) -> None:
+    repo.write("CHANGELOG.md", "# Changelog\n\n## Unreleased\n\n## 1.0.0 — 2026-10-01\n\n### The first release\n")
+    init(repo.root, "ci.yml", force=True)
+    readme = repo.read("changelog.d/README.md")
+    example = readme.split("```markdown\n", 1)[1].split("```", 1)[0]
+    assert [e.text.splitlines()[0] for e in fragment_entries(example, Style.DASH, "example")] == [
+        "### Worktrees: a branch whose tip was a merged PR's head landed (#244)"
+    ]
 
 
 def test_the_policy_loads_from_its_file(repo: Repo) -> None:

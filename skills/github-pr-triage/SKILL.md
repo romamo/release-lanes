@@ -39,7 +39,7 @@ Judgment stays with you: which PRs to delegate, each PR's risks, whether a revie
 |---|---|---|
 | `pr_gate.py <PR>... [--wait]` | Is each PR open, mergeable, and green on every finished check? | Right before every merge |
 | `failed_tests.py <run-id>` | Which tests failed, per job, with assertion lines | On any red job, once its run has finished |
-| `changelog_guard.py check\|move\|union` | Do new CHANGELOG lines sit under Unreleased, each bullet under one `###` heading, none twice? Moves misplaced entries there under their own heading; unions conflict blocks | After every rebase or conflict |
+| `changelog_guard.py check\|move\|union` | Do new CHANGELOG lines sit under Unreleased, each bullet under one `###` heading, none twice? With `[changelog] fragments` set, `check` also fails a line added under Unreleased and a fragment that doesn't read. Moves misplaced entries there under their own heading; unions conflict blocks | After every rebase or conflict |
 | `landed.py --onto <ref> <sha>...` | Did these commits land, even rebased or with a hand-merged CHANGELOG? | Before deleting a worktree or branch |
 | `release_ready.py <repo> <sha> <version>` | Is the release commit ready to tag: CI green on it, on the default branch, tag free, version in manifest and CHANGELOG, "not additive" if Breaking, compare link? Lists open PRs to judge | Right before tagging |
 | `shipped.py <repo> <prev-tag> <tag> [--post]` | Which closed issues did this release fix, and which haven't been told yet? Dry run by default; `--post` comments through `shipmill gh` itself when `[agents] app_id` is set | After the publish is verified |
@@ -87,6 +87,7 @@ Follow [references/landing.md](references/landing.md). In short:
 - Stacked PRs merge with merge commits, and each next PR is retargeted to the default branch before it merges
 - After every rebase, run `scripts/changelog_guard.py check --base origin/<default>`: a clean rebase can silently move new entries into a released section. On exit 1 run `move` with the same base, then `check` again, amend, then the release planner's dry run where the repo has one (it reads the committed CHANGELOG), and read the Unreleased section: wording a later merge made stale (a rename) is yours to fix
 - Resolve bullet-list conflicts (CHANGELOG) with `scripts/changelog_guard.py union <file>`. Never union counts or versions: recompute those from each side's baseline and run the test
+- When `.github/shipmill.toml` sets `[changelog] fragments`, each PR adds its entry as a new file in that folder and leaves `CHANGELOG.md` alone: PRs that only share a CHANGELOG spot need no serial landing and no union, and `check` fails a PR that adds a line under Unreleased (naming the fragment to write instead) or a fragment that doesn't read
 - After each merge, re-run step 1's state check: the next PR may now conflict
 
 ### 5. Red CI

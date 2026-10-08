@@ -116,7 +116,15 @@ class Upgrade:
 
 
 FRAGMENTS = "changelog.d"
-FRAGMENTS_README = f"""\
+# A fragment's example, in each CHANGELOG style: keep-a-changelog's category heading and entry,
+# or dash style's titled entry block
+KEEP_A_CHANGELOG_EXAMPLE = "### Fixed\n\n- Worktrees: a branch whose tip was a merged PR's head landed (#244)\n"
+DASH_EXAMPLE = "### Worktrees: a branch whose tip was a merged PR's head landed (#244)\n\nIt lands no more.\n"
+
+
+def fragments_readme(example: str) -> str:
+    """The fragments folder's README.md, which keeps the folder in git and is never a fragment"""
+    return f"""\
 # Changelog fragments
 
 Each pull request adds its changelog entry here as its own file instead of editing
@@ -127,11 +135,11 @@ Name a fragment `<issue>-<slug>.md`, such as `{FRAGMENTS}/244-merged-pr-head-lan
 write what the pull request would have added under Unreleased, in the CHANGELOG's style:
 
 ```markdown
-### Fixed
-
-- Worktrees: a branch whose tip was a merged PR's head landed (#244)
-```
+{example}```
 """
+
+
+FRAGMENTS_README = fragments_readme(KEEP_A_CHANGELOG_EXAMPLE)
 
 CATALOGUE: tuple[Upgrade, ...] = (
     Upgrade(
