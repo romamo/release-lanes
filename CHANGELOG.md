@@ -7,6 +7,13 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- Spec 013: changelog fragments. With `[changelog] fragments = "changelog.d"`, each pull
+  request adds its entry as its own file instead of editing `CHANGELOG.md`, so PRs stop
+  conflicting on it; a stable release writes the fragments into its section and deletes
+  them, and `shipmill init` turns them on by default (#256)
+
 ## [0.35.0] - 2026-10-08
 
 ### Added
