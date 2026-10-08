@@ -7,6 +7,11 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- Spec 011, a fix on every non-OK status row, is built: each of its 20 criteria is checked
+  against main under its Verification section (#242)
+
 ## [0.37.0] - 2026-10-08
 
 ### Changed
