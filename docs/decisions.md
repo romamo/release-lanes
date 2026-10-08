@@ -100,6 +100,7 @@ entry that supersedes it, never by editing an old one.
 - Why: Sessions that exit before their PR merges leave worktrees and local branches no later pass touches, since each pass removes only what it created; one owner for the orphans, acting only on proof, collects them without risking unlanded work
 - Applies to: src/shipmill/gate.py, skills/*/SKILL.md, worktrees
 - Enforced by: review
+- Superseded by: D-24
 
 ## D-13: A hold stops the gate from starting sessions, not from stopping a stuck one
 
@@ -183,3 +184,22 @@ entry that supersedes it, never by editing an old one.
 - Why: Gate sessions ran a plugin install in tmp/shipmill-gate that was 0.25.0 while 0.32.1 was out, and the update status printed resolved to that nested install, so the repo's own install stayed stale and the line never cleared (romamo/treaty). A check before every session would cost a claude call per tick; a default of false keeps gates already installed from changing installs without a config change
 - Applies to: src/shipmill/gate.py, src/shipmill/agents.py, src/shipmill/init.py, src/shipmill/doctor.py, skills/github-ship-watch/scripts/watch_state.py, skills/shipmill-setup/scripts/setup_state.py, [agents] plugin_update, shipmill status
 - Enforced by: the gate, watch_state.py, and setup_state.py tests (with the implementing PR)
+- Superseded by: D-23
+
+## D-23: The gate updates every install keyed on its checkout, project or local scope
+
+- Decided: 2026-10-08, in shipmill/shipmill#240
+- Rule: With [agents] plugin_update = true, shipmill gate checks at most once per 24 hours (the last check recorded under the repo's git directory) whether any install of shipmill@shipmill keyed on its checkout, at project or local scope, is behind the latest release and, when one is, updates it before it starts a session; a failed update is reported on the tick and the session still starts. The key defaults to false, and then the gate changes no install. Either way, shipmill status, doctor, and setup_state.py report a behind install in the repo's folder and in the gate's checkout as separate rows, each with a fix that works when run in that folder
+- Why: shipmill's own gate checkout holds a local-scope install (0.25.0) that D-22's project-only rule never updated, so its sessions kept old skills while the other gated repos, on project scope, got the latest; the maintainer chose to cover any install keyed on the checkout
+- Applies to: src/shipmill/gate.py, src/shipmill/plugin.py, src/shipmill/agents.py, src/shipmill/doctor.py, skills/github-ship-watch/scripts/watch_state.py, skills/shipmill-setup/scripts/setup_state.py, [agents] plugin_update, shipmill status
+- Enforced by: the gate and plugin tests (with the implementing PR)
+- Supersedes: D-22
+
+## D-24: A worktree whose tip was a merged PR's head has landed
+
+- Decided: 2026-10-08, in shipmill/shipmill#244
+- Rule: Whoever creates a worktree removes it once its PR merges; once the creating session has exited, shipmill gate's prune owns it and removes only what the spec's checks prove landed, where a branch also counts as landed when its tip is, or was before a force-push, the head of a merged pull request on that branch; a commit made after that tip keeps the worktree
+- Why: Review often rebases, amends, or drops part of a PR before a squash merge, so the worktree's own commit is in no merged history and its worktree read as not landed forever (treaty PR #75); the merged PR was that commit's review, so work dropped there has landed in effect, and a later commit still protects real unlanded work
+- Applies to: src/shipmill/worktrees.py, src/shipmill/gate.py, skills/*/SKILL.md, worktrees, docs/specs/002-*
+- Enforced by: the worktrees tests (with the implementing PR)
+- Supersedes: D-12
