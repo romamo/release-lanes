@@ -49,6 +49,18 @@ bot.
   action for a person (exit 1, not an agent's), read as no release due; `shipmill status`
   reads it as STUCK (#276)
 
+### Added
+
+- `shipmill upgrade` lists the config upgrades a repo hasn't decided (`--json` for
+  scripts): `changelog-fragments` until `[changelog] fragments` is set to any value, and
+  `plugin-update` for a config with an `[agents]` section and no `plugin_update` key.
+  `shipmill upgrade --apply <id>` adds the upgrade's line at the end of its table, keeping
+  every other byte of `.github/shipmill.toml`, creates the files it owns
+  (`changelog.d/README.md`), and commits nothing; an unknown id, one that doesn't apply, or
+  one already decided exits 2 naming it. `[autonomy] upgrade` takes observe, propose (the
+  default), or act, and an open hold reads act as propose; doctor's autonomy row names it
+  (spec 014) (#279)
+
 ## [0.36.0] - 2026-10-08
 
 ### Added
