@@ -10,7 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from shipmill import cli_command
 from shipmill.agents import AgentsConfig, Mode
 from shipmill.app import Identity, default_key
 from shipmill.cli import _parser, _status, main
@@ -21,8 +20,10 @@ from shipmill.status import (
     Gate,
     Issue,
     Job,
+    JobFiles,
     Main,
     Pull,
+    Report,
     Row,
     Verdict,
     parse_job,
@@ -38,9 +39,15 @@ SHA = "a" * 40
 VERSION = Row("SHIPMILL_VERSION", "shipmill", "latest v0.26.0; plugin: user 0.26.0, local 0.26.0 (/x)", False)
 AGENTS = AgentsConfig(prompt="/triage {repo}", prs=True, retry_hours=24, app_id=7, mode=Mode.HEADLESS)
 APP = Identity(7, "acme-bot", 99, Path("/k.pem"))
-JOB = Job(dt.timedelta(minutes=15), True, False, "0", NOW - dt.timedelta(minutes=4), "QUIET: nothing", False)
+FILES = JobFiles(Path("/u/Library/LaunchAgents/web.plist"), Path("/u/gate.log"), 501)
+JOB = Job(dt.timedelta(minutes=15), True, False, "0", NOW - dt.timedelta(minutes=4), "QUIET: nothing", False, FILES)
 GATE = Gate(AGENTS, True, True, JOB, None, APP, None, None)
 NO_PRS = dataclasses.replace(AGENTS, prs=False)
+CHECKOUT = Path("/src/web")
+
+
+def texts(found: Report) -> list[str]:
+    return [r.text for r in found.reasons]
 
 
 def facts(*rows: Row, **changes: object) -> Facts:
@@ -54,6 +61,8 @@ def facts(*rows: Row, **changes: object) -> Facts:
         gate=GATE,
         cli="0.26.0",
         now=NOW,
+        checkout=CHECKOUT,
+        command="shipmill",
     )
     return dataclasses.replace(base, **changes)  # type: ignore[arg-type]
 
@@ -91,7 +100,7 @@ def test_s009_2_a_broken_pipeline_row_is_stuck(state: str) -> None:
 def test_s009_3_a_gate_that_isnt_ticking_is_stuck(changed: Gate, reason: str) -> None:
     found = report(facts(gate=changed))
     assert found.verdict is Verdict.STUCK
-    assert any(reason in r for r in found.reasons)
+    assert any(reason in r for r in texts(found))
 
 
 def test_s009_3_a_gate_after_sleep_or_before_its_first_run_isnt_stuck() -> None:
@@ -107,13 +116,13 @@ def test_s009_3_a_gate_after_sleep_or_before_its_first_run_isnt_stuck() -> None:
 def test_s009_3_no_job_on_this_host_waits_on_you_rather_than_stuck() -> None:
     found = report(facts(gate=gate(job=None)))
     assert found.verdict is Verdict.WAITS
-    assert found.reasons == [f"no launchd job runs the gate on this host: {cli_command()} launchd {REPO}"]
+    assert texts(found) == [f"no launchd job runs the gate on this host: shipmill launchd {REPO}"]
 
 
 def test_s009_3_the_log_failure_after_a_decision_is_its_last_line() -> None:
     log = "QUIET: nothing needs an agent\n  pruned x\nInstalled 1 package in 1ms\nshipmill: watch_state.py failed\n"
     plist: dict[str, object] = {"StartInterval": 900}
-    found = parse_job(plist, "\tstate = not running\n\tlast exit code = 2\n", log, NOW)
+    found = parse_job(plist, "\tstate = not running\n\tlast exit code = 2\n", log, NOW, FILES)
     assert (found.last, found.failed, found.last_exit, found.loaded, found.running) == (
         "shipmill: watch_state.py failed",
         True,
@@ -121,7 +130,7 @@ def test_s009_3_the_log_failure_after_a_decision_is_its_last_line() -> None:
         True,
         False,
     )
-    assert parse_job(plist, None, None, None).loaded is False
+    assert parse_job(plist, None, None, None, FILES).loaded is False
     assert parse_waketime("{ sec = 1791314716, usec = 461743 } Tue Oct  6 22:25:16 2026") == dt.datetime(
         2026, 10, 6, 19, 25, 16, tzinfo=dt.UTC
     )
@@ -130,12 +139,13 @@ def test_s009_3_the_log_failure_after_a_decision_is_its_last_line() -> None:
 
 def test_s009_3_a_traceback_shows_its_error_and_a_named_exit_code_is_still_a_number() -> None:
     log = "QUIET: nothing\nTraceback (most recent call last):\n  File \"x\", line 1, in <module>\nKeyError: 'agent'\n"
-    found = parse_job({"StartInterval": 900}, "\tstate = not running\n\tlast exit code = 78: EX_CONFIG\n", log, NOW)
+    printed = "\tstate = not running\n\tlast exit code = 78: EX_CONFIG\n"
+    found = parse_job({"StartInterval": 900}, printed, log, NOW, FILES)
     assert (found.last, found.failed, found.last_exit) == ("KeyError: 'agent'", True, "78: EX_CONFIG")
-    reasons = report(facts(gate=gate(job=found))).reasons
+    reasons = texts(report(facts(gate=gate(job=found))))
     assert "the gate's last run exited 78: EX_CONFIG" in reasons
     assert "the gate's last tick failed: KeyError: 'agent'" in reasons
-    later = parse_job({}, None, log + "QUIET: nothing needs an agent\n", NOW)
+    later = parse_job({}, None, log + "QUIET: nothing needs an agent\n", NOW, FILES)
     assert (later.last, later.failed) == ("QUIET: nothing needs an agent", False)
 
 
@@ -169,7 +179,7 @@ def test_s009_4_an_app_key_missing_on_this_host_is_not_a_failure(tmp_path: Path)
     "found",
     [
         facts(issues=[Issue(6, "NEEDS_DECISION")]),
-        facts(Row("NEEDS_DECISION", REPO, "#9", False), pulls=[Pull(9, False)]),
+        facts(Row("NEEDS_DECISION", REPO, "#9", False), pulls=[Pull(9, False, "CLEAN", "main")]),
         facts(gate=gate(job=job(last="WAITING: session s waits on you: claude attach s"))),
         *(facts(Row(s, "x", "y", False)) for s in ("HOLD", "PROMOTION_DUE", "POSTMORTEM_DUE", "UNTRUSTED")),
         facts(Row("SHIPMILL_OUTDATED", "plugin user", "0.25.0, latest v0.26.0; claude plugin update x", False)),
@@ -330,7 +340,8 @@ def test_s009_16_the_whole_summary_reads_as_the_spec_shows_it() -> None:
             f"{REPO} ({URL}): WAITS ON YOU",
             "  repo           in sync at v0.26.0, release ok",
             f"  needs decision #206 {URL}/issues/206",
-            f"  parked         #26 {URL}/issues/26",
+            "                 fix: answer the needs-decision question on each item named",
+            f"  parked         #26 {URL}/issues/26 postponed",
             f"  open issues    2 {URL}/issues",
             "  pull requests  none",
             "  gate           OK, launchd every 15 min",
@@ -390,7 +401,7 @@ def test_s009_16_the_gate_reasons_are_lines_too() -> None:
     ("main_", "shown"),
     [
         (Main("main", SHA, SHA, 0, 0), "in sync"),
-        (Main("main", SHA, "b" * 40, 0, 2), "2 behind (git pull)"),
+        (Main("main", SHA, "b" * 40, 0, 2), f"2 behind: git -C {CHECKOUT} pull --ff-only"),  # S-011-16
         (Main("main", SHA, "b" * 40, 1, 0), "1 ahead"),
         (Main("main", SHA, "b" * 40, 1, 2), "diverged (1 ahead, 2 behind)"),
         (Main("main", None, SHA, 0, 0), "no local main"),
@@ -434,32 +445,37 @@ def test_s009_18_each_item_has_its_own_link_never_a_search() -> None:
         Issue(11, "BLOCKED"),
         Issue(1, "SUSPECT_CLOSE"),
     ]
-    found = facts(*rows, issues=issues, pulls=[Pull(9, False), Pull(8, False), Pull(7, True)])
+    pulls = [Pull(9, False, "CLEAN", "main"), Pull(8, False, "UNKNOWN", "main"), Pull(7, True, "DRAFT", "main")]
+    found = facts(*rows, issues=issues, pulls=pulls)
     text = lines(found)
-    assert text[1:12] == [
+    assert text[1:13] == [
         "  repo           in sync at v0.26.0, release ok",
         f"  needs decision #6 {URL}/issues/6",
         f"                 #9 {URL}/pull/9",
+        "                 fix: answer the needs-decision question on each item named",
         f"  suspect close  #1 {URL}/issues/1",
         f"  to triage      #5 {URL}/issues/5",
         f"  to build       #4 {URL}/issues/4",
         f"  in progress    #3 {URL}/issues/3",
         f"  to land        #8 {URL}/pull/8",
         f"  parked         #11 {URL}/issues/11",
-        f"                 #2 {URL}/issues/2",
-        f"  drafts         #7 {URL}/pull/7",
+        f"                 #2 {URL}/issues/2 triaged",
+        f"  drafts         #7 {URL}/pull/7: gh pr ready 7 -R {REPO} once it is ready",
     ]
     assert not any("?q=" in line for line in text)
-    assert report(found).reasons == ["issue #6 waits on your decision", "pull request #9 waits on your decision"]
+    assert texts(report(found)) == ["issue #6 waits on your decision", "pull request #9 waits on your decision"]
 
 
 def test_s009_18_an_untrusted_pull_request_links_to_the_pull() -> None:
-    found = facts(Row("UNTRUSTED", REPO, "#9", False), pulls=[Pull(9, False)])
+    found = facts(Row("UNTRUSTED", REPO, "#9", False), pulls=[Pull(9, False, "CLEAN", "main")])
     assert f"  untrusted      #9 {URL}/pull/9" in lines(found)
 
 
 def test_s009_19_open_issues_and_pull_requests_are_counted_with_the_list_link() -> None:
-    found = facts(issues=[Issue(5, "NEW"), Issue(4, "TRIAGED"), Issue(1, "SUSPECT_CLOSE")], pulls=[Pull(9, False)])
+    found = facts(
+        issues=[Issue(5, "NEW"), Issue(4, "TRIAGED"), Issue(1, "SUSPECT_CLOSE")],
+        pulls=[Pull(9, False, "CLEAN", "main")],
+    )
     text = lines(found)
     assert f"  open issues    2 {URL}/issues" in text
     assert f"  pull requests  1 {URL}/pulls" in text
@@ -549,7 +565,7 @@ def test_s009_24_open_pull_requests_are_listed_to_land_newest_first() -> None:
         f"  in progress    #3 {URL}/issues/3",
         f"  to land        #409 {URL}/pull/409",
         f"                 #408 {URL}/pull/408",
-        f"  parked         #2 {URL}/issues/2",
+        f"  parked         #2 {URL}/issues/2 triaged",
     ]
     assert not any(line.startswith("  other") for line in text)
     assert not any(line.startswith("  to land") for line in lines(facts()))
@@ -577,17 +593,17 @@ def test_s009_26_pull_requests_no_gate_lands_wait_on_you() -> None:
     row = Row("PRS_OPEN", REPO, "#408 #409", False)
     off = report(facts(row, gate=gate(agents=NO_PRS)))
     assert off.verdict is Verdict.WAITS
-    assert off.reasons == [
+    assert texts(off) == [
         "pull request #409 #408 wait to land: the gate doesn't land pull requests ([agents] prs = false); "
         "set [agents] prs = true, or land them by hand"
     ]
     bare = report(facts(Row("PRS_OPEN", REPO, "#7", False), gate=gate(agents=None)))
     assert bare.verdict is Verdict.WAITS
-    assert bare.reasons == ["pull request #7 wait to land: no gate lands pull requests (no [agents] in the config)"]
+    assert texts(bare) == ["pull request #7 wait to land: no gate lands pull requests (no [agents] in the config)"]
 
 
 def test_s009_26_pull_requests_the_gate_lands_are_work_not_waiting() -> None:
     found = report(facts(Row("PRS_OPEN", REPO, "#408 #409", False)))
     assert found.verdict is Verdict.WORKING
-    assert found.reasons == ["pull request #409 #408 to land"]
+    assert (found.reasons, found.working) == ([], ["pull request #409 #408 to land"])
     assert report(facts(gate=gate(agents=NO_PRS))).verdict is Verdict.IDLE

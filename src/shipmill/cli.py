@@ -693,6 +693,8 @@ def _status(
         gate=gate,
         cli=importlib.metadata.version("shipmill"),
         now=when,
+        checkout=top,
+        command=cli_command(),
     )
     sys.stdout.write(status.report(facts).text(slug))
     return proc.returncode  # S-009-14: spec 008's code, whatever the verdict
