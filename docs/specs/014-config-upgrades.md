@@ -1,6 +1,6 @@
 # S-014: Config upgrades
 
-status: draft
+status: approved
 
 ## Problem
 
