@@ -12,6 +12,17 @@ bot.
 - Spec 011, a fix on every non-OK status row, is built: each of its 20 criteria is checked
   against main under its Verification section (#242)
 
+### Fixed
+
+- `shipped.py --post` (its "Released in" notices) and `setup_state.py --fix` (its labels)
+  write as the App through `uvx --from git+https://github.com/shipmill/shipmill@v0
+  shipmill gh` when the checkout's `.github/shipmill.toml` sets `[agents] app_id`, as spec
+  012 asks of every write, instead of as the person running them; without `app_id` they
+  use plain `gh` as before. A `shipmill gh` exit 2 stops the script with nothing retried,
+  and a config that can't be read, or an `app_id` outside a readable `[agents]` table,
+  exits 2 before anything is written. The config is the checkout's, so a run from a
+  subfolder still writes as the App. Reads stay on plain `gh` (#290)
+
 ## [0.37.0] - 2026-10-08
 
 ### Changed

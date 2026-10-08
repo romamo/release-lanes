@@ -294,7 +294,7 @@ def test_s005_16_a_headless_mode_outside_agents_doesnt_count(ss: ModuleType, tmp
 def test_s005_16_fix_creates_the_label_only_when_wanted(ss: ModuleType, tmp_path: Path) -> None:
     gh = FakeGh("")
     write(tmp_path, ".github/shipmill.toml", HEADLESS)
-    ss.create_labels("me/demo", ss.wanted_labels(tmp_path), ["needs-decision"], gh)
+    ss.create_labels("me/demo", ss.wanted_labels(tmp_path), ["needs-decision"], ["gh"], gh)
     description = "A shipmill session asked a question here; waits for a reply"
     create = ["gh", "label", "create", "needs-decision", "-R", "me/demo", "--color", "d876e3"]
     assert gh.calls == [[*create, "--description", description]]
@@ -302,8 +302,48 @@ def test_s005_16_fix_creates_the_label_only_when_wanted(ss: ModuleType, tmp_path
     write(tmp_path, ".github/shipmill.toml", 'mode = "release"\n')
     wanted = ss.wanted_labels(tmp_path)
     gh.calls.clear()
-    ss.create_labels("me/demo", wanted, [name for name in wanted if name == "release-blocker"], gh)
+    ss.create_labels("me/demo", wanted, [name for name in wanted if name == "release-blocker"], ["gh"], gh)
     assert [call[3] for call in gh.calls] == ["release-blocker"]
+
+
+APP_GH = ["uvx", "--from", "git+https://github.com/shipmill/shipmill@v0", "shipmill", "--repo"]
+
+
+def test_290_fix_creates_labels_through_shipmill_gh_with_app_id(ss: ModuleType, tmp_path: Path) -> None:
+    # #290, spec 012: with [agents] app_id set, --fix's labels post as the App, not the person
+    write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "x"\napp_id = 7\nmode = "interactive"\n')
+    write_gh = ss.gh_writer(tmp_path, ss.watch_module())
+    assert write_gh == [*APP_GH, str(tmp_path.resolve()), "gh"]
+    gh = FakeGh("")
+    ss.create_labels("me/demo", ss.wanted_labels(tmp_path), ["needs-decision"], write_gh, gh)
+    assert gh.calls[0][: len(write_gh) + 3] == [*write_gh, "label", "create", "needs-decision"]
+
+
+@pytest.mark.parametrize("text", [None, 'mode = "release"\n', '[agents]\nprompt = "x"\n'])
+def test_290_fix_creates_labels_with_plain_gh_without_app_id(ss: ModuleType, tmp_path: Path, text: str | None) -> None:
+    if text is not None:
+        write(tmp_path, ".github/shipmill.toml", text)
+    assert ss.gh_writer(tmp_path, ss.watch_module()) == ["gh"]
+
+
+def test_290_a_malformed_config_fails_rather_than_writing_as_the_person(ss: ModuleType, tmp_path: Path) -> None:
+    write(tmp_path, ".github/shipmill.toml", "[agents\napp_id = 7\n")
+    with pytest.raises(SystemExit) as exc:
+        ss.gh_writer(tmp_path, ss.watch_module())
+    assert exc.value.code == 2
+
+
+def test_290_a_failing_shipmill_gh_stops_and_is_never_retried(ss: ModuleType, tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    def app_gh(cmd: list[str]) -> str:
+        calls.append(cmd)
+        return str(ss.run(["false"]))  # shipmill gh exits 2: no key, App not installed
+
+    with pytest.raises(SystemExit) as exc:
+        ss.create_labels("me/demo", {"a": ("ffffff", "a"), "b": ("ffffff", "b")}, ["a", "b"], APP_GH, app_gh)
+    assert exc.value.code == 2
+    assert len(calls) == 1 and calls[0][0] == "uvx"
 
 
 def test_s005_16_headless_without_app_id_reads_agents_no_app(ss: ModuleType, tmp_path: Path) -> None:
