@@ -9,6 +9,11 @@ bot.
 
 ### Added
 
+- Spec 014: config upgrades. shipmill proposes a feature that needs an opt-in in a repo's
+  config (changelog fragments, `plugin_update`) as an issue, asks the maintainer through
+  the needs-decision protocol, and opens the pull request once they accept;
+  `[autonomy] upgrade` picks observe, propose, or act, and a declined upgrade is never
+  proposed again (#277)
 - Spec 013: changelog fragments. With `[changelog] fragments = "changelog.d"`, each pull
   request adds its entry as its own file instead of editing `CHANGELOG.md`, so PRs stop
   conflicting on it; a stable release writes the fragments into its section and deletes
