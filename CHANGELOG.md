@@ -7,6 +7,14 @@ bot.
 
 ## [Unreleased]
 
+### Fixed
+
+- `shipmill plan` no longer stops at a stable lane that can't work out its candidate,
+  such as an rc section it can't fold: it goes on to rc and dev, names the stable lane's
+  error in the reason when one of them releases or proposes, and exits 2 with that error
+  only when none does; `--lane stable` fails as before. An rc, dev, or hotfix `prepare`
+  never reads the fold (#296)
+
 ## [0.38.0] - 2026-10-08
 
 ### Added

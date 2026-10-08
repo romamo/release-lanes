@@ -304,9 +304,22 @@ class Planner:
         lanes = [lane] if lane else [ln for ln in PRIORITY if ln in self.policy.lanes and ln is not Lane.HOTFIX]
         skipped = []
         proposals = []
+        unplanned: ReleaseError | None = None  # the stable lane's, when it couldn't work out a candidate
         for current in lanes:
             self.policy.rule(current)
-            candidate = self._hotfix(hotfix) if hotfix else self._candidate(current, head)
+            if hotfix:
+                candidate: _Candidate | str = self._hotfix(hotfix)
+            elif current is Lane.STABLE and lane is None:
+                # a stable lane that can't read its candidate (a bad rc section to fold, #296)
+                # doesn't stop rc and dev; the plan fails with its error only if they don't release
+                try:
+                    candidate = self._candidate(current, head)
+                except ReleaseError as error:
+                    unplanned = error
+                    skipped.append(f"{current}: not planned, {error}")
+                    continue
+            else:
+                candidate = self._candidate(current, head)
             if isinstance(candidate, str):
                 skipped.append(f"{current}: {candidate}")
                 continue
@@ -337,10 +350,11 @@ class Planner:
                 else:
                     proposals.append(Proposal(current, candidate.version, candidate.base, cause))
                 continue
+            unplanned_note = f"; {Lane.STABLE}: not planned, {unplanned}" if unplanned else ""
             return Decision(
                 mode,
                 "release",
-                f"{current} {candidate.version}: {candidate.why}; {due}",
+                f"{current} {candidate.version}: {candidate.why}; {due}{unplanned_note}",
                 current,
                 candidate.version,
                 candidate.base,
@@ -350,4 +364,6 @@ class Planner:
         if proposals:
             proposed = [f"{p.lane}: {p.version} is due, proposed instead of released: {p.cause}" for p in proposals]
             return Decision(mode, "propose", "; ".join(proposed + skipped), proposals=tuple(proposals))
+        if unplanned is not None:
+            raise unplanned
         return Decision(mode, "skip", "; ".join(skipped) or "no lane enabled")
