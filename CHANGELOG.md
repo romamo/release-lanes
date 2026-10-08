@@ -7,6 +7,11 @@ bot.
 
 ## [Unreleased]
 
+### Fixed
+
+- The package metadata names its author as Roman Medvedev with a contact email,
+  instead of the handle Romamo
+
 ## [0.40.0] - 2026-10-08
 
 ### Changed
