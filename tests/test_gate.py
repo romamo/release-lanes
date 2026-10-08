@@ -260,7 +260,8 @@ def test_the_gate_reads_the_rows_watch_state_prints() -> None:
     sys.modules[spec.name] = ws  # dataclasses look their module up by name
     spec.loader.exec_module(ws)
     states = sorted(ws.ACTION | {"HOLD", "PRS_OPEN", "BOT_OK", "PREDATES_PUBLISH"})  # #228: no launch on it
-    text = "\n".join(json.dumps(ws.Row(s, "romamo/demo", "").json(), sort_keys=True) for s in states)
+    rows = [ws.Row(s, "romamo/demo", "", "fix" if s in ws.FIXED else None) for s in states]
+    text = "\n".join(json.dumps(r.json(), sort_keys=True) for r in rows)
     work = decide(parse_findings(text), [], None, NOW, DAY).work
     assert {f.state for f in work} == {
         "BOT_FAILED",

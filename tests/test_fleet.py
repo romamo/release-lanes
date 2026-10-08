@@ -492,6 +492,17 @@ def test_a_watch_row_needs_a_boolean_agent(fl: ModuleType, agent: str) -> None:
     assert ok == [fl.Row("BOT_OK", "release.yml", "")]
 
 
+@pytest.mark.parametrize(("fix", "read"), [("null", True), ('"gh run rerun 5 --failed -R o/r"', True), ("5", False)])
+def test_a_watch_row_may_carry_a_fix(fl: ModuleType, fix: str, read: bool) -> None:
+    # watch_state.py --json adds a fix to every line (spec 011): a string or null
+    line = '{"state": "BOT_OK", "subject": "release.yml", "detail": "", "agent": false, "fix": ' + fix + "}\n"
+    if read:
+        assert fl.watch_rows("o/r", line) == [fl.Row("BOT_OK", "release.yml", "")]
+    else:
+        with pytest.raises(SystemExit, match="not a row"):
+            fl.watch_rows("o/r", line)
+
+
 def test_the_fixture_action_rows_are_agent_rows(ws: ModuleType) -> None:
     assert WATCH_ACTION <= ws.AGENT
 

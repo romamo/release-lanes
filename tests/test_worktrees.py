@@ -843,7 +843,7 @@ def test_s002_17_the_watch_reports_kept_shipmill_worktrees_over_seven_days(
     repo.add(".claude/worktrees/done", "-b", "done", hours=WEEK + 30)
     argv = ["--repo", str(current), "worktrees", "--json"]
     assert main(argv, repo.github, sessions=repo.sessions) == 0
-    rows = watch_state().stale_rows(capsys.readouterr().out)
+    rows = watch_state().stale_rows(capsys.readouterr().out, repo.root, "main")
     assert sorted((r.state, r.subject, r.detail) for r in rows) == [
         ("WORKTREE_STALE", ".claude/worktrees/dirty", "uncommitted changes; created 7d ago"),
         ("WORKTREE_STALE", "tmp/wt-detached", "detached HEAD; created 8d ago"),

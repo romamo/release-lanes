@@ -13,6 +13,15 @@ bot.
   request adds its entry as its own file instead of editing `CHANGELOG.md`, so PRs stop
   conflicting on it; a stable release writes the fragments into its section and deletes
   them, and `shipmill init` turns them on by default (#256)
+- github-ship-watch's `watch_state.py` gives each row that needs a person or an agent a
+  fix, the one line that clears it: `gh run rerun <id> --failed -R <repo>` for a failed
+  bot, operate, or publish run, the lane to start for a stalled bot, the `git -C` commands
+  for a stale worktree, the close command for a hold, the skill to run for issues,
+  incidents, and untrusted items, and for open pull requests no gate lands, the
+  `[agents] prs` setting. `--json` adds it as `fix` (a string or null) beside the
+  unchanged keys, and the table prints it on an indented `fix:` line; a fix names its repo
+  and checkout and never quotes an issue's or a pull request's title. `fleet.py` reads
+  the new key (#258)
 
 ## [0.35.0] - 2026-10-08
 
