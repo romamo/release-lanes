@@ -7,6 +7,7 @@ import json
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from shipmill import fragments
 from shipmill.autonomy import Autonomy, Hold, Stage
 from shipmill.changelog import Changelog, Entry
 from shipmill.errors import ReleaseError
@@ -125,6 +126,10 @@ class Planner:
             raise ReleaseError(f"no {self.policy.changelog} at {rev[:12]}")
         return Changelog(text, self.policy.style)
 
+    def fragments_at(self, rev: str) -> list[Entry]:
+        """The changelog fragments' entries at rev, read through git, never the checkout (spec 013)"""
+        return fragments.entries(fragments.at_revision(self.git, self.policy, rev))
+
     def target(self, pending: list[Entry], rev: str) -> Version:
         """The stable version main's head leads to: the last stable bumped by what is pending,
         or the open pre-release series if that is higher"""
@@ -157,7 +162,7 @@ class Planner:
         """What the lane would release from main's head, or why there is nothing to"""
         rule = self.policy.rule(lane)
         changelog = self.changelog_at(head)
-        pending = changelog.pending()
+        pending = changelog.pending(self.fragments_at(head))
         if lane is Lane.STABLE and rule.promote:
             return self._promotion(rule)
         if lane is Lane.DEV:
@@ -175,7 +180,7 @@ class Planner:
             version = series.with_dev(self.git.first_parent_count(head))
             return _Candidate(version, head, f"{len(pending)} pending entries; dev build of {series}")
         if not pending:
-            return "nothing pending under Unreleased"
+            return f"nothing pending under {fragments.where(self.policy)}"
         target = self.target(pending, head)
         if lane is Lane.RC:
             same = [t for t in self._lane_tags(Lane.RC) if t.version.release == target]
@@ -206,14 +211,14 @@ class Planner:
         base = rc.commit if on_main else self.git.first_parent(rc.commit)
         # the rc sections of version an earlier release bot wrote are pending too (D-25)
         changelog = self.changelog_at(base)
-        if not changelog.promoted(version):
+        if not changelog.promoted(version, self.fragments_at(base)):
             sections = changelog.rc_sections(version)
             found = (
                 f"its rc sections {', '.join(f'[{v}]' for v in sections)} hold no entries"
                 if sections
                 else f"no [{version}rcN] section"
             )
-            return f"{rc.name}'s base has nothing pending under Unreleased, and {found}"
+            return f"{rc.name}'s base has nothing pending under {fragments.where(self.policy)}, and {found}"
         return _Candidate(version, base, f"promotes {rc.name}, soaked {(self.now - rc.date).days} day(s)")
 
     def _hotfix(self, hotfix: Hotfix) -> _Candidate:

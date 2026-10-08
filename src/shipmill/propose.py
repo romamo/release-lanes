@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 
+from shipmill import fragments
 from shipmill.autonomy import HOLD_LABEL, Autonomy
 from shipmill.changelog import Changelog, Entry
 from shipmill.doctor import CALLER
@@ -61,7 +62,7 @@ def body(policy: Policy, proposal: Proposal, entries: list[Entry]) -> str:
             lines += [f"#### {heading}", ""]
         lines.append(entry.text)
     if not entries:
-        lines.append("Nothing pending under Unreleased.")
+        lines.append(f"Nothing pending under {fragments.where(policy)}.")
     lines += [
         "",
         how,
@@ -82,8 +83,11 @@ def propose(git: Git, policy: Policy, github: GitHub, proposals: tuple[Proposal,
         if text is None:
             raise ReleaseError(f"no {policy.changelog} at {proposal.base[:12]}")
         changelog = Changelog(text, policy.style)
-        # a stable release holds its rc sections too (D-25)
-        entries = changelog.promoted(proposal.version) if proposal.version.is_stable else changelog.pending()
+        # the fragments at the base are pending too (spec 013); a stable release holds its rc sections (D-25)
+        found = fragments.entries(fragments.at_revision(git, policy, proposal.base))
+        entries = (
+            changelog.promoted(proposal.version, found) if proposal.version.is_stable else changelog.pending(found)
+        )
         wanted = body(policy, proposal, entries)
         fix = f"change `issues: read` to `issues: write` on the prepare job in {CALLER}"
         number, outcome = upsert(github, marker(proposal.lane), title(proposal), wanted, fix)

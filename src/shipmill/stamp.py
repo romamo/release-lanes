@@ -9,6 +9,7 @@ import tomllib
 from collections.abc import Sequence
 from pathlib import Path
 
+from shipmill import fragments
 from shipmill.changelog import Changelog, Entry
 from shipmill.errors import ReleaseError
 from shipmill.gitrepo import Git
@@ -126,12 +127,23 @@ def stamp(
     path = root / policy.changelog
     if lane in (Lane.STABLE, Lane.HOTFIX):
         changelog = Changelog(path.read_text(encoding="utf-8"), policy.style)
+        found: list[fragments.Fragment] = []
         if lane is Lane.STABLE:
-            entries = changelog.promoted(version)  # Unreleased plus its rc sections (D-25)
+            found = fragments.in_checkout(root, policy)
+            # Unreleased, the fragments, and the version's rc sections (D-25, spec 013)
+            entries = changelog.promoted(version, fragments.entries(found))
         path.write_text(
-            changelog.release(version, date, entries, from_unreleased=lane is Lane.STABLE), encoding="utf-8"
+            changelog.release(
+                version, date, entries, from_unreleased=lane is Lane.STABLE, fragments=fragments.entries(found)
+            ),
+            encoding="utf-8",
         )
         changed.append(policy.changelog)
+        released = set(entries)
+        for fragment in found:
+            if any(e in released for e in fragment.entries):
+                (root / fragment.path).unlink()
+                changed.append(fragment.path)
     changed += write_version(root, policy, version, date)
     run_after_stamp(root, policy)
     return changed
@@ -154,13 +166,19 @@ def sync(git: Git, policy: Policy, version: Version, released: str, date: dt.dat
     return changed
 
 
-def notes(policy: Policy, changelog_text: str, version: Version, since: Version | None) -> str:
+def notes(
+    policy: Policy,
+    changelog_text: str,
+    version: Version,
+    since: Version | None,
+    fragment_entries: Sequence[Entry] = (),
+) -> str:
     """A release's notes: a stable release's CHANGELOG section, or what a pre-release holds
-    beyond the last stable release"""
+    beyond the last stable release: its pending Unreleased and fragment entries"""
     changelog = Changelog(changelog_text, policy.style)
     if version.is_stable:
         return changelog.section(version)
-    pending = changelog.pending()
+    pending = changelog.pending(fragment_entries)
     head = f"Changes since {since.tag}:" if since else "Changes:"
     if not pending:
         return f"{head} no CHANGELOG entries.\n"
