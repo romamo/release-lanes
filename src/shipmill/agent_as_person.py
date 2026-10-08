@@ -41,7 +41,8 @@ class Flagged:
         """The count and up to SHOWN URLs"""
         shown = " ".join(self.urls[:SHOWN])
         more = f" and {len(self.urls) - SHOWN} more" if len(self.urls) > SHOWN else ""
-        return f"{len(self.urls)} item(s) of the last 7 days carry an agent's marker but a person wrote them: {shown}{more}"
+        count = f"{len(self.urls)} item(s) of the last 7 days"
+        return f"{count} carry an agent's marker but a person wrote them: {shown}{more}"
 
     @staticmethod
     def fix(command: str) -> str:
