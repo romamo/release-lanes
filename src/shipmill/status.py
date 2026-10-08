@@ -37,6 +37,7 @@ NEVER_EXITED = "(never exited)"  # launchctl's last exit code before a job's fir
 STUCK_ROWS = (
     "BOT_FAILED",
     "BOT_STALLED",
+    "BOT_PLAN_FAILED",  # the planner refuses the default branch: no release cuts past it (#276)
     "WORK_BRANCH_STALE",
     "NOT_PUBLISHED",
     "OPERATE_FAILED",
@@ -45,7 +46,7 @@ STUCK_ROWS = (
 )
 # a hold is a person stopping the factory on purpose (D-15): theirs to lift, not a fault
 YOURS_ROWS = ("HOLD", "PROMOTION_DUE", "POSTMORTEM_DUE", "UNTRUSTED", "BRANCH_DELETE_OFF", "SHIPMILL_OUTDATED")
-RELEASE_ROWS = ("BOT_OK", "BOT_NONE", "BOT_FAILED", "BOT_STALLED", "WORK_BRANCH_STALE")
+RELEASE_ROWS = ("BOT_OK", "BOT_NONE", "BOT_FAILED", "BOT_STALLED", "BOT_PLAN_FAILED", "WORK_BRANCH_STALE")
 TAG_ROWS = ("PUBLISHED", "PUBLISHING", "NOT_PUBLISHED", "PREDATES_PUBLISH", "NO_REGISTRY", "UNANNOUNCED")
 # rows whose facts the summary shows in their own words; any other goes under "other" (S-009-13)
 PLACED = {
@@ -66,7 +67,7 @@ PLACED = {
     "HOST_UNKNOWN",  # the sessions line says it
 }
 # the release rows the repo line names in place of "release ok" (S-009-17)
-RELEASE_PROBLEMS = ("BOT_FAILED", "BOT_STALLED", "WORK_BRANCH_STALE", "NOT_PUBLISHED", "UNANNOUNCED")
+RELEASE_PROBLEMS = ("BOT_FAILED", "BOT_STALLED", "BOT_PLAN_FAILED", "WORK_BRANCH_STALE", "NOT_PUBLISHED", "UNANNOUNCED")
 
 # triage_state.py's issue states by the line they're listed on (S-009-18)
 ISSUE_LINES = (

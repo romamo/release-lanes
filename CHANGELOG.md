@@ -36,6 +36,14 @@ bot.
   one a released section already holds, with the `git rm` that removes it. Without the
   key nothing changes (#272)
 
+### Fixed
+
+- A failing `shipmill plan` no longer stops github-ship-watch's `watch_state.py`, so the
+  gate reads a repo's issues and pull requests again: the failure is a new `BOT_PLAN_FAILED`
+  row on the release bot, with the planner's error line and the plan to run to see it, an
+  action for a person (exit 1, not an agent's), read as no release due; `shipmill status`
+  reads it as STUCK (#276)
+
 ## [0.36.0] - 2026-10-08
 
 ### Added

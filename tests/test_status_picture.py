@@ -430,6 +430,15 @@ def test_s009_17_the_repo_line_names_the_version_and_the_release_problem() -> No
     )
 
 
+def test_a_failing_plan_is_stuck_and_named_on_the_repo_line() -> None:
+    # #276: watch_state.py reports a failing `shipmill plan` as BOT_PLAN_FAILED and reads on
+    fix = "on an up-to-date main: uvx --from t shipmill --repo /work/r plan --event schedule --dry-run"
+    found = facts(Row("BOT_PLAN_FAILED", "release.yml", "shipmill plan failed: shipmill: bad line", False, fix))
+    assert report(found).verdict is Verdict.STUCK
+    assert lines(found)[1] == "  repo           in sync at v0.26.0, BOT_PLAN_FAILED release.yml"
+    assert lines(found)[2].strip() == f"fix: {fix}"
+
+
 def test_s009_17_a_repo_without_a_release_workflow_says_so_and_is_no_reason() -> None:
     found = facts(Row("BOT_NONE", REPO, 'no release policy: releases by "tag X"', False))
     assert lines(found)[1] == "  repo           in sync at v0.26.0, no release workflow"

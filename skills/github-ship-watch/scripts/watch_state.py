@@ -11,7 +11,11 @@ Release bot (a repo with .github/shipmill.toml):
                   a newer push cancels the settle wait on purpose)
   BOT_STALLED     a shipmill bot in release mode has a release due now, no run of
                   its workflow is queued or running, and none started in --grace minutes
-  BOT_OK          neither; BOT_NONE when the repo has no bot (it releases by "tag X")
+  BOT_PLAN_FAILED a shipmill bot's `shipmill plan --event schedule --dry-run` on the default
+                  branch exited non-zero (a CHANGELOG it refuses, say): its error line, and the
+                  plan to run in the checkout to see it. The watch reads the plan as no release
+                  due and reads the rest; the release workflow's own plan stops at the same error
+  BOT_OK          none of these; BOT_NONE when the repo has no bot (it releases by "tag X")
   WORK_BRANCH_STALE  for a shipmill bot: a shipmill/v* work branch on origin while no run of
                   the workflow is unfinished (asked by status, however old), so no run owns it: a
                   run cancelled before its cleanup job left it, and each later run stops
@@ -149,10 +153,11 @@ issue's or a pull request's text (D-16). The table prints it on an indented "fix
 after its row, unless the row's detail already ends with it.
 
 Holds and incidents lead the report. Exit 0 when nothing needs action, 1 when any
-BOT_FAILED, BOT_STALLED, WORK_BRANCH_STALE, NOT_PUBLISHED, UNANNOUNCED, ISSUES,
-OPERATE_FAILED, UNHEALTHY, PROMOTION_DUE, INCIDENT_OPEN, POSTMORTEM_DUE, NEEDS_DECISION,
-BRANCH_DELETE_OFF, SHIPMILL_OUTDATED, GATE_NO_APP, or SKILL_SHADOWED row is present, 2 on bad
-input or a git, gh, or uvx failure (a failing `shipmill plan` or `shipmill worktrees`).
+BOT_FAILED, BOT_STALLED, BOT_PLAN_FAILED, WORK_BRANCH_STALE, NOT_PUBLISHED, UNANNOUNCED,
+ISSUES, OPERATE_FAILED, UNHEALTHY, PROMOTION_DUE, INCIDENT_OPEN, POSTMORTEM_DUE,
+NEEDS_DECISION, BRANCH_DELETE_OFF, SHIPMILL_OUTDATED, GATE_NO_APP, or SKILL_SHADOWED row is
+present, 2 on bad input or a git, gh, or uvx failure (a failing `shipmill worktrees`; a
+failing `shipmill plan` is the BOT_PLAN_FAILED row instead).
 Needs git, an authenticated gh, and uvx (for a shipmill bot's plan and worktrees; `shipmill
 worktrees` needs claude on PATH too, to see the live sessions). Python 3.10+,
 standard library only.
@@ -228,6 +233,7 @@ VERSION_TAG = re.compile(r"^v\d+\.\d+")  # skips moving major tags such as v0
 ACTION = {
     "BOT_FAILED",
     "BOT_STALLED",
+    "BOT_PLAN_FAILED",
     "WORK_BRANCH_STALE",
     "NOT_PUBLISHED",
     "UNANNOUNCED",
@@ -376,8 +382,14 @@ class Tag:
     created: dt.datetime
 
 
+def spawn(
+    cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, check=False)
+
+
 def run(cmd: list[str], cwd: Path | None = None, env: dict[str, str] | None = None) -> str:
-    return checked(cmd, subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, check=False))
+    return checked(cmd, spawn(cmd, cwd, env))
 
 
 def capture(cmd: list[str]) -> subprocess.CompletedProcess[str]:
@@ -506,15 +518,32 @@ def fetch_unfinished(
     return sorted(found.values(), key=lambda r: r.created, reverse=True)
 
 
-def planned_release(repo: str, repo_dir: Path, policy: Path, branch: str, tool: str) -> Due | None:
-    """What the shipmill planner would release now on the default branch, or None"""
+class PlanFailed(Exception):
+    """`shipmill plan` itself exited non-zero: its last stderr line, or its exit code"""
+
+
+Spawn = Callable[[list[str], Path | None, dict[str, str] | None], subprocess.CompletedProcess[str]]
+
+
+def planned_release(
+    repo: str, repo_dir: Path, policy: Path, branch: str, tool: str, execute: Spawn = spawn
+) -> Due | None:
+    """What the shipmill planner would release now on the default branch, or None. The plan's
+    own failure raises PlanFailed (#276); a failed worktree add or remove, or a plan that
+    prints no JSON, stops the watch as any failed command does"""
     work = repo_dir / "tmp" / f"ship-watch-{os.getpid()}"
-    run(["git", "worktree", "add", "-q", "--detach", str(work), f"origin/{branch}"], cwd=repo_dir)
+    add = ["git", "worktree", "add", "-q", "--detach", str(work), f"origin/{branch}"]
+    checked(add, execute(add, repo_dir, None))
     try:
         env = {**os.environ, "GITHUB_REPOSITORY": repo}
-        out = run(["uvx", "--from", tool, "shipmill", "plan", "--event", "schedule", "--dry-run"], cwd=work, env=env)
+        proc = execute(["uvx", "--from", tool, "shipmill", "plan", "--event", "schedule", "--dry-run"], work, env)
     finally:
-        run(["git", "worktree", "remove", "--force", str(work)], cwd=repo_dir)
+        remove = ["git", "worktree", "remove", "--force", str(work)]
+        checked(remove, execute(remove, repo_dir, None))
+    if proc.returncode != 0:
+        lines = [line.strip() for line in proc.stderr.splitlines() if line.strip()]
+        raise PlanFailed(lines[-1] if lines else f"exit {proc.returncode}")
+    out = proc.stdout
     decision = json.loads(out)
     policy_mode = re.search(r'^mode\s*=\s*"(\w[\w-]*)"', (repo_dir / policy).read_text(), re.MULTILINE)
     if decision["action"] != "release" or policy_mode is None or policy_mode.group(1) != "release":
@@ -523,6 +552,25 @@ def planned_release(repo: str, repo_dir: Path, policy: Path, branch: str, tool: 
     if not isinstance(lane, str) or not lane:
         raise Refused(f"error: shipmill plan decided a release but named no lane: {out[:200]!r}")
     return Due(str(decision["reason"]), lane)
+
+
+def plan_failed_row(failed: PlanFailed, workflow: str, repo_dir: Path, branch: str, tool: str) -> Row:
+    """The plan's failure as the bot's row: its error line, and the same plan run in the
+    checkout, which shows the error once the checkout is at origin's default branch"""
+    checkout = shlex.quote(str(repo_dir))
+    plan = f"uvx --from {shlex.quote(tool)} shipmill --repo {checkout} plan --event schedule --dry-run"
+    return Row("BOT_PLAN_FAILED", workflow, f"shipmill plan failed: {failed}", f"on an up-to-date {branch}: {plan}")
+
+
+def bot_plan(
+    repo: str, repo_dir: Path, policy: Path, branch: str, tool: str, workflow: str, execute: Spawn = spawn
+) -> tuple[Due | None, list[Row]]:
+    """The planned release, or the plan's failure as a row read as no release due, so the
+    watch goes on to the issues and pull requests (#276)"""
+    try:
+        return planned_release(repo, repo_dir, policy, branch, tool, execute), []
+    except PlanFailed as failed:
+        return None, [plan_failed_row(failed, workflow, repo_dir, branch, tool)]
 
 
 def stale_rows(text: str, main: Path, branch: str) -> list[Row]:
@@ -1708,7 +1756,8 @@ def main() -> int:
         rows.append(Row("BOT_NONE", args.repo, 'no release policy: releases by "tag X"'))
     else:
         workflow, shipmill = bot
-        due = planned_release(args.repo, repo_dir, policy, branch, args.tool) if shipmill else None
+        due, failed = bot_plan(args.repo, repo_dir, policy, branch, args.tool, workflow) if shipmill else (None, [])
+        rows += failed
         # the branches before the runs: a run that ends between the two reads deleted its branch
         branches = work_branches(repo_dir) if shipmill else {}
         runs = fetch_runs(args.repo, workflow)
