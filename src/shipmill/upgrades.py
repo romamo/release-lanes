@@ -14,7 +14,7 @@ import copy
 import json
 import re
 import tomllib
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
@@ -26,6 +26,7 @@ from shipmill.autonomy import Autonomy
 from shipmill.config import CONFIG_PATH
 from shipmill.errors import ReleaseError
 from shipmill.github import UPGRADE_LABEL, GitHub, Issue
+from shipmill.policy import Style
 from shipmill.version import Version
 
 _ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
@@ -54,10 +55,11 @@ class UpgradeId:
 
 @dataclass(frozen=True, slots=True)
 class OwnedFile:
-    """A file an upgrade creates, relative to the repo root"""
+    """A file an upgrade creates, relative to the repo root; render gives its text from the
+    config being upgraded"""
 
     path: Path
-    text: str
+    render: Callable[[Mapping[str, Any]], str]
 
     def __post_init__(self) -> None:
         if self.path.is_absolute() or ".." in self.path.parts:
@@ -141,6 +143,25 @@ write what the pull request would have added under Unreleased, in the CHANGELOG'
 
 FRAGMENTS_README = fragments_readme(KEEP_A_CHANGELOG_EXAMPLE)
 
+
+def fragments_readme_text(style: Style) -> str:
+    """The fragments folder's README.md, its example in the CHANGELOG's style (spec 013)"""
+    return fragments_readme(KEEP_A_CHANGELOG_EXAMPLE if style is Style.KEEP_A_CHANGELOG else DASH_EXAMPLE)
+
+
+def _config_readme(raw: Mapping[str, Any]) -> str:
+    """The README in the config's [changelog] style, as shipmill init writes it; keep-a-changelog
+    for a config that names no style"""
+    changelog = raw.get("changelog", {})
+    if not isinstance(changelog, dict):
+        raise ReleaseError(f"{CONFIG_PATH}: changelog must be a table, got {changelog!r}")
+    style = changelog.get("style", Style.KEEP_A_CHANGELOG.value)
+    known = [s.value for s in Style]
+    if style not in known:
+        raise ReleaseError(f"{CONFIG_PATH}: [changelog] style must be one of {', '.join(known)}; got {style!r}")
+    return fragments_readme_text(Style(style))
+
+
 CATALOGUE: tuple[Upgrade, ...] = (
     Upgrade(
         id=UpgradeId("changelog-fragments"),
@@ -152,7 +173,7 @@ CATALOGUE: tuple[Upgrade, ...] = (
         changes=f"each pull request adds its changelog entry as a file in {FRAGMENTS}/ instead of editing CHANGELOG.md",
         why="pull requests stop conflicting on CHANGELOG.md; a stable release writes the fragments into its section",
         off="delete fragments from [changelog] once no fragment is pending",
-        files=(OwnedFile(Path(FRAGMENTS) / "README.md", FRAGMENTS_README),),
+        files=(OwnedFile(Path(FRAGMENTS) / "README.md", _config_readme),),
     ),
     Upgrade(
         id=UpgradeId("plugin-update"),
@@ -376,7 +397,7 @@ def apply(root: Path, upgrade: Upgrade) -> Applied:
             kept.append(owned.path)
             continue
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(owned.text, encoding="utf-8")
+        target.write_text(owned.render(raw), encoding="utf-8")
         created.append(owned.path)
     path.write_bytes(edited.encode("utf-8"))
     return Applied(upgrade, tuple(created), tuple(kept))
