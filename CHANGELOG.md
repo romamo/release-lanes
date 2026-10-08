@@ -7,6 +7,17 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- Decision D-23, superseding D-22: with `[agents] plugin_update = true` the gate updates
+  every install of the plugin keyed on its checkout, local scope as well as project
+  (#240)
+- Decision D-24, superseding D-12: a worktree whose tip is, or was before a force-push,
+  the head of a merged pull request on its branch counts as landed, so the gate's prune
+  removes it (#244)
+- Decision D-25: a stable promotion folds its version's rc sections in the CHANGELOG into
+  the stable section, and never skips as nothing pending while they hold entries (#243)
+
 ## [0.33.2] - 2026-10-07
 
 ### Fixed
