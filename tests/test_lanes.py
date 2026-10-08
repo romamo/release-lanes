@@ -256,8 +256,10 @@ def test_a_promotion_with_nothing_to_fold_names_the_rc_sections(
 
 def test_a_bad_rc_section_to_fold_leaves_the_rc_lane_releasing(repo: Repo) -> None:  # #296
     repo.at(at_day(0))
-    prose = "The second 1.1 release candidate: 1 addition and 1 fix."
-    bad = LEGACY_RC_SECTIONS.replace("## [1.1.0rc2] - 2026-10-04\n", f"## [1.1.0rc2] - 2026-10-04\n\n{prose}\n")
+    prose = "Feature C, in a sentence of its own."
+    # prose under a '### ' heading, which the fold refuses rather than drop (D-25, D-26)
+    bad = LEGACY_RC_SECTIONS.replace("### Added\n\n- Feature C (#3)\n", f"### Added\n\n{prose}\n\n- Feature C (#3)\n")
+    assert bad != LEGACY_RC_SECTIONS
     _tag_on_main(repo, bad, "v1.1.0rc2")
     fold_error = f"1.1.0rc2, folded into 1.1.0: text outside a '- ' entry: {prose!r}"
 
