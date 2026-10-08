@@ -23,6 +23,16 @@ bot.
   and checkout and never quotes an issue's or a pull request's title. `fleet.py` reads
   the new key (#258)
 
+### Changed
+
+- `shipmill status` shows the fix for every reason it is STUCK or WAITS ON YOU, on an
+  indented `fix:` line after the line it clears: the gate's launchd job, the App, the CLI
+  update for the form installed, and landing pull requests when no gate does. Its item lines
+  say what acting on them needs: a pull request behind or in conflict with its base, the
+  pull requests covering an issue in progress, what a parked issue waits on, how to ready a
+  draft, and the `git -C <checkout> pull --ff-only` for a branch behind (`fetch origin
+  <branch>:<branch>` when another branch is checked out) (#259)
+
 ## [0.35.0] - 2026-10-08
 
 ### Added
