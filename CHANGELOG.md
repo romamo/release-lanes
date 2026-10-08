@@ -7,10 +7,21 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- `shipmill gate --json`'s `plugin` changes shape: it was `installed`, `latest`, `updated`,
+  and `error`, and is now `latest`, `installs` (each `scope`, `installed`, `updated`), and
+  `error`, one entry per install keyed on the gate's checkout (#240)
+
 ### Fixed
 
 - The package metadata names its author as Roman Medvedev instead of the handle Romamo
 - The LICENSE names the copyright holder as Roman Medvedev instead of the handle Romamo
+- With `[agents] plugin_update = true`, the gate now updates every shipmill plugin install
+  keyed on its checkout, at local scope as well as project scope, so a gate whose checkout
+  has a local install (shipmill's own) no longer stays on an old release (D-23). After the
+  update it reads the installs again and reports a failure, not an update, when an install
+  stayed behind or an install in another folder changed; the session still starts (#240)
 
 ### Added
 

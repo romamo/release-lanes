@@ -1318,6 +1318,26 @@ def test_the_repos_install_and_the_gate_checkouts_are_separate_rows(ws: ModuleTy
     ]
 
 
+def test_the_repos_and_the_gate_checkouts_local_installs_are_separate_rows(ws: ModuleType) -> None:
+    # #240: shipmill's own layout, both installs at local scope; the gate row's fix is the
+    # command the gate itself runs with plugin_update = true (D-23), in the gate's checkout
+    installed = registry(install("local", "0.33.1", "/work/r"), install("local", "0.25.0", str(GATE)))
+    rows = ws.plugin_rows(installed, MARKETPLACE, "v0.33.2", [Path("/work/r")], [GATE])
+    assert [(r.subject, r.detail) for r in rows if r.state == "SHIPMILL_OUTDATED"] == [
+        (
+            "plugin local",
+            "0.33.1, latest v0.33.2; in /work/r: claude plugin uninstall shipmill@shipmill --scope local"
+            " && claude plugin install shipmill@shipmill --scope local"
+            " (`update` picks the nested install in /work/r/tmp/shipmill-gate, a Claude Code bug)",
+        ),
+        (
+            "plugin local",
+            "0.25.0, latest v0.33.2; in /work/r/tmp/shipmill-gate:"
+            " claude plugin update shipmill@shipmill --scope local",
+        ),
+    ]
+
+
 def test_a_nested_install_at_another_scope_keeps_the_update(ws: ModuleType) -> None:
     installed = registry(install("project", "0.31.1", "/work/r"), install("local", "0.32.1", str(GATE)))
     rows = ws.plugin_rows(installed, MARKETPLACE, "v0.32.1", [Path("/work/r")], [GATE])

@@ -168,7 +168,7 @@ class Decision:
     mode: Mode | None = None  # the config's mode on a tick that read the state; None: it didn't
     decisions: tuple[Asked, ...] = ()  # what the tick did for each item waiting on a decision (spec 005)
     asks_as: str | None = None  # a headless launch without an App: the login its questions post as
-    plugin: PluginUpdate | None = None  # the daily plugin check before a launch (D-22); None: none ran
+    plugin: PluginUpdate | None = None  # the daily plugin check before a launch (D-23); None: none ran
     detached: Detached | None = None  # the branch --refresh detached the gate's worktree from (#247)
 
 
@@ -977,12 +977,12 @@ def gate(
     needs-decision.json and, without app_id, notifies for them (spec 005); the decision
     carries the mode it read and what it did for each item.
 
-    With [agents] plugin_update = true (D-22), a real LAUNCH first checks, at most once per
-    24 hours (plugin-check.json in the state directory), whether the checkout's own
-    project-scope shipmill@shipmill install is behind the latest release, and updates it
-    with plugins (`claude plugin update` run in the checkout) when it is. The decision
-    carries what the check did; a failed check or update starts the session anyway. With
-    false, the default, the gate changes no install"""
+    With [agents] plugin_update = true (D-23), a real LAUNCH first checks, at most once per
+    24 hours (plugin-check.json in the state directory), whether any shipmill@shipmill
+    install keyed on the checkout, at project or local scope, is behind the latest release,
+    and updates each one that is with plugins (`claude plugin update --scope <its scope>`
+    run in the checkout). The decision carries what the check did; a failed check or update
+    starts the session anyway. With false, the default, the gate changes no install"""
     check_checkout(git, repo)
     config = checked(config, claude.args)
     state = state_dir(git)
@@ -1092,8 +1092,8 @@ def tick_lines(
         if w.stopped and w.error is not None:  # the stop line above leaves out the failed send
             lines.append(f"  notify failed for {w.session}: {w.error}")
     lines += [f"  {line}" for a in decision.decisions if (line := a.line(dry_run)) is not None]
-    if decision.plugin is not None and (line := decision.plugin.line()) is not None:
-        lines.append(f"  {line}")
+    if decision.plugin is not None:
+        lines += [f"  {line}" for line in decision.plugin.lines()]
     verb = "would prune" if dry_run else "pruned"
     lines += [f"  {verb} {j.path} ({j.worktree.branch})" for j in pruned]
     lines += [f"  {f.line()}" for f in decision.work]

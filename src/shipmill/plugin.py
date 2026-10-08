@@ -1,12 +1,16 @@
-"""The gate's daily check of its own checkout's shipmill@shipmill install (D-22).
+"""The gate's daily check of its own checkout's shipmill@shipmill installs (D-23).
 
-Claude Code keys a project-scope plugin install on the folder it runs in, so the gate's
-checkout (`tmp/shipmill-gate`) has an install of its own, apart from the repo's. With
-[agents] plugin_update = true, a tick that is about to start a session checks at most once
-per 24 hours whether that install is behind shipmill's latest release and, when it is,
-updates it with `claude plugin update --scope project` run in the checkout. The last check
-is recorded under the repo's git directory, beside the gate's other state. A failed check
-or update is reported on the tick, and the session still starts.
+Claude Code keys a project- or local-scope plugin install on a folder, so the gate's checkout
+(`tmp/shipmill-gate`) can have installs of its own, apart from the repo's. With [agents]
+plugin_update = true, a tick that is about to start a session checks at most once per 24
+hours whether any install keyed on the checkout, at project or local scope, is behind
+shipmill's latest release and, when one is, updates it with `claude plugin update --scope
+<its scope>` run in the checkout. Claude Code documents no way to name the project an update
+acts on, so the check reads the installs again afterwards: an install still behind, or an
+install keyed on another folder that the update changed, is reported as a failure. The last
+check is recorded under the repo's git directory, beside the gate's other state. A failed
+check or update is reported on the tick, and the session still starts. A user-scope install
+is never updated.
 """
 
 import datetime as dt
@@ -22,30 +26,47 @@ PLUGIN = "shipmill@shipmill"  # the Claude Code plugin, in its marketplace
 SHIPMILL_REPO = "shipmill/shipmill"  # where shipmill releases
 CHECKED = "plugin-check.json"  # the last check's time, under the gate's state directory
 EVERY = dt.timedelta(hours=24)
+SCOPES = ("project", "local")  # the scopes Claude Code keys on a folder, in the order they're updated
 
 Runner = Callable[[list[str], Path], str]  # (command, cwd) -> its stdout; ReleaseError when it fails
 
 
 @dataclass(frozen=True, slots=True)
-class PluginUpdate:
-    """What a tick's check found and did; installed is None without a project install in the
-    checkout, latest None when the check failed before it read the release"""
+class Install:
+    """One install of the plugin keyed on a folder: its scope, folder, and version"""
 
-    installed: str | None
+    scope: str
+    folder: Path
+    version: str
+
+
+@dataclass(frozen=True, slots=True)
+class PluginUpdate:
+    """What a tick's check found and did: the checkout's installs as it found them (none
+    without one), the latest release (None when the check failed before it read it), the
+    scopes it updated and confirmed, and the failure, if any"""
+
+    installs: tuple[Install, ...]
     latest: str | None
-    updated: bool
+    updated: tuple[str, ...]
     error: str | None = None
 
-    def line(self) -> str | None:
-        """The tick's line: an update or a failure; a current install says nothing"""
+    def lines(self) -> list[str]:
+        """The tick's lines: each update, then a failure; current installs say nothing"""
+        lines = [
+            f"plugin updated: {PLUGIN} {i.version} -> {self.latest} in this checkout ({i.scope} scope)"
+            for i in self.installs
+            if i.scope in self.updated
+        ]
         if self.error is not None:
-            return f"plugin update failed, the session starts anyway: {self.error}"
-        if self.updated:
-            return f"plugin updated: {PLUGIN} {self.installed} -> {self.latest} in this checkout (project scope)"
-        return None
+            lines.append(f"plugin update failed, the session starts anyway: {self.error}")
+        return lines
 
     def record(self) -> dict[str, object]:
-        return {"installed": self.installed, "latest": self.latest, "updated": self.updated, "error": self.error}
+        installs = [
+            {"scope": i.scope, "installed": i.version, "updated": i.scope in self.updated} for i in self.installs
+        ]
+        return {"latest": self.latest, "installs": installs, "error": self.error}
 
 
 def load_checked(path: Path) -> dt.datetime | None:
@@ -72,46 +93,88 @@ def save_checked(path: Path, now: dt.datetime) -> None:
     path.write_text(json.dumps({"checked": now.isoformat()}) + "\n", encoding="utf-8")
 
 
-def project_install(text: str, checkout: Path) -> str | None:
-    """The version of the checkout's own project-scope install, from `claude plugin list
-    --json`; None without one. Anything but the documented shape is refused"""
+def keyed_installs(text: str) -> list[Install]:
+    """The plugin's project- and local-scope installs, from `claude plugin list --json`, each
+    with its folder resolved; a user-scope install is left out. Anything but the documented
+    shape is refused"""
     try:
-        installs = json.loads(text)
+        entries = json.loads(text)
     except json.JSONDecodeError as exc:
         raise ReleaseError(f"claude plugin list --json printed no JSON: {exc}") from None
-    if not isinstance(installs, list):
+    if not isinstance(entries, list):
         raise ReleaseError("claude plugin list --json: expected a JSON array")
     found = []
-    here = checkout.resolve()  # the gate's --repo may be relative; Claude Code records an absolute path
-    for e in installs:
+    for e in entries:
         if not isinstance(e, dict):
             raise ReleaseError(f"claude plugin list --json: an install is {e!r}, not an object")
         if e.get("id") != PLUGIN:
             continue
         if not isinstance(e.get("scope"), str) or not isinstance(e.get("version"), str):
             raise ReleaseError(f"claude plugin list --json: {PLUGIN} install {e!r}")
+        if e["scope"] not in SCOPES:
+            continue
         where = e.get("projectPath")
-        if e["scope"] == "project" and isinstance(where, str) and Path(where).resolve() == here:
-            found.append(e["version"])
-    if len(found) > 1:
-        raise ReleaseError(f"claude plugin list --json lists {PLUGIN} twice at project scope in {checkout}")
-    return found[0] if found else None
+        if not isinstance(where, str):
+            raise ReleaseError(f"claude plugin list --json: {PLUGIN} {e['scope']} install has no projectPath: {e!r}")
+        found.append(Install(e["scope"], Path(where).resolve(), e["version"]))
+    return found
+
+
+def checkout_installs(installs: list[Install], checkout: Path) -> tuple[Install, ...]:
+    """The installs keyed on the checkout, project scope first; two at one scope are refused"""
+    here = checkout.resolve()  # the gate's --repo may be relative; Claude Code records an absolute path
+    own = [i for i in installs if i.folder == here]
+    for scope in SCOPES:
+        if sum(i.scope == scope for i in own) > 1:
+            raise ReleaseError(f"claude plugin list --json lists {PLUGIN} twice at {scope} scope in {checkout}")
+    return tuple(sorted(own, key=lambda i: SCOPES.index(i.scope)))
 
 
 def check(checkout: Path, run: Runner) -> PluginUpdate:
-    """Read the checkout's install and the latest release; update the install when it's behind"""
-    installed = project_install(run(["claude", "plugin", "list", "--json"], checkout), checkout)
-    if installed is None:
-        return PluginUpdate(None, None, False)
+    """Read the checkout's installs and the latest release; update each install that's behind,
+    then read the installs again to confirm the update reached it and no other folder's"""
+    listing = ["claude", "plugin", "list", "--json"]
+    before = keyed_installs(run(listing, checkout))
+    own = checkout_installs(before, checkout)
+    if not own:
+        return PluginUpdate((), None, ())
     tag = run(["gh", "release", "view", "-R", SHIPMILL_REPO, "--json", "tagName", "-q", ".tagName"], checkout).strip()
     latest = Version.of_tag(tag)
-    if Version.parse(installed) >= latest:
-        return PluginUpdate(installed, str(latest), False)
+    behind = [i for i in own if Version.parse(i.version) < latest]
+    if not behind:
+        return PluginUpdate(own, str(latest), ())
+    errors = []
+    tried = []
+    for install in behind:
+        try:
+            run(["claude", "plugin", "update", PLUGIN, "--scope", install.scope], checkout)
+        except ReleaseError as exc:
+            errors.append(str(exc))
+            continue
+        tried.append(install.scope)
     try:
-        run(["claude", "plugin", "update", PLUGIN, "--scope", "project"], checkout)
+        after = keyed_installs(run(listing, checkout))
     except ReleaseError as exc:
-        return PluginUpdate(installed, str(latest), False, str(exc))
-    return PluginUpdate(installed, str(latest), True)
+        errors.append(f"the update couldn't be confirmed: {exc}")
+        return PluginUpdate(own, str(latest), (), "; ".join(errors))
+    now = {i.scope: i.version for i in checkout_installs(after, checkout)}
+    updated = []
+    for scope in tried:
+        version = now.get(scope)
+        if version is not None and Version.parse(version) >= latest:
+            updated.append(scope)
+        else:
+            left = "removed its install" if version is None else f"left its install at {version}"
+            errors.append(f"`claude plugin update --scope {scope}` in {checkout} {left}")
+    errors += [f"the update changed the {i.scope} install in {i.folder}" for i in changed(before, after, checkout)]
+    return PluginUpdate(own, str(latest), tuple(updated), "; ".join(errors) or None)
+
+
+def changed(before: list[Install], after: list[Install], checkout: Path) -> list[Install]:
+    """The installs keyed on folders other than the checkout that the update changed or removed"""
+    here = checkout.resolve()
+    now = {(i.scope, i.folder): i.version for i in after}
+    return [i for i in before if i.folder != here and now.get((i.scope, i.folder)) != i.version]
 
 
 def daily_update(path: Path, checkout: Path, now: dt.datetime, run: Runner) -> PluginUpdate | None:
@@ -124,6 +187,6 @@ def daily_update(path: Path, checkout: Path, now: dt.datetime, run: Runner) -> P
     try:
         found = check(checkout, run)
     except ReleaseError as exc:
-        return PluginUpdate(None, None, False, str(exc))
+        return PluginUpdate((), None, (), str(exc))
     save_checked(path, now)
     return found
