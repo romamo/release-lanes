@@ -13,7 +13,8 @@ from shipmill.autonomy import Autonomy, AutonomyPolicy, Hold
 from shipmill.cli import main
 from shipmill.config import CONFIG_PATH, Table
 from shipmill.errors import ReleaseError
-from shipmill.upgrades import CATALOGUE, FRAGMENTS_README, UpgradeId, find
+from shipmill.policy import Style
+from shipmill.upgrades import CATALOGUE, FRAGMENTS_README, UpgradeId, find, fragments_readme_text
 
 from .conftest import POLICY, FakeGitHub, Repo
 
@@ -190,6 +191,40 @@ def test_apply_under_an_empty_table_and_keeps_an_existing_readme(
     assert record["created"] == [] and record["kept"] == ["changelog.d/README.md"]
     assert path.read_text(encoding="utf-8") == '[changelog]\nfragments = "changelog.d"\n\n[bump]\n'
     assert readme.read_text(encoding="utf-8") == "ours\n"
+
+
+def test_apply_writes_the_readme_in_the_configs_style_as_init_does(tmp_path: Path) -> None:
+    # #305: a dash-style repo got the keep-a-changelog example
+    dash, keep = tmp_path / "dash", tmp_path / "keep"
+    write_config(dash, '[changelog]\nstyle = "dash"\n')
+    write_config(keep, '[changelog]\nstyle = "keep-a-changelog"\n')
+    for root in (dash, keep):
+        assert main(["--repo", str(root), "upgrade", "--apply", "changelog-fragments"]) == 0
+    dash_readme = (dash / "changelog.d" / "README.md").read_text(encoding="utf-8")
+    assert dash_readme == fragments_readme_text(Style.DASH)
+    block = "### Worktrees: a branch whose tip was a merged PR's head landed (#244)\n\nIt lands no more.\n"
+    assert block in dash_readme
+    assert "### Fixed" not in dash_readme
+    assert (keep / "changelog.d" / "README.md").read_bytes() == FRAGMENTS_README.encode("utf-8")
+    assert fragments_readme_text(Style.KEEP_A_CHANGELOG) == FRAGMENTS_README
+
+
+def test_apply_keeps_an_existing_readme_in_a_dash_repo(tmp_path: Path) -> None:
+    write_config(tmp_path, '[changelog]\nstyle = "dash"\n')
+    readme = tmp_path / "changelog.d" / "README.md"
+    readme.parent.mkdir()
+    readme.write_text("ours\n", encoding="utf-8")
+    assert main(["--repo", str(tmp_path), "upgrade", "--apply", "changelog-fragments"]) == 0
+    assert readme.read_text(encoding="utf-8") == "ours\n"
+
+
+def test_apply_refuses_an_unknown_style_and_writes_nothing(tmp_path: Path) -> None:
+    text = '[changelog]\nstyle = "plain"\n'
+    path = write_config(tmp_path, text)
+    with pytest.raises(ReleaseError, match=r"style must be one of keep-a-changelog, dash; got 'plain'"):
+        main(["--repo", str(tmp_path), "upgrade", "--apply", "changelog-fragments"])
+    assert path.read_text(encoding="utf-8") == text
+    assert not (tmp_path / "changelog.d" / "README.md").exists()
 
 
 @pytest.mark.parametrize(

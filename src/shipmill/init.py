@@ -12,7 +12,7 @@ from shipmill.doctor import CALLER, OPERATE_CALLER
 from shipmill.errors import ReleaseError
 from shipmill.gitrepo import Git
 from shipmill.policy import Style, VersionFiles
-from shipmill.upgrades import DASH_EXAMPLE, FRAGMENTS, KEEP_A_CHANGELOG_EXAMPLE, fragments_readme
+from shipmill.upgrades import FRAGMENTS, fragments_readme_text
 
 BOT_REPO = "shipmill/shipmill"
 BOT_REF = "v0"
@@ -55,11 +55,6 @@ def detect(root: Path) -> Detected:
     else:
         branch = "main"
     return Detected(name, branch, style, version_files)
-
-
-def fragments_readme_text(style: Style) -> str:
-    """The fragments folder's README.md, its example in the CHANGELOG's style (spec 013)"""
-    return fragments_readme(KEEP_A_CHANGELOG_EXAMPLE if style is Style.KEEP_A_CHANGELOG else DASH_EXAMPLE)
 
 
 def policy_text(d: Detected, fragments: bool = True) -> str:
