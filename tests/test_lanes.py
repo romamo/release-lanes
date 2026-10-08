@@ -37,9 +37,11 @@ def release(repo: Repo, decision: Decision) -> str:
     assert decision.action == "release", decision.reason
     assert decision.lane is not None and decision.version is not None
     day = dt.date.fromisoformat(repo.git.env["GIT_COMMITTER_DATE"][:10])
+    # main's policy, read once: prepare moves the checkout to the base, whose policy may be older
+    policy = repo.policy
     prepared = prepare(
         repo.git,
-        repo.policy,
+        policy,
         decision.lane,
         decision.version,
         decision.base,
@@ -50,7 +52,7 @@ def release(repo: Repo, decision: Decision) -> str:
         push=True,
     )
     assert prepared.pushed
-    land(repo.git, repo.policy, repo.github, decision.lane, decision.version, prepared.sha, decision.base, day)
+    land(repo.git, policy, repo.github, decision.lane, decision.version, prepared.sha, decision.base, day)
     assert cleanup(repo.git, decision.version)
     return prepared.sha
 
@@ -281,7 +283,7 @@ def test_hotfix_refuses_a_pr_without_an_entry(repo: Repo) -> None:
     repo.git.run("push", "-q", "origin", "main")
     repo.github.merges[5] = repo.git.sha()
     decision = plan(repo, at_day(1), event=Event.MANUAL, lane=Lane.HOTFIX, hotfix=Hotfix((5,)))
-    with pytest.raises(ReleaseError, match="adds no CHANGELOG entry"):
+    with pytest.raises(ReleaseError, match="adds no CHANGELOG entry: a hotfix ships"):
         prepare(
             repo.git,
             repo.policy,

@@ -3,7 +3,8 @@ folder, each holding what the PR would have written under Unreleased (spec 013).
 
 A stable release writes them into its CHANGELOG section and deletes them; until then every
 command that reads what is pending reads Unreleased plus the fragments, in file-name order.
-The planner reads them at a revision through git; prepare and doctor read the checkout.
+The planner reads them at a revision through git; prepare and doctor read the checkout; a
+hotfix reads the ones each of its merges added, and sync deletes them on main.
 """
 
 from collections.abc import Sequence
@@ -65,6 +66,36 @@ class AtRevision:
 
 
 @dataclass(frozen=True, slots=True)
+class ChangedBy:
+    """The files a commit changed under the folder against its first parent, on one side of
+    the diff: after it, the ones it added or modified; before it, the ones it deleted or
+    modified. A hotfix's merge ships the entries the first holds and the second lacks (spec
+    013), so a renamed or edited fragment ships only what the merge added. Reading only the
+    diff never needs the folder at the first parent."""
+
+    git: Git
+    rev: str
+    before: bool
+
+    def files(self, folder: str) -> list[str]:
+        out = self.git.run(
+            "diff",
+            "--name-only",
+            "-z",
+            "--no-renames",
+            f"--diff-filter={'DM' if self.before else 'AM'}",
+            f"{self.rev}^1",
+            self.rev,
+            "--",
+            f"{folder}/",
+        )
+        return [p[len(folder) + 1 :] for p in out.split("\0") if p]
+
+    def text(self, path: str) -> str:
+        return AtRevision(self.git, f"{self.rev}^1" if self.before else self.rev).text(path)
+
+
+@dataclass(frozen=True, slots=True)
 class InCheckout:
     root: Path
 
@@ -97,6 +128,18 @@ def read(source: _Source, folder: str, style: Style) -> list[Fragment]:
 def at_revision(git: Git, policy: Policy, rev: str) -> list[Fragment]:
     """The fragments at rev; none when the policy sets no fragments folder"""
     return [] if policy.fragments is None else read(AtRevision(git, rev), policy.fragments, policy.style)
+
+
+def added_by(git: Git, policy: Policy, merge: str) -> list[Fragment]:
+    """The fragments merge added or modified against its first parent, as merge has them;
+    none when the policy sets no fragments folder"""
+    return [] if policy.fragments is None else read(ChangedBy(git, merge, False), policy.fragments, policy.style)
+
+
+def removed_by(git: Git, policy: Policy, merge: str) -> list[Fragment]:
+    """The fragments merge deleted or modified against its first parent, as the parent has
+    them; none when the policy sets no fragments folder"""
+    return [] if policy.fragments is None else read(ChangedBy(git, merge, True), policy.fragments, policy.style)
 
 
 def in_checkout(root: Path, policy: Policy) -> list[Fragment]:

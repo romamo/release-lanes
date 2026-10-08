@@ -83,22 +83,29 @@ def run_after_stamp(root: Path, policy: Policy) -> None:
 
 
 def hotfix_entries(git: Git, policy: Policy, merges: Sequence[str]) -> list[Entry]:
-    """The entries each merge added under main's Unreleased"""
+    """The entries each merge added under main's Unreleased, then those it added to the
+    fragments it changed (spec 013): a fragment it only renamed adds nothing"""
     entries: list[Entry] = []
     for merge in merges:
-        after = _changelog(git, policy, merge).pending()
-        before = set(_changelog(git, policy, f"{merge}^1").pending())
+        after = _changelog(git, policy, merge).pending(fragments.entries(fragments.added_by(git, policy, merge)))
+        gone = fragments.entries(fragments.removed_by(git, policy, merge))
+        before = set(_changelog(git, policy, f"{merge}^1").pending(gone))
         added = [e for e in after if e not in before]
         if not added:
-            raise ReleaseError(f"{merge[:12]} adds no CHANGELOG entry: a hotfix ships entries it can name")
+            also = "" if policy.fragments is None else f" or fragment in {policy.fragments}"
+            raise ReleaseError(f"{merge[:12]} adds no CHANGELOG entry{also}: a hotfix ships entries it can name")
         entries.extend(e for e in added if e not in entries)
     return entries
 
 
 def apply_merges(git: Git, policy: Policy, merges: Sequence[str]) -> None:
-    """Apply each merge's change, except to the CHANGELOG, to the checkout's index"""
+    """Apply each merge's change, except to the CHANGELOG and the fragments folder, to the
+    checkout's index"""
+    kept_off = [f":(exclude){policy.changelog}"]
+    if policy.fragments is not None:
+        kept_off.append(f":(exclude){policy.fragments}")
     for merge in merges:
-        patch = git.run_bytes("diff", "--binary", f"{merge}^1", merge, "--", ".", f":(exclude){policy.changelog}")
+        patch = git.run_bytes("diff", "--binary", f"{merge}^1", merge, "--", ".", *kept_off)
         if not patch.strip():
             continue
         problem = git.apply(patch)
@@ -151,15 +158,26 @@ def stamp(
 
 def sync(git: Git, policy: Policy, version: Version, released: str, date: dt.date, newest: bool) -> list[str]:
     """Bring a stable release cut off main into main's checkout: move its entries from
-    Unreleased into its section, and when it is the newest stable, point the version at it.
-    released is the CHANGELOG as the release commit has it."""
+    Unreleased into its section, delete the fragments whose every entry it holds (spec 013),
+    and when it is the newest stable, point the version at it. released is the CHANGELOG as
+    the release commit has it."""
     root = git.root
     stamped = Changelog(released, policy.style)
     entries = stamped.section_entries(version)
     path = root / policy.changelog
     main = Changelog(path.read_text(encoding="utf-8"), policy.style)
-    path.write_text(main.release(version, date, entries, from_unreleased=True), encoding="utf-8")
+    found = fragments.in_checkout(root, policy)
+    path.write_text(
+        main.release(version, date, entries, from_unreleased=True, fragments=fragments.entries(found)),
+        encoding="utf-8",
+    )
     changed = [policy.changelog]
+    held = set(entries)
+    for fragment in found:
+        # a fragment with an entry the section lacks stays: that entry is still pending
+        if all(e in held for e in fragment.entries):
+            (root / fragment.path).unlink()
+            changed.append(fragment.path)
     if newest:
         changed += write_version(root, policy, version, date)
     run_after_stamp(root, policy)
