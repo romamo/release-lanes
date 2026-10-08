@@ -203,3 +203,11 @@ entry that supersedes it, never by editing an old one.
 - Applies to: src/shipmill/worktrees.py, src/shipmill/gate.py, skills/*/SKILL.md, worktrees, docs/specs/002-*
 - Enforced by: the worktrees tests (with the implementing PR)
 - Supersedes: D-12
+
+## D-25: A stable promotion folds its version's rc sections into one section
+
+- Decided: 2026-10-08, in shipmill/shipmill#243
+- Rule: When a stable release promotes an rc and the CHANGELOG holds sections for that version's rcs ([X.Y.ZrcN], newer than the last stable), the X.Y.Z section gets every entry of those sections plus Unreleased, merged under their headings, and the rc sections are removed; those sections count as pending, so a promotion never skips as nothing pending while they hold entries
+- Why: A repo that moved to shipmill from a release bot that wrote rc sections had an empty Unreleased at every rc's base, so stable promotion skipped and 1.0.0 could not release (romamo/treaty); one stable section shows everything since the last stable, and the per-rc history stays in the rc tags and their GitHub releases
+- Applies to: src/shipmill/planner.py, src/shipmill/changelog.py, src/shipmill/stamp.py, CHANGELOG, stable lane
+- Enforced by: the planner and changelog tests (with the implementing PR)
