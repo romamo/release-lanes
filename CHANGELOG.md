@@ -7,6 +7,15 @@ bot.
 
 ## [Unreleased]
 
+### Changed
+
+- `shipmill gate`'s QUIET line names the pull requests it leaves for a person: with no
+  work and pull requests in `PRS_OPEN` while `[agents] prs` isn't true, it reads `QUIET:
+  nothing needs an agent; N pull request(s) wait to land, landing off ([agents] prs =
+  false)`; with none waiting it reads as before. A row's `fix` from `watch_state.py --json`
+  enters neither the gate's fingerprint nor its session prompt, so a new fix starts no
+  session (#260)
+
 ## [0.36.0] - 2026-10-08
 
 ### Added

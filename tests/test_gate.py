@@ -35,6 +35,7 @@ from shipmill.gate import (
     refresh,
     skills_dir,
     state_dir,
+    tick_lines,
 )
 from shipmill.gitrepo import Git
 from shipmill.notify import NotifyFailed
@@ -273,6 +274,46 @@ def test_the_gate_reads_the_rows_watch_state_prints() -> None:
         "OPERATE_FAILED",
         "INCIDENT_OPEN",
     }
+
+
+def test_s011_10_a_fix_changes_neither_the_fingerprint_nor_the_prompt() -> None:
+    rows = [
+        {"state": "ISSUES", "subject": "romamo/demo", "detail": "NEW #12", "agent": True},
+        {"state": "BOT_FAILED", "subject": "release.yml", "detail": "failure: https://x.test/runs/5", "agent": True},
+        {"state": "PRS_OPEN", "subject": "romamo/demo", "detail": "#3", "agent": False},
+    ]
+    fixes = ["/shipmill:github-issue-triage romamo/demo", "gh run rerun 5 --failed -R romamo/demo", "land #3 MARKER"]
+    bare = "\n".join(json.dumps(r) for r in rows)
+    fixed = "\n".join(json.dumps({**r, "fix": f}) for r, f in zip(rows, fixes, strict=True))
+    nulled = "\n".join(json.dumps({**r, "fix": None}) for r in rows)
+    decisions = [decide(parse_findings(t), [], None, NOW, DAY, prs=True) for t in (bare, fixed, nulled)]
+    assert len({fingerprint(d.work) for d in decisions}) == 1
+    assert len({prompt("/triage {repo}", "romamo/demo", d.work, NOW) for d in decisions}) == 1
+    assert all("MARKER" not in prompt("/triage {repo}", "romamo/demo", d.work, NOW) for d in decisions)
+    # a fix that is new or changed never starts a session by itself
+    last = Launch(fingerprint(decisions[0].work), "s1", NOW - dt.timedelta(hours=1))
+    assert decide(parse_findings(fixed), [], last, NOW, DAY, prs=True).action is Action.UNCHANGED
+
+
+def test_s011_20_quiet_names_the_pull_requests_no_gate_lands() -> None:
+    prs = [Finding("PRS_OPEN", "romamo/demo", "#3 #5", False)]
+    decision = decide([Finding("BOT_OK", "release.yml", "", False), *prs], [], None, NOW, DAY)
+    expected = "QUIET: nothing needs an agent; 2 pull request(s) wait to land, landing off ([agents] prs = false)"
+    assert tick_lines(decision, None, (), (), dry_run=False) == [expected]
+    assert decision.reason == expected.removeprefix("QUIET: ")
+    single = decide([OPEN_PRS], [], None, NOW, DAY).reason
+    assert single == "nothing needs an agent; 1 pull request(s) wait to land, landing off ([agents] prs = false)"
+
+
+def test_s011_20_quiet_with_no_pull_request_waiting_reads_as_before() -> None:
+    decision = decide([Finding("BOT_OK", "release.yml", "", False), *REPORT_ONLY], [], None, NOW, DAY)
+    assert tick_lines(decision, None, (), (), dry_run=False) == ["QUIET: nothing needs an agent"]
+    assert decide(REPORT_ONLY, [], None, NOW, DAY, prs=True).reason == "nothing needs an agent"
+
+
+def test_an_unreadable_open_prs_row_is_refused_not_counted() -> None:
+    with pytest.raises(ReleaseError, match="PRS_OPEN row is unreadable"):
+        decide([Finding("PRS_OPEN", "romamo/demo", "#3 and more", False)], [], None, NOW, DAY)
 
 
 @pytest.mark.parametrize("prs", [False, True])

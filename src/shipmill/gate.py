@@ -198,6 +198,18 @@ def busy(sessions: Sequence[Session]) -> Decision | None:
     return None
 
 
+def unlanded(findings: Iterable[Finding]) -> tuple[int, ...]:
+    """The pull requests PRS_OPEN lists, its detail only `#N` tokens; refused when unreadable"""
+    numbers: set[int] = set()
+    for f in findings:
+        if f.state != PRS_OPEN:
+            continue
+        if re.fullmatch(r"#\d+(?: #\d+)*", f.detail) is None:
+            raise ReleaseError(f"watch_state.py's PRS_OPEN row is unreadable: {f.detail[:200]!r}")
+        numbers.update(int(n) for n in re.findall(r"#(\d+)", f.detail))
+    return tuple(sorted(numbers))
+
+
 def decide(
     findings: Sequence[Finding],
     sessions: Sequence[Session],
@@ -211,7 +223,11 @@ def decide(
         return pending
     work = tuple(f for f in findings if f.agent or (prs and f.state == PRS_OPEN))
     if not work:
-        return Decision(Action.QUIET, "nothing needs an agent", work)
+        waiting = () if prs else unlanded(findings)
+        landing = (
+            f"; {len(waiting)} pull request(s) wait to land, landing off ([agents] prs = false)" if waiting else ""
+        )
+        return Decision(Action.QUIET, f"nothing needs an agent{landing}", work)
     if last is not None and last.fingerprint == fingerprint(work) and now - last.at < retry:
         again = (last.at + retry).isoformat(timespec="minutes")
         return Decision(Action.UNCHANGED, f"same findings as session {last.session}; retried after {again}", work)

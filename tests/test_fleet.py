@@ -503,6 +503,21 @@ def test_a_watch_row_may_carry_a_fix(fl: ModuleType, fix: str, read: bool) -> No
             fl.watch_rows("o/r", line)
 
 
+def test_s011_10_fleet_reads_the_lines_watch_state_prints_with_their_fix(fl: ModuleType, ws: ModuleType) -> None:
+    rows = [
+        ws.Row("BOT_FAILED", "release.yml", "failure: https://github.com/o/r/actions/runs/5", "gh run rerun 5 -R o/r"),
+        ws.Row("PRS_OPEN", "o/r", "#3 #4", None),
+        ws.Row("BOT_OK", "release.yml", "", None),
+    ]
+    out = "".join(json.dumps(r.json()) + "\n" for r in rows)
+    assert all('"fix": ' in line for line in out.splitlines())
+    assert fl.watch_rows("o/r", out) == [fl.Row(r.state, r.subject, r.detail) for r in rows]
+    # the fix is accepted, never a pass for a malformed row: an extra key still refuses it
+    for bad in ({**rows[0].json(), "extra": 1}, {k: v for k, v in rows[0].json().items() if k != "agent"}):
+        with pytest.raises(SystemExit, match="not a row"):
+            fl.watch_rows("o/r", json.dumps(bad) + "\n")
+
+
 def test_the_fixture_action_rows_are_agent_rows(ws: ModuleType) -> None:
     assert WATCH_ACTION <= ws.AGENT
 
