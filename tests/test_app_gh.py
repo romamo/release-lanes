@@ -5,6 +5,7 @@ reaches the network: GitHub is MintApi and openssl FakeSigner"""
 import datetime as dt
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -337,6 +338,31 @@ def test_without_app_id_a_callers_own_gh_token_is_left_as_it_is(tmp_path: Path, 
     runner = Runner()
     assert gh(root, ["auth", "status"], host, MintApi(), runner, GH_TOKEN="the-callers") == 7
     assert runner.calls[0][1]["GH_TOKEN"] == "the-callers"
+
+
+def broken(root: Path) -> Path:
+    """The checkout as a worktree whose main repo is gone: git can't read it"""
+    shutil.rmtree(root / ".git")
+    (root / ".git").write_text(f"gitdir: {root.parent / 'gone'}\n", encoding="utf-8")
+    assert not Git(root).ok("rev-parse", "--show-toplevel")
+    return root
+
+
+def test_s012_3_a_checkout_git_cant_read_never_runs_gh_as_the_host(tmp_path: Path, host: Host) -> None:
+    """A worktree whose main repo is gone (or one git calls of dubious ownership) still sets
+    app_id; git failing there must not read as "no checkout", which would write as the person"""
+    root = broken(checkout(tmp_path, WITH_APP))
+    runner = Runner()
+    with pytest.raises(ReleaseError, match="git can't read the checkout"):
+        gh(root / ".github", ["issue", "comment", "1", "-R", REPO, "--body", "x"], host, MintApi(), runner)
+    assert runner.calls == []
+
+
+def test_without_app_id_a_checkout_git_cant_read_runs_gh_as_the_host(tmp_path: Path, host: Host) -> None:
+    root = broken(checkout(tmp_path, '[agents]\nprompt = "/t"\n'))
+    runner = Runner()
+    assert gh(root, ["pr", "list"], host, MintApi(), runner) == 7
+    assert "GH_TOKEN" not in runner.calls[0][1]
 
 
 def test_without_app_id_an_app_key_is_refused(tmp_path: Path, host: Host) -> None:

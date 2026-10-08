@@ -651,6 +651,13 @@ def _app_key(passed: list[str]) -> tuple[Path | None, list[str]]:
     return None, passed
 
 
+def _unreadable_top(root: Path) -> Path | None:
+    """The nearest folder at or above root holding a .git that git couldn't read (a worktree
+    whose repo is gone, a checkout of dubious ownership); None outside any checkout. Its config
+    still decides gh's identity, so git failing never reads as "no App" (D-14)"""
+    return next((folder for folder in (root, *root.parents) if (folder / ".git").exists()), None)
+
+
 def _gh(
     root: Path,
     passed: list[str],
@@ -667,12 +674,18 @@ def _gh(
     if not root.is_dir():  # a mistyped --repo must not read as a repo with no App
         raise ReleaseError(f"--repo {root} is not a folder")
     git = Git(root)
-    top = Path(git.run("rev-parse", "--show-toplevel").strip()) if git.ok("rev-parse", "--show-toplevel") else None
+    readable = git.ok("rev-parse", "--show-toplevel")
+    top = Path(git.run("rev-parse", "--show-toplevel").strip()) if readable else _unreadable_top(root)
     app_id = None if top is None else app_id_of(top)
     if top is None or app_id is None:
         if key is not None:
             raise ReleaseError(f"--app-key names an App's key, but no [agents] app_id is set in {CONFIG_PATH}")
         return runner([str(find_gh(environ)), *gh_args], as_host(environ))
+    if not readable:
+        raise ReleaseError(
+            f"git can't read the checkout at {top}, which sets [agents] app_id, so the App's token can't be had; "
+            f"`git -C {top} status` names why"
+        )
     repo = named_repo(gh_args) or _origin_repo(top)
     if repo is None:
         raise ReleaseError(f"{top}'s origin isn't a GitHub repo; name the repo with gh's -R owner/name")
