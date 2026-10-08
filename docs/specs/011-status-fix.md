@@ -240,4 +240,9 @@ waiting it is unchanged.
 
 ## Issues
 
+- shipmill/shipmill#258: S-011-1, S-011-2, S-011-3, S-011-4, S-011-5, S-011-6, S-011-7, S-011-8, S-011-9
+- shipmill/shipmill#259: S-011-12, S-011-13, S-011-14, S-011-15, S-011-16, S-011-17, S-011-18, S-011-19
+- shipmill/shipmill#260: S-011-10, S-011-20
+- shipmill/shipmill#261: S-011-11
+
 ## Verification
