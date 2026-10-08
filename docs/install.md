@@ -241,14 +241,16 @@ the details.
    # plugin_update = true # false (default): the gate changes no plugin install; true: it updates its checkout's, once a day
    ```
 
-   The gate's checkout has a shipmill plugin install of its own, apart from the repo's
-   (Claude Code keys a project install on the folder). With `plugin_update = true`, a tick
-   about to start a session checks at most once per 24 hours whether that install is behind
-   the latest release and, when it is, runs `claude plugin update shipmill@shipmill --scope
-   project` in the checkout first; a failed update is printed on the tick and the session
-   starts anyway (D-22). Either way `status`, `doctor`, and the setup checklist report an
-   install that is behind, in the repo's folder and in the gate's checkout, each with its
-   own fix
+   The gate's checkout has shipmill plugin installs of its own, apart from the repo's
+   (Claude Code keys a project or local install on the folder). With `plugin_update = true`,
+   a tick about to start a session checks at most once per 24 hours whether any of them is
+   behind the latest release and, for each one that is, runs `claude plugin update
+   shipmill@shipmill --scope <its scope>` in the checkout first, then reads the installs
+   again: an install still behind, or one in another folder that the update changed, is
+   printed as a failure. A user-scope install is never updated. A failed update is printed
+   on the tick and the session starts anyway (D-23). Either way `status`, `doctor`, and the
+   setup checklist report an install that is behind, in the repo's folder and in the gate's
+   checkout, each with its own fix
 
    Without `app_id`, a session writes as your `gh` login, so its pull requests, merges,
    and commits read as yours. Set it before you schedule the gate, to have them made by a
@@ -473,8 +475,8 @@ the gate's own environment to choose another ceiling.
    `shipmill/needs-decision.json`, and `gate --json` reports `mode` and a `decisions` list
    (`item`, `since`, `waited_hours`, `notified`, `error`). `mode` is null on a HELD,
    WAITING, or RUNNING tick, which reads no config. `plugin` is the daily plugin check of
-   a launch with `plugin_update = true` (`installed`, `latest`, `updated`, `error`), null
-   when none ran
+   a launch with `plugin_update = true` (`latest`, `installs`, each with `scope`,
+   `installed`, and `updated`, and `error`), null when none ran
 
 ## Pause or remove it
 

@@ -53,7 +53,7 @@ PeopleReader = Callable[[], Flagged]  # spec 012's flagged items, or ReleaseErro
 
 
 def read_plugin_rows(repo: str, root: Path) -> list[PluginRow]:
-    """watch_state.py's shipmill_rows for the checkout (D-22): the same installs, latest
+    """watch_state.py's shipmill_rows for the checkout (D-23): the same installs, latest
     release (`gh release view`), and fix text as `shipmill status`, read in this process"""
     script = skills_dir() / "github-ship-watch" / "scripts" / "watch_state.py"
     spec = importlib.util.spec_from_file_location("shipmill_watch_state", script)

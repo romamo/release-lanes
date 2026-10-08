@@ -51,4 +51,4 @@ prs = true
 retry_hours = 24
 app_id = 5209412   # gated sessions write as shipmill-romamo[bot] (spec 004)
 mode = "headless"  # what the gate runs; written out, not left to the default (D-20)
-plugin_update = true  # the gate updates its checkout's plugin install, once a day (D-22)
+plugin_update = true  # the gate updates its checkout's plugin installs, once a day (D-23)

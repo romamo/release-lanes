@@ -361,9 +361,10 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
    # plugin_update = true # default false: the gate changes no plugin install
    ```
 
-   `plugin_update = true` lets the gate update its checkout's own plugin install, at most
-   once a day, before it starts a session, so gate sessions run the released skills; a
-   failed update is printed on the tick and the session starts anyway (D-22). Ask the user
+   `plugin_update = true` lets the gate update its checkout's own plugin installs (project
+   and local scope; never user scope), at most once a day, before it starts a session, so
+   gate sessions run the released skills; a failed update is printed on the tick and the
+   session starts anyway (D-23). Ask the user
    before setting it: it is the policy's permission to change an install
 
    Every time you set up the gate, ask two questions together, before writing the

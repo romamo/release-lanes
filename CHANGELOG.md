@@ -28,6 +28,13 @@ bot.
   write` only when `upgrade` is propose or act and an upgrade is pending (D-9); `shipmill
   status` lists each pending upgrade with its
   issue's link or the `--apply` command as its fix (spec 014) (#280)
+- With `[agents] plugin_update = true`, the gate now updates every shipmill plugin install
+  keyed on its checkout, at local scope as well as project scope, so a gate whose checkout
+  has a local install (shipmill's own) no longer stays on an old release (D-23). After the
+  update it reads the installs again and reports a failure, not an update, when an install
+  stayed behind or an install in another folder changed; the session still starts. `gate
+  --json`'s `plugin` is now `latest`, `installs` (each `scope`, `installed`, `updated`), and
+  `error` (#240)
 
 ## [0.40.0] - 2026-10-08
 
