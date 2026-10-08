@@ -158,6 +158,100 @@ def test_stable_on_an_unmoved_main_fast_forwards_it(repo: Repo) -> None:
     assert "## [1.1.0]" in repo.main_text("CHANGELOG.md")
 
 
+LEGACY_RC_SECTIONS = """\
+# Changelog
+
+## [Unreleased]
+
+## [1.1.0rc2] - 2026-10-04
+
+### Added
+
+- Feature C (#3)
+
+### Fixed
+
+- Fix B (#2)
+
+## [1.1.0rc1] - 2026-10-03
+
+### Added
+
+- Feature A (#1)
+
+## [1.0.0] - 2026-09-01
+
+### Added
+
+- The first release
+
+[Unreleased]: https://github.com/o/demo/compare/v1.1.0rc2...HEAD
+[1.1.0rc2]: https://github.com/o/demo/compare/v1.1.0rc1...v1.1.0rc2
+[1.1.0rc1]: https://github.com/o/demo/compare/v1.0.0...v1.1.0rc1
+[1.0.0]: https://github.com/o/demo/releases/tag/v1.0.0
+"""
+
+
+def _tag_on_main(repo: Repo, changelog: str, tag: str) -> str:
+    """A release commit an earlier release bot made on main: its CHANGELOG, tagged"""
+    repo.git.run("checkout", "-q", "main")
+    repo.write("CHANGELOG.md", changelog)
+    repo.git.run("commit", "-q", "--allow-empty", "-am", f"Release {tag}")
+    repo.git.run("tag", "-a", tag, "-m", tag)
+    repo.git.run("push", "-q", "origin", "main", tag)
+    return repo.git.sha()
+
+
+def test_stable_folds_the_rc_sections_an_earlier_bot_wrote(repo: Repo) -> None:  # #243, D-25
+    repo.at(at_day(0))
+    rc_base = _tag_on_main(repo, LEGACY_RC_SECTIONS, "v1.1.0rc2")
+    repo.at(at_day(1))
+    repo.merge(4, "Fixed", "Fix D, after the rc")  # main moves on: the release syncs back
+
+    decision = plan(repo, at_day(4), event=Event.MANUAL, lane=Lane.STABLE)
+    assert (decision.action, str(decision.version), decision.base) == ("release", "1.1.0", rc_base)
+    sha = release(repo, decision)
+
+    # every entry of the rc sections, newest first, merged under their headings; no rc section left
+    folded = "### Added\n\n- Feature C (#3)\n- Feature A (#1)\n\n### Fixed\n\n- Fix B (#2)\n"
+    released = repo.git.show(sha, "CHANGELOG.md") or ""
+    assert Changelog(released, Style.KEEP_A_CHANGELOG).section(Version.parse("1.1.0")) == folded
+    assert "## [Unreleased]\n\n## [1.1.0] - " in released
+    assert "1.1.0rc" not in released
+    assert released.endswith(
+        "[Unreleased]: https://github.com/o/demo/compare/v1.1.0...HEAD\n"
+        "[1.1.0]: https://github.com/o/demo/compare/v1.0.0...v1.1.0\n"
+        "[1.0.0]: https://github.com/o/demo/releases/tag/v1.0.0\n"
+    )
+    assert repo.github.releases[-1][:3] == ("v1.1.0", "demo 1.1.0", folded)
+
+    # main's sync folds the same sections and keeps what landed after the rc pending
+    main = Changelog(repo.main_text("CHANGELOG.md"), Style.KEEP_A_CHANGELOG)
+    assert main.section(Version.parse("1.1.0")) == folded
+    assert [e.text for e in main.pending()] == ["- Fix D, after the rc (#4)"]
+    assert [str(x) for x in main.versions()] == ["1.1.0", "1.0.0"]
+
+
+@pytest.mark.parametrize(
+    ("changelog", "found"),
+    [
+        (None, "no [1.1.0rcN] section"),
+        (
+            LEGACY_RC_SECTIONS.split("### Added")[0] + "## [1.0.0] - 2026-09-01\n",
+            "its rc sections [1.1.0rc2] hold no entries",
+        ),
+    ],
+)
+def test_a_promotion_with_nothing_to_fold_names_the_rc_sections(
+    repo: Repo, changelog: str | None, found: str
+) -> None:  # #243
+    repo.at(at_day(0))
+    _tag_on_main(repo, changelog or repo.read("CHANGELOG.md"), "v1.1.0rc2")
+    decision = plan(repo, at_day(4), event=Event.MANUAL, lane=Lane.STABLE)
+    assert decision.action == "skip"
+    assert f"v1.1.0rc2's base has nothing pending under Unreleased, and {found}" in decision.reason
+
+
 def test_hotfix_ships_chosen_prs_from_the_release_branch(repo: Repo) -> None:
     repo.merge(1, "Added", "Feature A, not ready", "src/a.py", "A = 1\n")
     repo.merge(2, "Fixed", "Urgent fix", "src/app.py", "VALUE = 2\n")

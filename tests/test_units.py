@@ -220,6 +220,39 @@ class TestChangelog:
         with pytest.raises(ReleaseError, match=message):
             Changelog(text, Style.KEEP_A_CHANGELOG).pending()
 
+    def test_without_rc_sections_a_stable_release_holds_what_is_pending(self) -> None:  # #243
+        changelog = Changelog(KAC, Style.KEEP_A_CHANGELOG)
+        assert changelog.rc_sections(v("1.1.0")) == []
+        assert changelog.promoted(v("1.1.0")) == changelog.pending()
+
+    def test_folds_only_the_rc_sections_of_the_version(self) -> None:  # #243, D-25
+        text = KAC.replace(
+            "## [1.0.0]",
+            "## [1.2.0rc1] - 2026-10-04\n\n### Added\n\n- Next series (#9)\n\n"
+            "## [1.1.0rc1] - 2026-10-03\n\n### Fixed\n\n- Fix C (#3)\n- Fix D (#4)\n\n"
+            "## [1.0.0]",
+        ).replace("[1.0.0]: https", "[1.1.0rc1]: https://github.com/o/demo/compare/v1.0.0...v1.1.0rc1\n[1.0.0]: https")
+        changelog = Changelog(text, Style.KEEP_A_CHANGELOG)
+        assert changelog.rc_sections(v("1.1.0")) == [v("1.1.0rc1")]
+        entries = changelog.promoted(v("1.1.0"))
+        # Unreleased first, then the rc section; Fix C, in both, once
+        assert [e.text for e in entries] == [
+            "- Feature A (#1)",
+            "- Feature B, with a long\n  continuation line (#2)",
+            "- Fix C (#3)",
+            "- Fix D (#4)",
+        ]
+        with pytest.raises(ReleaseError, match="1 of their entries are not in the release: '- Fix D"):
+            changelog.release(v("1.1.0"), dt.date(2026, 10, 5), entries[:3], from_unreleased=True)
+        after = changelog.release(v("1.1.0"), dt.date(2026, 10, 5), entries, from_unreleased=True)
+        assert "1.1.0rc1" not in after
+        assert "## [1.2.0rc1] - 2026-10-04\n\n### Added\n\n- Next series (#9)\n\n## [1.1.0] - 2026-10-05" in after
+        assert Changelog(after, Style.KEEP_A_CHANGELOG).section(v("1.1.0")) == (
+            "### Added\n\n- Feature A (#1)\n- Feature B, with a long\n  continuation line (#2)\n\n"
+            "### Fixed\n\n- Fix C (#3)\n- Fix D (#4)\n"
+        )
+        assert "[1.1.0]: https://github.com/o/demo/compare/v1.0.0...v1.1.0\n" in after
+
     def test_needs_unreleased_link(self) -> None:
         changelog = Changelog(KAC.replace("[Unreleased]: https", "[Other]: https"), Style.KEEP_A_CHANGELOG)
         entry = changelog.unreleased()[0]
