@@ -150,6 +150,8 @@ def plain_changelog(text: str, where: str) -> dict[str, str]:
         if header is not None:
             current = header.group(1)
             continue
+        if stripped.startswith("["):  # a quoted header such as ["changelog"]: never skipped silently
+            fail(f"{where}: line {number}: can't read the header {stripped!r} on Python 3.10: write a bare [name]")
         if current == "" and PLAIN_DOTTED.match(stripped):
             fail(f"{where}: line {number}: can't read {stripped!r} on Python 3.10: write a [changelog] table")
         if current != "changelog":

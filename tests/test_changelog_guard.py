@@ -439,6 +439,16 @@ def test_the_plain_form_reads_the_changelog_table_as_tomllib_does() -> None:
         assert guard_module().plain_changelog(text, "config") == tomllib.loads(text)["changelog"]
 
 
+@pytest.mark.parametrize("header", ['["changelog"]', "['changelog']", '[changelog."x"]'])
+def test_the_plain_form_refuses_a_header_it_cannot_read(header: str, capsys: pytest.CaptureFixture[str]) -> None:
+    """A quoted header was skipped, so ["changelog"]'s fragments read as unset on Python 3.10"""
+    text = f'[bump]\nfrom = "headings"\n{header}\nstyle = "dash"\nfragments = "changelog.d"\n'
+    with pytest.raises(SystemExit) as exited:
+        guard_module().plain_changelog(text, "config")
+    assert exited.value.code == 2
+    assert f"config: line 3: can't read the header {header!r} on Python 3.10" in capsys.readouterr().err
+
+
 def test_s013_15_two_branches_that_each_add_a_fragment_merge_with_no_conflict(tmp_path: Path) -> None:
     root = with_fragments(tmp_path)
     git(root, "switch", "-q", "-c", "a", "main")
