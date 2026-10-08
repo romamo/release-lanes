@@ -20,7 +20,12 @@
   worktrees       list the repository's worktrees, each REMOVABLE once its work landed, or KEPT and why;
                   --prune removes the REMOVABLE ones and their local branches
   app-token       print a GitHub App installation token limited to one repo, cached while it has
-                  10 minutes left; --git-credential answers as git's credential helper
+                  10 minutes left (in the checkout, else under $XDG_CACHE_HOME/shipmill);
+                  --git-credential answers as git's credential helper
+  gh              run gh with the arguments that follow, as the repo's GitHub App when
+                  [agents] app_id is set (the token limited to gh's -R/--repo, else origin's
+                  repo), else as the host's gh login; exits with gh's code. Every gh call that
+                  writes in an agent session goes through it
   app-create      create the gate's GitHub App in one click: owner and visibility planned from the
                   repos holding .github/shipmill.toml, the key saved with mode 0600
   app-install     guide installing the App on more repos: the App's Install App page and what to pick
@@ -45,17 +50,19 @@ from pathlib import Path
 from typing import TextIO
 
 from shipmill import cli_command, status
-from shipmill.agents import AgentsConfig
+from shipmill.agents import AgentsConfig, app_id_of
 from shipmill.app import (
     CACHE,
     HELPERS,
     Api,
     Identity,
+    NotInstalled,
     Openssl,
     Signer,
     UrllibApi,
     app_check,
     app_token,
+    cache_outside,
     check_key,
     credential,
     default_key,
@@ -76,6 +83,7 @@ from shipmill.app_create import (
     pick_owner,
     plan,
 )
+from shipmill.app_gh import GhRunner, as_app, as_host, find_gh, named_repo, run_gh
 from shipmill.app_install import WAIT_SECONDS, guide
 from shipmill.autonomy import Hold
 from shipmill.config import CONFIG_PATH, config_path
@@ -293,7 +301,10 @@ def _parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser(
         "app-token",
-        help="print an installation token of a GitHub App, limited to one repo and cached in the checkout",
+        help=(
+            "print an installation token of a GitHub App, limited to one repo; cached in the checkout, "
+            "else in $XDG_CACHE_HOME/shipmill/<owner>/<repo>/ (default ~/.cache)"
+        ),
     )
     p.add_argument("slug", metavar="owner/name", help="the GitHub repo the token is limited to; --repo is its checkout")
     p.add_argument("--app-id", type=int, required=True, help="the App's id, as [agents] app_id names it")
@@ -304,6 +315,16 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "answer git's credential protocol on stdin: get prints username=x-access-token and the token "
             "as password for https://github.com; store, erase, and other operations print nothing"
+        ),
+    )
+
+    sub.add_parser(
+        "gh",
+        add_help=False,  # `shipmill gh --help` is gh's help: every argument after gh goes to gh
+        help=(
+            "run gh with the arguments that follow, as [agents] app_id's GitHub App when set, else as the "
+            "host's gh login (spec 012); use it for every gh call that writes from an agent session. "
+            "Only a leading --app-key PATH is shipmill's (default: ~/.config/shipmill/app-<app_id>.pem)"
         ),
     )
 
@@ -360,14 +381,25 @@ def main(
     signer: Signer | None = None,
     stdin: TextIO | None = None,
     state: StateRunner | None = None,
+    environ: Mapping[str, str] | None = None,
+    home: Path | None = None,
+    gh_runner: GhRunner | None = None,
 ) -> int:
     """github stands in for gh, http for the health checks, sessions for `claude agents`, api
-    for GitHub's REST API, signer for openssl, stdin for git's credential request, and state
-    for watch_state.py, as tests pass fakes"""
-    args = _parser().parse_args(argv)
+    for GitHub's REST API, signer for openssl, stdin for git's credential request, state for
+    watch_state.py, environ for this process's env, home for the user's home, and gh_runner
+    for running `shipmill gh`'s gh, as tests pass fakes"""
+    head, passed = _split_gh(argv)
+    args = _parser().parse_args(head)
     root: Path = args.repo.resolve()
+    env = environ if environ is not None else os.environ
+    user_home = home if home is not None else Path.home()
+    if args.command == "gh":
+        if passed is None:  # such as `shipmill -- gh ...`
+            raise ReleaseError("only --repo PATH may come before gh, as in `shipmill --repo PATH gh pr list`")
+        return _gh(root, passed, api or UrllibApi(), signer or Openssl(), env, user_home, gh_runner or run_gh)
     if args.command == "app-token":
-        return _app_token(root, args, api or UrllibApi(), signer or Openssl(), stdin or sys.stdin)
+        return _app_token(root, args, api or UrllibApi(), signer or Openssl(), stdin or sys.stdin, env, user_home)
     if args.command == "app-install":
         return _app_install(root, args, api or UrllibApi(), signer or Openssl())
     if args.command == "app-create":
@@ -556,13 +588,46 @@ def _gate(root: Path, args: argparse.Namespace, github: GitHub, sessions: Sessio
     return 0
 
 
-def _app_token(root: Path, args: argparse.Namespace, api: Api, signer: Signer, stdin: TextIO) -> int:
-    """Spec 004, Tokens. Never falls back to the host's gh login (D-14): any failure exits 2"""
+def _split_gh(argv: list[str]) -> tuple[list[str], list[str] | None]:
+    """argv up to and including the gh command, and the arguments after it, which go to gh
+    untouched (spec 012); None when the command isn't gh. Before a command only --repo PATH
+    (or an abbreviation of it) takes a value"""
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "gh":
+            return argv[: index + 1], argv[index + 1 :]
+        if not arg.startswith("-") or arg == "--":
+            return argv, None
+        index += 2 if len(arg) > 2 and "--repo".startswith(arg) else 1
+    return argv, None
+
+
+def _cache(root: Path, repo: str, environ: Mapping[str, str], home: Path) -> Path:
+    """Spec 004's cache in a checkout's state folder; spec 012's under XDG_CACHE_HOME with none"""
+    if not root.is_dir():
+        raise ReleaseError(f"--repo {root} is not a folder")
+    git = Git(root)
+    if git.ok("rev-parse", "--git-common-dir"):
+        return state_dir(git) / CACHE
+    return cache_outside(repo, environ, home)
+
+
+def _app_token(
+    root: Path,
+    args: argparse.Namespace,
+    api: Api,
+    signer: Signer,
+    stdin: TextIO,
+    environ: Mapping[str, str],
+    home: Path,
+) -> int:
+    """Specs 004 and 012, Tokens. Never falls back to the host's gh login (D-14): any failure exits 2"""
     app_id: int = args.app_id
     if app_id < 1:
         raise ReleaseError(f"--app-id must be 1 or more, got {app_id}")
-    key: Path = args.app_key if args.app_key is not None else default_key(app_id, Path.home())
-    cache = state_dir(Git(root)) / CACHE
+    key: Path = args.app_key if args.app_key is not None else default_key(app_id, home)
+    cache = _cache(root, args.slug, environ, home)
 
     def token() -> str:
         return app_token(cache, args.slug, app_id, key, dt.datetime.now(dt.UTC), signer, api)
@@ -572,6 +637,52 @@ def _app_token(root: Path, args: argparse.Namespace, api: Api, signer: Signer, s
         return 0
     sys.stdout.write(credential(args.git_credential, stdin.read(), token))
     return 0
+
+
+def _app_key(passed: list[str]) -> tuple[Path | None, list[str]]:
+    """A leading --app-key PATH (or --app-key=PATH) is shipmill's, since gh has no such flag
+    before its command; the rest goes to gh untouched"""
+    if passed[:1] == ["--app-key"]:
+        if len(passed) < 2:
+            raise ReleaseError("--app-key needs the App's private key, such as ~/.config/shipmill/app-123.pem")
+        return Path(passed[1]).expanduser(), passed[2:]
+    if passed and passed[0].startswith("--app-key="):
+        return Path(passed[0].removeprefix("--app-key=")).expanduser(), passed[1:]
+    return None, passed
+
+
+def _gh(
+    root: Path,
+    passed: list[str],
+    api: Api,
+    signer: Signer,
+    environ: Mapping[str, str],
+    home: Path,
+    runner: GhRunner,
+) -> int:
+    """Spec 012: gh as the App when the checkout's config sets [agents] app_id, else as the
+    host's login; gh's exit code. With app_id set any failure to get the token exits 2 and gh
+    never runs (D-14); GH_TOKEN is never set but empty"""
+    key, gh_args = _app_key(passed)
+    if not root.is_dir():  # a mistyped --repo must not read as a repo with no App
+        raise ReleaseError(f"--repo {root} is not a folder")
+    git = Git(root)
+    top = Path(git.run("rev-parse", "--show-toplevel").strip()) if git.ok("rev-parse", "--show-toplevel") else None
+    app_id = None if top is None else app_id_of(top)
+    if top is None or app_id is None:
+        if key is not None:
+            raise ReleaseError(f"--app-key names an App's key, but no [agents] app_id is set in {CONFIG_PATH}")
+        return runner([str(find_gh(environ)), *gh_args], as_host(environ))
+    repo = named_repo(gh_args) or _origin_repo(top)
+    if repo is None:
+        raise ReleaseError(f"{top}'s origin isn't a GitHub repo; name the repo with gh's -R owner/name")
+    binary = find_gh(environ)
+    cache = state_dir(Git(top)) / CACHE
+    try:
+        token = app_token(cache, repo, app_id, key or default_key(app_id, home), dt.datetime.now(dt.UTC), signer, api)
+    except NotInstalled as exc:
+        raise ReleaseError(f"{exc}; install it with `{cli_command()} app-install {repo}`") from None
+    return runner([str(binary), *gh_args], as_app(environ, token))
 
 
 def _app_create(

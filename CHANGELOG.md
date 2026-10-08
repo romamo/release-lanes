@@ -22,6 +22,11 @@ bot.
   unchanged keys, and the table prints it on an indented `fix:` line; a fix names its repo
   and checkout and never quotes an issue's or a pull request's title. `fleet.py` reads
   the new key (#258)
+- `shipmill gh <args>` runs the `gh` on `PATH` with exactly those arguments, as the repo's
+  App when `[agents] app_id` is set (a token limited to gh's `-R`/`--repo`, else origin's
+  repo; any failure to get it exits 2 and never runs `gh`), else as the host's login with
+  no empty `GH_TOKEN`; and `shipmill app-token` works outside a checkout, caching under
+  `$XDG_CACHE_HOME/shipmill/<owner>/<repo>/` with mode 0600 (spec 012) (#262)
 
 ### Changed
 

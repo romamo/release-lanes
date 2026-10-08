@@ -76,3 +76,15 @@ class AgentsConfig:
         if "agents" not in raw:
             raise ReleaseError(f"{path} has no [agents] section; add one with a prompt to use the gate")
         return cls.parse(Table(raw, path.name).table("agents"))
+
+
+def app_id_of(root: Path) -> int | None:
+    """The checkout's [agents] app_id, or None with no config file, no [agents] section, or no
+    app_id; a malformed [agents] section still fails"""
+    if not (root / CONFIG_PATH).is_file():
+        return None
+    path = config_path(root)
+    raw = read(path)
+    if "agents" not in raw:
+        return None
+    return AgentsConfig.parse(Table(raw, path.name).table("agents")).app_id
