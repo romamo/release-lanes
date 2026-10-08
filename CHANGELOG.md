@@ -7,6 +7,17 @@ bot.
 
 ## [Unreleased]
 
+### Added
+
+- Changelog fragments on the hotfix lane (spec 013): a hotfix's section holds the
+  Unreleased entries and the fragments its merges added (`git diff --diff-filter=A`
+  against each merge's first parent), and the merges' fragment files stay off the release
+  branch, as `CHANGELOG.md` does; a merge that adds neither still fails. `shipmill sync`,
+  after a hotfix or a stable release cut off a moved main, deletes on main each fragment
+  whose every entry the section holds, and exits 2 naming the entry when the section
+  holds one that is in neither Unreleased nor a fragment on main. Without `[changelog]
+  fragments` nothing changes (#273)
+
 ## [0.37.0] - 2026-10-08
 
 ### Changed

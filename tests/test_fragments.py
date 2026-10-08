@@ -7,11 +7,13 @@ import sys
 
 import pytest
 
+from shipmill import fragments
 from shipmill.changelog import Changelog, Entry, fragment_entries
 from shipmill.cli import main
 from shipmill.doctor import doctor
 from shipmill.errors import ReleaseError
-from shipmill.planner import Event, Proposal
+from shipmill.land import prepare
+from shipmill.planner import Decision, Event, Hotfix, Proposal
 from shipmill.policy import Lane, Style
 from shipmill.propose import propose
 from shipmill.version import Version
@@ -301,3 +303,127 @@ def test_a_release_names_a_fragment_entry_it_cannot_find() -> None:
         changelog.release(
             Version.parse("1.1.0"), at_day(0).date(), [gone], from_unreleased=True, fragments=[Entry("Added", "- B")]
         )
+
+
+def merge_fragment(repo: Repo, pr: int, name: str, text: str, path: str = "", code: str = "") -> str:
+    """Land pull request pr adding one fragment, and a code change when path is given"""
+    if path:
+        repo.git.run("checkout", "-q", "main")
+        repo.git.run("reset", "-q", "--hard", "origin/main")
+        repo.write(path, code)
+    sha = add_fragment(repo, name, text)
+    repo.github.merges[pr] = sha
+    return sha
+
+
+def commit_on_main(repo: Repo, message: str) -> str:
+    repo.git.run("add", "-A")
+    repo.git.run("commit", "-q", "-m", message)
+    repo.git.run("push", "-q", "origin", "main")
+    return repo.git.sha()
+
+
+def hotfix_of(repo: Repo, *prs: int) -> tuple[str, Decision]:
+    """Plan and release a hotfix of prs; its release commit and plan"""
+    decision = plan(repo, at_day(1), event=Event.MANUAL, lane=Lane.HOTFIX, hotfix=Hotfix(prs))
+    assert (decision.action, str(decision.version)) == ("release", "1.0.1"), decision.reason
+    return release(repo, decision), decision
+
+
+def test_s013_10_a_hotfix_ships_exactly_its_merges_fragments_and_entries(repo: Repo) -> None:
+    use_fragments(repo)
+    merge_fragment(repo, 1, "1-a.md", "### Added\n\n- Feature A, not ready (#1)\n", "src/a.py", "A = 1\n")
+    # PR 2 adds an Unreleased entry and a fragment in one merge
+    repo.write(f"{FOLDER}/2-b.md", "### Fixed\n\n- Fix B, as a fragment (#2)\n")
+    repo.merge(2, "Fixed", "Fix B, under Unreleased", "src/app.py", "VALUE = 2\n")
+    merge_fragment(repo, 3, "3-c.md", "### Fixed\n\n- Fix C (#3)\n\n### Security\n\n- Patch D (#3)\n")
+    sha, decision = hotfix_of(repo, 2, 3)
+
+    # PR 2's Unreleased entry, then its fragment, then PR 3's fragment; nothing of PR 1
+    assert released_section(repo, sha, "1.0.1") == (
+        "### Fixed\n\n- Fix B, under Unreleased (#2)\n- Fix B, as a fragment (#2)\n- Fix C (#3)\n\n"
+        "### Security\n\n- Patch D (#3)\n"
+    )
+    assert repo.git.show(sha, "src/app.py") == "VALUE = 2\n" and repo.git.show(sha, "src/a.py") is None
+    # none of the merges' fragment files reach the release branch, cut from v1.0.0, which
+    # predates the folder: the hotfix reads only what each merge added
+    assert folder_files(repo, sha) == []
+    assert repo.git.run("diff", "--name-only", decision.base, sha, "--", FOLDER) == ""
+
+
+def test_s013_10_a_merge_that_adds_neither_entry_nor_fragment_fails(repo: Repo) -> None:
+    use_fragments(repo)
+    repo.write("src/app.py", "VALUE = 3\n")
+    repo.write(f"{FOLDER}/README.md", README + "\nEdited.\n")  # a change in the folder adds no fragment
+    repo.github.merges[5] = commit_on_main(repo, "No entry")
+    decision = plan(repo, at_day(1), event=Event.MANUAL, lane=Lane.HOTFIX, hotfix=Hotfix((5,)))
+    with pytest.raises(ReleaseError, match="adds no CHANGELOG entry or fragment in changelog.d: a hotfix ships"):
+        prepare(
+            repo.git, repo.policy, Lane.HOTFIX, Version.parse("1.0.1"), decision.base, at_day(1).date(),
+            decision.merges, decision.prs, commit=True,
+        )  # fmt: skip
+
+
+def test_s013_10_a_hotfix_without_fragments_configured_is_unchanged(repo: Repo) -> None:
+    """No [changelog] fragments: a file under changelog.d is code like any other, applied to
+    the release branch, and the section holds the Unreleased entries alone"""
+    assert repo.policy.fragments is None
+    repo.merge(2, "Fixed", "Urgent fix", f"{FOLDER}/2-b.md", "### Fixed\n\n- Not a fragment here (#2)\n")
+    sha, _ = hotfix_of(repo, 2)
+    assert released_section(repo, sha, "1.0.1") == "### Fixed\n\n- Urgent fix (#2)\n"
+    assert folder_files(repo, sha) == ["changelog.d/2-b.md"]
+    assert repo.main_text(f"{FOLDER}/2-b.md")  # the sync deletes nothing on main
+
+
+def test_s013_11_sync_deletes_on_main_the_fragments_the_hotfix_released(repo: Repo) -> None:
+    use_fragments(repo)
+    merge_fragment(repo, 1, "1-a.md", "### Added\n\n- Feature A, not ready (#1)\n")
+    merge_fragment(repo, 2, "2-b.md", "### Fixed\n\n- Fix B (#2)\n", "src/app.py", "VALUE = 2\n")
+    merge_fragment(repo, 3, "3-c.md", "### Fixed\n\n- Fix C (#3)\n")
+    # a fragment on main that shares an entry with the hotfix but holds another stays
+    repo.write(f"{FOLDER}/4-d.md", "### Fixed\n\n- Fix C (#3)\n- Fix D (#4)\n")
+    before_sync = commit_on_main(repo, "Add 4-d.md")
+    hotfix_of(repo, 2, 3)
+
+    synced = repo.git.sha("origin/main")
+    assert repo.git.first_parent(synced) == before_sync
+    assert repo.git.run("diff", "--name-status", before_sync, synced, "--", FOLDER).splitlines() == [
+        "D\tchangelog.d/2-b.md",
+        "D\tchangelog.d/3-c.md",
+    ]
+    on_main = Changelog(repo.main_text("CHANGELOG.md"), Style.KEEP_A_CHANGELOG)
+    assert on_main.section(Version.parse("1.0.1")) == "### Fixed\n\n- Fix B (#2)\n- Fix C (#3)\n"
+    left = fragments.at_revision(repo.git, repo.policy, synced)
+    assert [e.text for e in on_main.pending(fragments.entries(left))] == ["- Feature A, not ready (#1)", "- Fix D (#4)"]
+
+
+def test_s013_11_sync_exits_2_naming_an_entry_main_no_longer_holds(repo: Repo) -> None:
+    use_fragments(repo)
+    merge_fragment(repo, 2, "2-b.md", "### Fixed\n\n- Fix B (#2)\n", "src/app.py", "VALUE = 2\n")
+    merge_fragment(repo, 3, "3-c.md", "### Fixed\n\n- Fix C (#3)\n")
+    hotfix_of(repo, 2, 3)
+    # main as it was before the sync commit, with Fix C's fragment gone
+    repo.git.run("checkout", "-q", "--detach", "origin/main^1")
+    repo.git.run("rm", "-q", f"{FOLDER}/3-c.md")
+    done = subprocess.run(
+        [sys.executable, "-m", "shipmill", "--repo", str(repo.root), "sync", "--version", "1.0.1"],
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 2, (done.stdout, done.stderr)
+    assert "no longer under Unreleased or a fragment as released" in done.stderr
+    assert "'- Fix C (#3)'" in done.stderr
+    assert (repo.root / FOLDER / "2-b.md").is_file()  # a failed sync deletes nothing
+
+
+def test_a_stable_sync_deletes_the_released_fragments_on_a_moved_main(repo: Repo) -> None:
+    use_fragments(repo)
+    merge_fragment(repo, 1, "1-a.md", "### Added\n\n- Feature A (#1)\n")
+    release(repo, plan(repo, at_day(1)))
+    repo.at(at_day(1, 9))
+    merge_fragment(repo, 2, "2-b.md", "### Fixed\n\n- Fix B, after the rc (#2)\n")
+    release(repo, plan(repo, at_day(4), event=Event.MANUAL, lane=Lane.STABLE))
+    synced = repo.git.sha("origin/main")
+    assert folder_files(repo, synced) == ["changelog.d/2-b.md", "changelog.d/README.md"]
+    on_main = Changelog(repo.main_text("CHANGELOG.md"), Style.KEEP_A_CHANGELOG)
+    assert on_main.section(Version.parse("1.1.0")) == "### Added\n\n- Feature A (#1)\n"

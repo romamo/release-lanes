@@ -37,9 +37,11 @@ def release(repo: Repo, decision: Decision) -> str:
     assert decision.action == "release", decision.reason
     assert decision.lane is not None and decision.version is not None
     day = dt.date.fromisoformat(repo.git.env["GIT_COMMITTER_DATE"][:10])
+    # main's policy, read once: prepare moves the checkout to the base, whose policy may be older
+    policy = repo.policy
     prepared = prepare(
         repo.git,
-        repo.policy,
+        policy,
         decision.lane,
         decision.version,
         decision.base,
@@ -50,7 +52,7 @@ def release(repo: Repo, decision: Decision) -> str:
         push=True,
     )
     assert prepared.pushed
-    land(repo.git, repo.policy, repo.github, decision.lane, decision.version, prepared.sha, decision.base, day)
+    land(repo.git, policy, repo.github, decision.lane, decision.version, prepared.sha, decision.base, day)
     assert cleanup(repo.git, decision.version)
     return prepared.sha
 
