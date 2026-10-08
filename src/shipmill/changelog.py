@@ -30,6 +30,9 @@ _HEADINGS = {
 _RELEASE_LIKE = re.compile(r"^## (\[|\d)")  # a heading that must parse as a release
 _LINK = re.compile(r"^\[(?P<name>[^\]]+)\]: (?P<url>\S+)\s*$")
 _COMPARE = re.compile(r"^(?P<base>\S+)/compare/(?P<range>\S+)$")
+# where an rc section's intro prose ends: its first heading, or a list item (of any marker,
+# indented or not) before one
+_NOT_PROSE = re.compile(r"^(#|\s*([-*+]|\d+[.)])\s)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,16 +119,17 @@ class Changelog:
         return list(dict.fromkeys([*self.pending(fragments), *self._folded(version)]))
 
     def _folded(self, version: Version) -> list[Entry]:
-        """The entries of version's rc sections, newest section first. Folding removes the
-        sections, so text that is not an entry (prose, a '#### ' heading, a numbered list)
-        fails here rather than vanish"""
-        return [
-            e
-            for rc in self.rc_sections(version)
-            for e in _entries(
-                self.section(rc).splitlines(), self.style, strict=True, where=f"{rc}, folded into {version}"
-            )
-        ]
+        """The entries of version's rc sections, newest section first. The prose before a
+        section's first '### ' heading, such as a release bot's "The 3rd 1.0 release
+        candidate: ..." line, is dropped (D-26). Folding removes the sections, so any other
+        text that is not an entry (prose between entries, a '#### ' heading, a list item before
+        the first heading) fails here rather than vanish"""
+        found: list[Entry] = []
+        for rc in self.rc_sections(version):
+            lines = self.section(rc).splitlines()
+            start = next((i for i, line in enumerate(lines) if _NOT_PROSE.match(line)), len(lines))
+            found.extend(_entries(lines[start:], self.style, strict=True, where=f"{rc}, folded into {version}"))
+        return found
 
     def section(self, version: Version) -> str:
         found = [s for s in self._segments if s.version == version]

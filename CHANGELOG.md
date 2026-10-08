@@ -13,6 +13,14 @@ bot.
   section's first `### ` heading is dropped, and any other text outside an entry still
   fails the fold (#283)
 
+### Fixed
+
+- A stable promotion folds rc sections that open with prose, such as "The 34th 1.0 release
+  candidate: 2 breaking changes, ...": the prose before an rc section's first `### `
+  heading is dropped, in both styles, so `shipmill plan` and `prepare` no longer fail with
+  `text outside a '- ' entry` (D-26); any other text outside an entry, or a list item
+  before the first heading, still fails the fold (#283)
+
 ## [0.38.0] - 2026-10-08
 
 ### Added

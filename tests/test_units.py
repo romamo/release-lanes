@@ -256,17 +256,83 @@ class TestChangelog:
     @pytest.mark.parametrize(
         "body",
         [
-            "This candidate reworks the parser.\n\n### Added\n\n- Fix C (#3)\n",
+            "### Added\n\n- Fix C (#3)\n\nThis candidate reworks the parser.\n",
+            "The intro.\n\n### Added\n\n- Fix C (#3)\n\nProse after the first heading.\n\n### Fixed\n\n- Fix D (#4)\n",
             "### Added\n\n- Fix C (#3)\n\n#### Internals\n\n- Fix D (#4)\n",
+            "### Added\n\n1. Fix C (#3)\n",
             "- Fix C (#3)\n",
+            "The intro.\n\n- Fix C (#3)\n\n### Fixed\n\n- Fix D (#4)\n",
+            "The intro.\n\n#### Internals\n\n### Fixed\n\n- Fix D (#4)\n",
+            "The intro.\n\n1. Fix C (#3)\n\n### Fixed\n\n- Fix D (#4)\n",
+            "The intro.\n\n+ Fix C (#3)\n\n### Fixed\n\n- Fix D (#4)\n",
+            "The intro:\n  - Fix C (#3)\n\n### Fixed\n\n- Fix D (#4)\n",
+            "The intro:\n   2) Fix C (#3)\n\n### Fixed\n\n- Fix D (#4)\n",
         ],
     )
-    def test_folding_refuses_an_rc_section_with_text_that_is_not_an_entry(self, body: str) -> None:  # #243
+    def test_folding_refuses_an_rc_section_with_text_that_is_not_an_entry(self, body: str) -> None:  # #243, #283
         # the fold removes the rc section, so what it can't carry over must not vanish silently
         text = KAC.replace("## [1.0.0]", f"## [1.1.0rc1] - 2026-10-03\n\n{body}\n## [1.0.0]")
         changelog = Changelog(text, Style.KEEP_A_CHANGELOG)
         with pytest.raises(ReleaseError, match=r"1\.1\.0rc1, folded into 1\.1\.0: "):
             changelog.promoted(v("1.1.0"))
+
+    @pytest.mark.parametrize(
+        "intro",
+        [
+            "The 34th 1.0 release candidate: 2 additions and 1 fix.\n\n",
+            "\n\nThe 34th 1.0 release candidate.\n\n\n",
+            "A first paragraph,\nwrapped.\n\nA second paragraph.\n\n",
+            "",
+        ],
+    )
+    def test_folding_drops_the_prose_before_an_rc_sections_first_heading(self, intro: str) -> None:  # #283, D-26
+        rc2 = f"## [1.1.0rc2] - 2026-10-04\n\n{intro}### Added\n\n- Feature D (#4)\n\n### Fixed\n\n- Fix E (#5)\n\n"
+        rc1 = "## [1.1.0rc1] - 2026-10-03\n\nThe 1st 1.1 release candidate.\n\n### Fixed\n\n- Fix F (#6)\n\n"
+        changelog = Changelog(KAC.replace("## [1.0.0]", f"{rc2}{rc1}## [1.0.0]"), Style.KEEP_A_CHANGELOG)
+        entries = changelog.promoted(v("1.1.0"))
+        assert [e.text for e in entries] == [
+            "- Feature A (#1)",
+            "- Feature B, with a long\n  continuation line (#2)",
+            "- Fix C (#3)",
+            "- Feature D (#4)",
+            "- Fix E (#5)",
+            "- Fix F (#6)",
+        ]
+        after = changelog.release(v("1.1.0"), dt.date(2026, 10, 5), entries, from_unreleased=True)
+        assert "1.1.0rc" not in after and "release candidate" not in after and "paragraph" not in after
+        assert Changelog(after, Style.KEEP_A_CHANGELOG).section(v("1.1.0")) == (
+            "### Added\n\n- Feature A (#1)\n- Feature B, with a long\n  continuation line (#2)\n- Feature D (#4)\n\n"
+            "### Fixed\n\n- Fix C (#3)\n- Fix E (#5)\n- Fix F (#6)\n"
+        )
+
+    def test_an_rc_section_with_only_an_intro_folds_to_nothing(self) -> None:  # #283
+        rc = "## [1.1.0rc1] - 2026-10-03\n\nThe 1st 1.1 release candidate: no changes.\n\n"
+        changelog = Changelog(KAC.replace("## [1.0.0]", f"{rc}## [1.0.0]"), Style.KEEP_A_CHANGELOG)
+        assert changelog.rc_sections(v("1.1.0")) == [v("1.1.0rc1")]
+        entries = changelog.promoted(v("1.1.0"))
+        assert entries == changelog.pending()
+        after = changelog.release(v("1.1.0"), dt.date(2026, 10, 5), entries, from_unreleased=True)
+        assert "1.1.0rc1" not in after and "release candidate" not in after
+
+    def test_dash_style_folding_drops_the_intro_and_keeps_text_after_a_title(self) -> None:  # #283, D-26
+        rc2 = "## 1.10.0rc2 — 2026-10-04\n\n### Topic three\n\n- Detail three\n\n"
+        rc1 = (
+            "## 1.10.0rc1 — 2026-10-03\n\nThe 1st 1.10 release candidate.\n\nMore prose.\n\n"
+            "### Topic four\n\n- Detail four\n\nNot an entry, but part of Topic four.\n\n"
+        )
+        changelog = Changelog(DASH.replace("## 1.9.0", f"{rc2}{rc1}## 1.9.0"), Style.DASH)
+        entries = changelog.promoted(v("1.10.0"))
+        assert [e.text for e in entries][2:] == [
+            "### Topic three\n\n- Detail three",
+            "### Topic four\n\n- Detail four\n\nNot an entry, but part of Topic four.",
+        ]
+        after = changelog.release(v("1.10.0"), dt.date(2026, 10, 5), entries, from_unreleased=True)
+        assert "1.10.0rc" not in after and "release candidate" not in after and "More prose" not in after
+        section = Changelog(after, Style.DASH).section(v("1.10.0"))
+        assert section.endswith(
+            "### Topic three\n\n- Detail three\n\n"
+            "### Topic four\n\n- Detail four\n\nNot an entry, but part of Topic four.\n"
+        )
 
     def test_needs_unreleased_link(self) -> None:
         changelog = Changelog(KAC.replace("[Unreleased]: https", "[Other]: https"), Style.KEEP_A_CHANGELOG)

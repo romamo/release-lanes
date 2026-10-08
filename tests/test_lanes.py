@@ -234,12 +234,40 @@ def test_stable_folds_the_rc_sections_an_earlier_bot_wrote(repo: Repo) -> None: 
     assert [str(x) for x in main.versions()] == ["1.1.0", "1.0.0"]
 
 
+def test_stable_folds_rc_sections_that_open_with_an_intro_line(repo: Repo) -> None:  # #283, D-26
+    repo.at(at_day(0))
+    legacy = LEGACY_RC_SECTIONS.replace(
+        "## [1.1.0rc2] - 2026-10-04\n\n",
+        "## [1.1.0rc2] - 2026-10-04\n\nThe 2nd 1.1 release candidate: 1 addition and 1 fix.\n\n",
+    ).replace(
+        "## [1.1.0rc1] - 2026-10-03\n\n",
+        "## [1.1.0rc1] - 2026-10-03\n\nThe 1st 1.1 release candidate:\n1 addition.\n\nA second paragraph.\n\n",
+    )
+    rc_base = _tag_on_main(repo, legacy, "v1.1.0rc2")
+    decision = plan(repo, at_day(4), event=Event.MANUAL, lane=Lane.STABLE)
+    assert (decision.action, str(decision.version), decision.base) == ("release", "1.1.0", rc_base)
+    sha = release(repo, decision)
+
+    folded = "### Added\n\n- Feature C (#3)\n- Feature A (#1)\n\n### Fixed\n\n- Fix B (#2)\n"
+    released = repo.git.show(sha, "CHANGELOG.md") or ""
+    assert Changelog(released, Style.KEEP_A_CHANGELOG).section(Version.parse("1.1.0")) == folded
+    assert "1.1.0rc" not in released and "release candidate" not in released and "paragraph" not in released
+    assert repo.github.releases[-1][:3] == ("v1.1.0", "demo 1.1.0", folded)
+    main = Changelog(repo.main_text("CHANGELOG.md"), Style.KEEP_A_CHANGELOG)
+    assert main.section(Version.parse("1.1.0")) == folded
+    assert [str(x) for x in main.versions()] == ["1.1.0", "1.0.0"]
+
+
 @pytest.mark.parametrize(
     ("changelog", "found"),
     [
         (None, "no [1.1.0rcN] section"),
         (
             LEGACY_RC_SECTIONS.split("### Added")[0] + "## [1.0.0] - 2026-09-01\n",
+            "its rc sections [1.1.0rc2] hold no entries",
+        ),
+        (  # #283: an intro is no entry
+            LEGACY_RC_SECTIONS.split("### Added")[0] + "The 2nd 1.1 release candidate.\n\n## [1.0.0] - 2026-09-01\n",
             "its rc sections [1.1.0rc2] hold no entries",
         ),
     ],
