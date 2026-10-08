@@ -1,6 +1,6 @@
 # S-013: Changelog fragments
 
-status: draft
+status: approved
 
 ## Problem
 
