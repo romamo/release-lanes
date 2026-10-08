@@ -4,7 +4,7 @@ version = "0.40.0"
 description = "The open-source AI software factory for GitHub: agents triage issues and land pull requests, and release lanes publish, deploy, and roll back by policy"
 readme = "README.md"
 license = "MIT"
-authors = [{ name = "Romamo" }]
+authors = [{ name = "Roman Medvedev" }]
 requires-python = ">=3.14"
 keywords = [
     "ai-agents",
