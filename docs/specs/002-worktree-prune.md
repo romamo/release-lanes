@@ -175,7 +175,7 @@ a failing plan does.
 ## Decisions relied on
 
 - D-15
-- D-12
+- D-24 (supersedes D-12)
 
 ## Issues
 

@@ -133,7 +133,7 @@ The module docstring's command list and exit codes in `src/shipmill/cli.py` name
 
 - D-3: prose calls the release automation shipmill
 - D-4: the policy is read from `.github/shipmill.toml`, through `watch_state.py`
-- D-12: `status` creates no worktree of its own; the plan's worktree stays the script's to
+- D-24 (supersedes D-12): `status` creates no worktree of its own; the plan's worktree stays the script's to
   remove
 - D-14: `status` writes nothing, so it runs as the user's `gh` and needs no App
 - D-16: unattended sessions work only on trusted authors' items; `status` starts none
