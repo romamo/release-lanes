@@ -87,6 +87,11 @@ def test_s014_11_the_issue_rows_leave_upgrade_issues_to_ship_watch() -> None:
         "github-ship-watch asks the maintainer about it and opens its pull request, so triage posts no verdict"
         in triage
     )
+    # an answered upgrade question reads DECIDED in triage_state.py, still ship-watch's to take up
+    assert (
+        "That holds when `triage_state.py` reads it DECIDED too: its answer is github-ship-watch's to take up"
+        in triage
+    )
 
 
 def test_s014_12_the_pull_request_is_the_apps_on_its_branch_closing_the_issue_and_naming_the_decision() -> None:
