@@ -266,7 +266,8 @@ or the tags are wrong; fix those, not the version.
 3. Run the checklist: `uv run --no-project python <skill>/scripts/setup_state.py <owner/repo>`.
    It reports releases, the `[agents]` section, the plugin in `.claude/settings.json`, and
    the labels (`postponed`, `blocked`, `shipmill-hold`, the blocker label, and with an
-   `[agents]` section, in either mode, `needs-decision`), and
+   `[agents]` section, in either mode, `needs-decision` and `shipmill-upgrade-later`, a
+   config upgrade's "not now"), and
    whether GitHub deletes a pull request's branch when it merges (`BRANCH_DELETE_ON` or
    `BRANCH_DELETE_OFF`, the repo setting `delete_branch_on_merge`). That setting matters
    because github-pr-triage's stacked merges rely on GitHub retargeting a stacked PR when

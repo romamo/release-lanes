@@ -218,8 +218,10 @@ answered item, and with `--bot-login` a bot comment without the marker (a triage
 is not a question. With `--bot-login`, when the newest marker comment by that login or by an
 OWNER, MEMBER, or COLLABORATOR is a person's, the person asked after the bot did, and the
 issue reads as a labelled issue with no question. A labelled issue with no question comment
-reads NEEDS_DECISION until the label comes off: a person parked it. An issue with a reply reads the state it would read without the label
-(NEW, NEEDS_PR, UNBLOCKED, and so on), so it is work again. A comment from any other
+reads NEEDS_DECISION until the label comes off: a person parked it. An issue with a reply reads
+DECIDED, an action read before any other state (#309), so it is work again; the session that
+acts on the reply removes the label, and the issue then reads the state it would without it
+(NEW, NEEDS_PR, UNBLOCKED, and so on). A comment from any other
 author association never counts as a reply, so an outsider can't wake an item.
 
 `skills/github-ship-watch/scripts/watch_state.py` passes `--bot-login` and
@@ -322,7 +324,7 @@ an empty list when nothing waits or the tick didn't read the state.
 - S-005-4: `docs/design/agent-modes.md`, What Claude Code provides, names the Claude Code version on which a real `claude -p` started with S-005-3's flags, detached as Tracking a headless session says, met a denied Bash call, had no AskUserQuestion, outlived the process that started it, and exited on its own; the build issue that delivers this merges before any other headless code
 - S-005-5: with `mode = "headless"`, a `--claude-arg` of `--permission-mode`, `--permission-prompts`, `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--bg`, `--background`, or `--session-id` (alone or as `--flag=value`) exits 2 naming the flag, and stops and launches no session
 - S-005-6: the headless prompt ends with the headless paragraph naming `@<login>` from `gh api user -q .login` and `references/needs-decision.md`; a failing login read exits 2 and launches nothing
-- S-005-7: `triage_state.py` reports an open issue labelled `needs-decision` whose question has no reply as `NEEDS_DECISION`, which doesn't make it exit 1, and an issue with a reply as the state it reads without the label
+- S-005-7: `triage_state.py` reports an open issue labelled `needs-decision` whose question has no reply as `NEEDS_DECISION`, which doesn't make it exit 1, and an issue with a reply as `DECIDED`, which does (#309), and reads the state it would without the label once the label comes off
 - S-005-8: a question's first line is `<!-- shipmill:needs-decision -->`; without `--bot-login`, the question is the newest such comment by an OWNER, MEMBER, or COLLABORATOR; with `--bot-login X`, the question is the newest such comment by X, unless a newer one by an OWNER, MEMBER, or COLLABORATOR exists, and then the issue has no question; a reply is a newer comment without the marker by an OWNER, MEMBER, or COLLABORATOR (other than X); a marker comment by any other author is never a question and a comment by any other author association is never a reply; a labelled issue with no question reads `NEEDS_DECISION`
 - S-005-9: `watch_state.py --json` leaves waiting issues out of the ISSUES row and waiting pull requests out of PRS_OPEN, and prints a `NEEDS_DECISION` row whose detail lists only `#N` numbers, with `agent: false`; a repo whose only open work waits on a decision reads QUIET at the gate, and a waiting item doesn't change the gate's fingerprint
 - S-005-10: with `--trusted-only`, `triage_state.py` reports an open issue whose author is neither an OWNER, MEMBER, or COLLABORATOR nor the `--bot-login` as `UNTRUSTED`, not an action state, and `watch_state.py` counts in PRS_OPEN only pull requests whose head is in the repo, listing the others in an `UNTRUSTED` row with `agent: false`

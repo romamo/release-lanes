@@ -93,6 +93,7 @@ ACTION = frozenset(
         "SHIPMILL_OUTDATED",
         "GATE_NO_APP",
         "SKILL_SHADOWED",
+        "UPGRADE_PENDING",
     }
 )
 REPO_ERROR = "REPO_ERROR"

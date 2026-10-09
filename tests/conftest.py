@@ -183,8 +183,11 @@ class FakeGitHub:
         self.comments.setdefault(number, []).append(body)
 
     def labelled_issues(self, label: str) -> list[Issue]:
-        found = [*self.issues.values(), *self.closed_issues.values()]
-        return sorted((i for i in found if label in self.labels.get(i.number, ())), key=lambda i: -i.number)
+        found = [
+            replace(i, labels=self.labels.get(i.number, ()))
+            for i in (*self.issues.values(), *self.closed_issues.values())
+        ]
+        return sorted((i for i in found if label in i.labels), key=lambda i: -i.number)
 
     def open_labelled_issues(self, label: str) -> list[Issue]:
         return sorted(
@@ -196,6 +199,10 @@ class FakeGitHub:
         have = self.labels.get(number, ())
         self.labels[number] = (*have, *(label for label in labels if label not in have))
         self.edits += 1
+
+    def remove_label(self, number: int, label: str) -> None:
+        assert label in self.labels.get(number, ()), f"#{number} has no {label} label"
+        self.labels[number] = tuple(have for have in self.labels[number] if have != label)
 
     def close_issue(self, number: int, comment: str) -> None:
         self.closed_issues[number] = replace(self.issues.pop(number), closed_at=self.now)

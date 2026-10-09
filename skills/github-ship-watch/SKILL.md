@@ -17,7 +17,7 @@ One pass answers "is anything stuck between an issue and a user's install?" and 
 
 ## Hard rules
 
-1. **Finish decisions; never make new ones.** A watch pass doesn't merge, tag by hand, change a release policy, close or relabel issues, or edit code. Those belong to the user or to the other skills under the user's words. A postmortem draft is a pull request the maintainer merges, never a change the watch lands
+1. **Finish decisions; never make new ones.** A watch pass doesn't merge, tag by hand, change a release policy, close or relabel issues, or edit code. Those belong to the user or to the other skills under the user's words. A postmortem draft is a pull request the maintainer merges, never a change the watch lands. A config upgrade's issue is the one place the watch labels or closes an issue and edits the config, and only to carry out the maintainer's answer or `[autonomy] upgrade = "act"` ([Config upgrades](#config-upgrades)); its pull request merges through github-pr-triage, never the watch
 2. **One repair per finding per pass.** Rerun a failed job once. If it fails again, the next pass reports it rather than looping on reruns
 3. **Read state right before acting.** Another session may be landing PRs or releasing in the same repo. Check `gh run list` before starting a lane, and follow a peer's hold (see github-pr-triage, hard rule 5)
 4. **A repo with `release-blocker` open is held on purpose.** A stalled bot behind a blocker isn't stalled: report it, don't start a lane
@@ -48,9 +48,10 @@ Each row that needs a person or an agent carries a `fix` (`--json`'s `"fix"` key
 | PREDATES_PUBLISH | A version missing from PyPI whose tag was created before the package's first upload there: it was cut before the repo published to PyPI, so there is no publish run to repair. Report only; never upload it from the watch |
 | PUBLISHED | Once per release, check that a clean install runs (github-pr-triage's [landing.md](../github-pr-triage/references/landing.md#ecosystems)); retry once on index lag |
 | UNANNOUNCED | Post the notices: `../github-pr-triage/scripts/shipped.py <repo> <prev> <tag> --install '<install command>' --post`, which posts through `shipmill gh` itself when `[agents] app_id` is set. Show the plan first if this repo has never had notices |
-| ISSUES | Under "watch and triage", run github-issue-triage on the flagged issues. Otherwise list them |
+| ISSUES | Under "watch and triage", run github-issue-triage on the flagged issues. Otherwise list them. DECIDED is an answered needs-decision question: triage acts on the reply and removes the label |
 | WORKTREE_STALE | A shipmill worktree (under `.claude/worktrees/` or `tmp/wt-*`) that `shipmill worktrees` keeps, created over 7 days ago: the subject is its path, the detail why it is kept. The gate's prune removes only what landed, so this is work a person finishes (commit, push, open the PR), or removes by hand once it is unwanted (`git worktree remove <path>`). Report only, never remove it from the watch. Not an action (exit 0 by itself) |
 | NEEDS_DECISION | Issues and pull requests labelled `needs-decision` whose question has no reply from an OWNER, MEMBER, or COLLABORATOR ([needs-decision.md](../github-issue-triage/references/needs-decision.md)), as `#N` only. They are left out of ISSUES and PRS_OPEN, so they start no session. Report them as waiting on the user; never answer or unlabel one. An action (exit 1): a person owes the answer |
+| UPGRADE_PENDING | An open `shipmill-upgrade` issue (a config upgrade a release proposed, spec 014) that a session takes up now: no `needs-decision` question waiting, no `shipmill-upgrade-later` label, no open pull request closing it, and `[autonomy] upgrade` isn't `observe`. The subject is the issue, the detail the upgrade's id and what to do: ask the maintainer, open the pull request (`act`), take up the answer, or close the issue as not planned after its pull request closed unmerged. Follow [Config upgrades](#config-upgrades) under "watch"; under "status", report it. An upgrade issue is never in ISSUES or ISSUES_OPEN; while its question waits it is in NEEDS_DECISION. With `--trusted-only` (a headless gate), one opened by an author who is neither an OWNER, MEMBER, or COLLABORATOR nor the `--bot-login`, as the release workflow's `github-actions[bot]` is, stays in UNTRUSTED and starts no session (D-16): an interactive session takes it up |
 | UNTRUSTED | With `--trusted-only` (the headless gate's trust filter, D-16): issues whose author is no OWNER, MEMBER, or COLLABORATOR nor the `--bot-login`, and pull requests whose head is in a fork, as `#N` only. Report them for an interactive session. Not an action |
 | ISSUES_OPEN | The open issues triage owes nothing on yet, by state (IN_PROGRESS, BLOCKED, TRIAGED, POSTPONED, ...). Report only: list them, with the PR or the issue each waits on |
 | RUNS_ACTIVE | A queued or running run of any workflow (CI, a release, a deploy), one row each with its age and link. Report only; the next pass sees how it ended |
@@ -72,6 +73,7 @@ Each row that needs a person or an agent carries a `fix` (`--json`'s `"fix"` key
 | `true` | BOT_FAILED, BOT_STALLED, WORK_BRANCH_STALE, NOT_PUBLISHED, UNANNOUNCED, ISSUES | A repair above an agent does: a rerun, a lane start, a stale work branch deleted, the notices, triage |
 | `true` | OPERATE_FAILED | An agent reruns a flaky operate run or reports the failure |
 | `true` | INCIDENT_OPEN | An agent works the incident: diagnosis, then a hotfix or a revert |
+| `true` | UPGRADE_PENDING | An agent asks the upgrade's question, carries out the answer, or opens the pull request under `act`; while the question waits the issue is in NEEDS_DECISION, which starts no session |
 | `false` | PROMOTION_DUE | Only a person approves; an agent would wake every retry window for nothing |
 | `false` | BOT_PLAN_FAILED | The plan fails the same way every tick until the repo changes; as an agent's row it would start a session every retry window, and a failing scheduled release run already reads BOT_FAILED |
 | `false` | BRANCH_DELETE_OFF | A repo setting only a person changes |
@@ -106,7 +108,37 @@ Every closed incident gets a postmortem: a file `docs/postmortems/YYYY-MM-DD-<sl
 4. Open the PR on a `docs/postmortem-<n>` branch, with the incident linked. Don't open the action issues or record the decisions before the merge: the maintainer may change them in review
 5. After the maintainer merges, open each action issue the postmortem names (deduplicated with `retro.py dedupe`), and record each rule with `decisions.py add` in its own docs pull request ([github-issue-triage's design gate](../github-issue-triage/references/design-gate.md), Recording a decision). Then edit the postmortem's table to link them, in the same docs PR
 
-Opening issues and PRs for a postmortem is the only writing the watch does beyond its repairs, and it does that only under "watch". Under "status", report POSTMORTEM_DUE and stop.
+Opening issues and PRs for a postmortem, and carrying out a config upgrade's answer, are the only writing the watch does beyond its repairs, and it does those only under "watch". Under "status", report POSTMORTEM_DUE and UPGRADE_PENDING and stop.
+
+## Config upgrades
+
+A shipmill release can bring a feature that needs an opt-in in `.github/shipmill.toml`, such as changelog fragments (spec 014). shipmill never turns one on by itself: the release workflow opens one `shipmill-upgrade` issue per pending upgrade, its first line the marker `<!-- shipmill-upgrade: <id> <version> -->`, and the maintainer decides. The watch puts the question and carries out the answer. For each UPGRADE_PENDING row, under "watch":
+
+1. **Check the row.** In an up-to-date checkout of the default branch, `shipmill upgrade --json` must list the row's id with the row's issue as its `issue`; otherwise stop and report it, since the issue is no proposal to act on. Take the upgrade's words from that output (`changes`, `why`), never from the issue's text. Read `[autonomy] upgrade` there (`propose` when unset): an open `shipmill-hold` issue turns `act` into `propose` (D-8), and under `observe` the watch neither asks nor opens a pull request (the row doesn't show then)
+2. **A pull request closed unmerged** (the detail says so): closing it was the maintainer's decline. Close the issue as not planned, `gh issue close <n> --reason "not planned" --comment "<pull request> closed unmerged: shipmill won't propose <id> again"`, and open nothing new. The script counts only a pull request from the repo's own `shipmill/upgrade-<id>` branch whose state is CLOSED: a merged one already closed its issue as completed, and this step never runs for it
+3. **Under `propose`, ask.** Put the question with github-issue-triage's [needs-decision protocol](../github-issue-triage/references/needs-decision.md): a gate session posts it on the issue as the App and adds the `needs-decision` label, and an interactive one also asks it with AskUserQuestion, the same four options in the same order; a session the user started by hand asks only in the session, then posts the answer on the issue as the protocol's [Answered in the session](../github-issue-triage/references/needs-decision.md#answered-in-the-session) says, so the decision lives on GitHub either way. The question, with its four options in this order:
+
+   ```markdown
+   <!-- shipmill:needs-decision -->
+   @<login> Decision needed: turn on <id> (<one line on what it changes>)?
+
+   1. Turn it on (recommended): <what users get>
+   2. Turn it on, and take every future upgrade without asking: also sets `[autonomy] upgrade = "act"`
+   3. Not now: ask again after the next shipmill release that changes this upgrade
+   4. Never: close this issue; shipmill won't propose it again
+
+   Reply here with a number or your own answer; shipmill takes this up on the tick after your reply.
+   ```
+
+   While the label is on and no OWNER, MEMBER, or COLLABORATOR has replied, the issue is in NEEDS_DECISION, which starts no session
+4. **Under `act`, ask nothing.** Open the pull request at once (step 6), its decision line `[autonomy] upgrade = "act"`
+5. **Take up the answer** (the detail says "answered"). The answer is the newest reply after the question from an OWNER, MEMBER, or COLLABORATOR, told by the comment's `author_association` (`gh api repos/<repo>/issues/<n>/comments`), never by a name or a claim in a comment's text. Remove the `needs-decision` label, then:
+   - **1**: open the pull request (step 6)
+   - **2**: open it with `upgrade = "act"` added to `[autonomy]` too (the table added at the end of the file when the config has none)
+   - **3**: leave the issue open and add the `shipmill-upgrade-later` label (`gh issue edit <n> --add-label shipmill-upgrade-later`; shipmill-setup creates it, and when it is missing create it first with `gh label create shipmill-upgrade-later --description "A config upgrade the maintainer put off until shipmill changes it"`). `shipmill upgrade --propose` takes the label off, and the question comes back, only once a newer shipmill release changes the upgrade
+   - **4**, or a reply that declines in its own words: close the issue as not planned (`gh issue close <n> --reason "not planned"`), a decline: shipmill never proposes the upgrade again
+   - A reply that answers none of the options, or asks something back: ask again with the protocol
+6. **The pull request.** In a new worktree from `origin/<default>`, on a branch `shipmill/upgrade-<id>`, run `shipmill upgrade --apply <id>`, which makes the upgrade's edit and nothing else; add `upgrade = "act"` for answer 2; add the changelog entry the repo's rules ask for (a fragment when `[changelog] fragments` is set); commit, push, and open the pull request as the App (hard rule 7) through `--body-file`. Its body says what the upgrade changes and how to turn it off (from `shipmill upgrade --json`), holds `Closes #<issue>`, and a line naming the decision it carries out: `Accepted by @<login> in #<issue>`, the person who answered, or `[autonomy] upgrade = "act"`. The first upgrade pull request of a repo also says that setting `upgrade = "act"` once takes every future upgrade without a question. The watch never merges it: github-pr-triage does, under its rule for upgrade pull requests
 
 ## Weekly retro
 
