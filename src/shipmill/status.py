@@ -872,8 +872,14 @@ def item_lines(facts: Facts) -> list[str]:
     lines += _group("suspect close", [item(repo, n, False) for n in suspect])
     lines += _fixed("branches", [("merged branches kept", fixed(r)) for r in of("BRANCH_DELETE_OFF")][:1])
     lines += _fixed("upgrade", [upgrade_value(facts, o) for o in facts.upgrades])
+    # an upgrade's issue is github-ship-watch's, listed on its upgrade line, never as triage's work
+    owned = {o.issue for o in facts.upgrades if o.issue is not None}
     for name, states in ISSUE_LINES:
-        found = sorted((i for i in facts.issues if i.state in states), key=lambda i: i.number, reverse=True)
+        found = sorted(
+            (i for i in facts.issues if i.state in states and i.number not in owned),
+            key=lambda i: i.number,
+            reverse=True,
+        )
         lines += _group(name, [issue_value(repo, i) for i in found])
         if name == "in progress":  # S-009-24: the pull requests waiting to land follow the work
             land = [pull_value(facts, n) for n in to_land(rows)]

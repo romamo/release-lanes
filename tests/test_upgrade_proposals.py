@@ -17,6 +17,7 @@ from shipmill.errors import ReleaseError
 from shipmill.github import UPGRADE_LABEL, UPGRADE_LATER_LABEL, Forbidden, Issue, parse_labelled
 from shipmill.init import Detected, caller_text
 from shipmill.policy import Style, VersionFiles
+from shipmill.status import Issue as StatusIssue
 from shipmill.status import read_upgrades
 from shipmill.upgrades import Offer, UpgradeId, asked, body, find, marker, renewed
 from shipmill.version import Version
@@ -382,6 +383,16 @@ def test_s014_15_status_lists_each_pending_upgrade_with_its_issue_or_the_apply_c
     assert found[at + 2] == f"                 plugin-update (shipmill 0.37.0): {PLUGIN.changes}"
     assert found[at + 3] == f"                 fix: https://github.com/{REPO}/issues/42"
     assert found[0].endswith(": IDLE")  # an offer, not a reason for the verdict
+
+
+@pytest.mark.parametrize("state", ["NEW", "DECIDED"])
+def test_s014_15_status_lists_an_upgrade_issue_on_its_upgrade_line_only(state: str) -> None:
+    # triage_state.py reads an upgrade issue as any issue (NEW, or DECIDED once its question is
+    # answered), but github-ship-watch owns it: it is no issue to triage
+    found = lines(facts(upgrades=[Offer(PLUGIN, 42)], issues=[StatusIssue(42, state), StatusIssue(7, "NEW")]))
+    triage = [line for line in found if "/issues/7" in line or "/issues/42" in line]
+    assert [line for line in triage if "/issues/42" in line] == [f"                 fix: https://github.com/{REPO}/issues/42"]
+    assert any(line.startswith("  to triage") and "/issues/7" in line for line in found)
 
 
 class Gh:
