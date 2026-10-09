@@ -673,6 +673,13 @@ def test_309_a_hold_word_in_another_sentence_of_the_line_holds_nothing(ts: Modul
         ("Pending https://github.com/o/up/pull/7 (the spec PR).", ("o", "up", 7)),
         ("This waits on #61. It is next.", ("o", "r", 61)),
         ("The parser is ready. On hold: waits on o/up#3.", ("o", "up", 3)),
+        # an abbreviation before a capitalised owner ends no sentence
+        ("On hold: waits on an upstream fix, e.g. PyCQA/flake8#5", ("PyCQA", "flake8", 5)),
+        ("On hold: blocked by upstream, i.e. Acme/lib#5.", ("Acme", "lib", 5)),
+        ("On hold: waits on upstream (cf. Microsoft/vscode#5)", ("Microsoft", "vscode", 5)),
+        ("Blocked: our fix vs. Acme/lib#6 upstream", ("Acme", "lib", 6)),
+        # a version or a dotted repo name ends none either
+        ("On hold: waits on https://github.com/o/r.js/issues/3 since 0.41.2. Then go.", ("o", "r.js", 3)),
     ],
 )
 def test_309_the_documented_hold_lines_still_hold(ts: ModuleType, line: str, held: tuple[str, str, int]) -> None:

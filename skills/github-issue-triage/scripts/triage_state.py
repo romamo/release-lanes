@@ -21,8 +21,9 @@ For each open issue:
                    "waits on", "waiting on", "depends on", "blocked by", "blocked
                    on", "decided in", or "on hold until" (a #N elsewhere on the
                    line is context). A sentence ends at ".", "!", or "?" followed
-                   by a space and a capital letter, so a hold word in one sentence
-                   of a paragraph doesn't hold on a link in another (#309). Or,
+                   by a space and a capital letter (not after "e.g.", "i.e.",
+                   "cf.", or "vs."), so a hold word in one sentence of a
+                   paragraph doesn't hold on a link in another (#309). Or,
                    once triaged, its body has a "Depends on owner/repo#N" line (or
                    "#N" anywhere on that line, the same repo: a build issue split
                    from a spec) naming an issue still open; an untriaged issue
@@ -56,7 +57,7 @@ For each open issue:
                    which the issue reads its usual state. Read right after
                    NEEDS_DECISION, before any other state, so an answer that links an
                    open issue doesn't read BLOCKED (#309)
-  UNTRUSTED       with --trusted-only, an issue whose author is neither an OWNER,
+  UNTRUSTED        with --trusted-only, an issue whose author is neither an OWNER,
                    MEMBER, or COLLABORATOR nor the --bot-login, whatever it would read
                    otherwise: an unattended session leaves it to an interactive one (D-16)
 
@@ -304,8 +305,9 @@ HOLD = re.compile(r"\b(?:on hold|blocked|waits? on|waiting on|pending|depends on
 # Where a sentence of a comment line ends: a hold phrase holds only on the links of its own
 # sentence, so "a command whose run length depends on its input" in one sentence of a
 # paragraph doesn't hold on an issue another sentence of it names (#309). "e.g. #5" and
-# "github.com" don't end one: a sentence ends only before a capital letter
-SENTENCE = re.compile(r"(?<=[.!?])\s+(?=[A-Z])")
+# "github.com" don't end one: a sentence ends only before a capital letter, and never after
+# "e.g.", "i.e.", "cf.", or "vs.", which a capitalised owner ("e.g. PyCQA/flake8#5") follows
+SENTENCE = re.compile(r"(?<!\b[eE]\.g\.)(?<!\b[iI]\.e\.)(?<!\b[cC]f\.)(?<!\b[vV]s\.)(?<=[.!?])\s+(?=[A-Z])")
 UPSTREAM = re.compile(r"(?:https://github\.com/)?(?P<owner>[\w.-]+)/(?P<name>[\w.-]+)(?:#|/issues/|/pull/)(?P<num>\d+)")
 # A plain #N right after a hold phrase names the issue or pull request of the repo itself
 # that the hold waits on; a #N elsewhere on the line ("#59 stays open") is only context

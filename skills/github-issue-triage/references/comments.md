@@ -104,7 +104,7 @@ I'd go with {n} because {reason}.{ Filed upstream as <owner/repo#N>.}
 
 ## Hold (blocked on something outside the repo)
 
-Keep "On hold" and the upstream link in one sentence of one line, because `triage_state.py` reads that sentence to report BLOCKED and later UNBLOCKED. A sentence ends at ".", "!", or "?" before a capital letter, so a hold word elsewhere in a paragraph doesn't hold on the links it names:
+Keep "On hold" and the upstream link in one sentence of one line, because `triage_state.py` reads that sentence to report BLOCKED and later UNBLOCKED. A sentence ends at ".", "!", or "?" before a capital letter (not after "e.g.", "i.e.", "cf.", or "vs."), so a hold word elsewhere in a paragraph doesn't hold on the links it names:
 
 ```markdown
 On hold: {why, e.g. #PR goes below the spec's default of 5 rotated files}, decided in {owner/repo#N}. {What stays ready meanwhile, e.g. "#59 stays open, rebased onto main".}
