@@ -268,8 +268,9 @@ def _parser() -> argparse.ArgumentParser:
     acts.add_argument(
         "--propose",
         action="store_true",
-        help="open or update one shipmill-upgrade issue per pending upgrade (none under observe), and close"
-        " the issue of each upgrade the config decided",
+        help="open or update one shipmill-upgrade issue per pending upgrade (none under observe), taking"
+        " shipmill-upgrade-later off one whose upgrade is newer than its marker's version, and close the issue"
+        " of each upgrade the config decided",
     )
     p.add_argument("--json", action="store_true", help="print the result as JSON")
 

@@ -317,7 +317,15 @@ upgrade = "propose"               # observe | propose | act: config upgrades
   `observe`. Closing that issue while the config lacks the key declines the upgrade: it is
   never proposed again, nor listed. A config that sets the key closes its open issue as
   completed on the next run. A failure there fails that job only, naming the upgrade, never
-  the release. `shipmill doctor` and `shipmill status` list each pending upgrade with its
+  the release. An agent session (github-ship-watch, its `UPGRADE_PENDING` row) asks the
+  maintainer on the issue through the needs-decision protocol under `propose`, and opens
+  the pull request as the App on `shipmill/upgrade-<id>` once the answer accepts it, or at
+  once under `act`; github-pr-triage merges it on green CI only on an accepting answer from
+  an owner, member, or collaborator, or under `act`, and never during a hold. "Not now"
+  labels the issue `shipmill-upgrade-later`, which `shipmill upgrade --propose` takes off
+  only when a newer shipmill release changes the upgrade (the version on the marker line
+  says which one it was asked about); a pull request closed unmerged declines it like
+  closing the issue. `shipmill doctor` and `shipmill status` list each pending upgrade with its
   issue's link, or the `--apply` command, as its fix; doctor warns about a land job
   without `issues: write` only under `propose` or `act` with an upgrade pending, and a
   pending upgrade never fails it

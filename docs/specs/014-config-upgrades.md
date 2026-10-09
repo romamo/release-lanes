@@ -1,6 +1,6 @@
 # S-014: Config upgrades
 
-status: approved
+status: built
 
 ## Problem
 
@@ -225,3 +225,19 @@ upgrade is an offer, not a problem.
 - shipmill/shipmill#281: S-014-10, S-014-11, S-014-12, S-014-13, S-014-14
 
 ## Verification
+
+- S-014-1: ran the `test_s014_1` tests in `tests/test_upgrades.py`; on a scratch config with `[changelog]` and `[agents]` and neither key, `shipmill upgrade` listed `changelog-fragments` and `plugin-update` with the `--apply` command, and after the first was applied `--json` listed only `plugin-update`
+- S-014-2: ran the `test_s014_2` tests; on the same scratch config `shipmill upgrade --apply changelog-fragments` printed `added fragments = "changelog.d" to [changelog]` and `wrote changelog.d/README.md`, the line landed under `style = "keep-a-changelog"  # kept as is` with every other line and comment as it was, and nothing was committed
+- S-014-3: ran `test_s014_3_apply_exits_2_naming_the_id`; applying `changelog-fragments` a second time exited 2 with `upgrade changelog-fragments is already decided: [changelog] fragments is set in .github/shipmill.toml`
+- S-014-4: ran the `test_s014_4` tests in `tests/test_upgrades.py`: the three levels, the `propose` default, a refused value naming the allowed ones, and `act` read as `propose` under an open hold
+- S-014-5: ran the `test_s014_5` tests in `tests/test_upgrade_proposals.py`: one issue per pending upgrade with the marker first, updated in place, none under `observe`
+- S-014-6: ran the `test_s014_6` tests: an issue closed without the key is neither proposed again nor listed; a reopened one is proposed again
+- S-014-7: ran the `test_s014_7` test: a config that sets the key, to any value, closes the open issue as completed under `propose` and `observe`
+- S-014-8: ran the `test_s014_8` tests and read `.github/workflows/land.yml`: its `upgrade` job needs `land`, sets no permissions, runs `shipmill upgrade --propose` under `shell: bash`, and no other job waits on it; `prepare.yml` runs no proposal
+- S-014-9: ran the `test_s014_9` tests: the `issues: write` warning shows only under `propose` or `act` with an upgrade pending, and pending upgrades alone leave doctor's exit as it was
+- S-014-10: ran the `test_s014_10` tests in `tests/test_ship_watch.py`: an open upgrade issue reads `UPGRADE_PENDING` (an agent and action row), waits under `shipmill-upgrade-later` or an open pull request closing it, is in NEEDS_DECISION while labelled with no reply from an OWNER, MEMBER, or COLLABORATOR, and reads `UPGRADE_PENDING` again after one; no upgrade issue reaches ISSUES or ISSUES_OPEN, and the intake rows without one are unchanged. With `--trusted-only`, an upgrade issue `triage_state.py` reads as UNTRUSTED (the release workflow's `github-actions[bot]` is neither trusted nor the gate's App) stays UNTRUSTED with no UPGRADE_PENDING row, as D-16 requires. Loaded `watch_state.py` under Python 3.10 and read `[autonomy] upgrade` and an upgrade issue's row through the regex fallback
+- S-014-11: ran the `test_s014_11` tests in `tests/test_upgrade_questions.py`: github-ship-watch's Config upgrades section holds this spec's question word for word, asks it through the needs-decision protocol under `propose` and nothing under `act`, and gives each answer its outcome; `setup_state.py` wants the `shipmill-upgrade-later` label with an `[agents]` section
+- S-014-12: ran the `test_s014_12` tests: the skill opens the pull request as the App on `shipmill/upgrade-<id>` from `shipmill upgrade --apply <id>`, with `Closes #<issue>` and the decision line, and `watch_state.py` reads a pull request from that branch closed unmerged (state CLOSED, not a fork's) as the decline that closes the issue as not planned, never a merged one
+- S-014-13: ran the `test_s014_13` test: github-pr-triage merges an upgrade pull request on green CI only under `upgrade = "act"` on the default branch or on an accepting answer told by its `author_association`, never during a hold, and otherwise reports it as waiting on the maintainer
+- S-014-14: ran the `test_s014_14` tests in `tests/test_upgrade_proposals.py`: `upgrade --propose` keeps `shipmill-upgrade-later` while the marker records 0.37.0, 0.100.0, 0.37.1, or 1.0.0rc1 and takes it off for 0.36.0, 0.9.0, 0.37.0rc2, or 0.37.0.dev1 (version order, not text order), before rewriting the marker; an unreadable version keeps it. `gh issue list --json ...,labels` on shipmill/shipmill returned the labels as `[{"name": ...}]`, the shape `parse_labelled` reads
+- S-014-15: ran the `test_s014_15` tests: `shipmill status` lists each pending upgrade with its issue's link, or the `--apply` command without one, and leaves out a declined upgrade

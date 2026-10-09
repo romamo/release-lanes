@@ -244,17 +244,18 @@ NO_APP = (
     " and GitHub won't notify you of their mentions; run shipmill-setup's step 3 (app-create)"
 )
 BASE_LABELS = {"postponed", "blocked", "shipmill-hold", "release-blocker"}
+AGENT_LABELS = {"needs-decision", "shipmill-upgrade-later"}  # D-21, and spec 014's "not now"
 
 
 def test_s005_16_headless_wants_the_needs_decision_label(ss: ModuleType, tmp_path: Path) -> None:
     write(tmp_path, ".github/shipmill.toml", HEADLESS)
     wanted = ss.wanted_labels(tmp_path)
-    assert set(wanted) == BASE_LABELS | {"needs-decision"}
+    assert set(wanted) == BASE_LABELS | AGENT_LABELS
     assert wanted["needs-decision"] == ("d876e3", "A shipmill session asked a question here; waits for a reply")
     row = ss.labels_row(["needs-decision"], wanted)
     assert (row.state, row.detail) == ("LABELS_MISSING", "needs-decision")
     assert ss.labels_row([], wanted).detail == (
-        "postponed, blocked, shipmill-hold, needs-decision, and the blocker label exist"
+        "postponed, blocked, shipmill-hold, needs-decision, shipmill-upgrade-later, and the blocker label exist"
     )
 
 
@@ -270,9 +271,9 @@ def test_d21_interactive_wants_the_needs_decision_label_too(ss: ModuleType, tmp_
     # #206, D-21: an interactive gate session posts its questions as needs-decision too
     write(tmp_path, ".github/shipmill.toml", text)
     wanted = ss.wanted_labels(tmp_path)
-    assert set(wanted) == BASE_LABELS | {"needs-decision"}
+    assert set(wanted) == BASE_LABELS | AGENT_LABELS
     assert ss.labels_row([], wanted).detail == (
-        "postponed, blocked, shipmill-hold, needs-decision, and the blocker label exist"
+        "postponed, blocked, shipmill-hold, needs-decision, shipmill-upgrade-later, and the blocker label exist"
     )
 
 
@@ -287,7 +288,7 @@ def test_s005_16_no_agents_doesnt_want_the_label(ss: ModuleType, tmp_path: Path,
 
 def test_s005_16_a_headless_mode_outside_agents_doesnt_count(ss: ModuleType, tmp_path: Path) -> None:
     write(tmp_path, ".github/shipmill.toml", '[agents]\nprompt = "x"\napp_id = 1\n[lanes.dev]\nmode = "headless"\n')
-    assert set(ss.wanted_labels(tmp_path)) == BASE_LABELS | {"needs-decision"}  # the [agents] section, D-21
+    assert set(ss.wanted_labels(tmp_path)) == BASE_LABELS | AGENT_LABELS  # the [agents] section, D-21
     assert ss.agents_row(tmp_path).state == "AGENTS_NO_MODE"  # another table's mode isn't [agents]'s
 
 

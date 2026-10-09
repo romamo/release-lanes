@@ -273,6 +273,7 @@ def test_the_gate_reads_the_rows_watch_state_prints() -> None:
         "ISSUES",
         "OPERATE_FAILED",
         "INCIDENT_OPEN",
+        "UPGRADE_PENDING",
     }
 
 

@@ -62,6 +62,8 @@ Also check:
 
 Read every flagged issue in full, comments included: `gh issue view <n> --json title,body,comments,labels,state`.
 
+An issue labelled `shipmill-upgrade` whose first line is a `<!-- shipmill-upgrade: <id> <version> -->` marker is a config upgrade shipmill proposed (spec 014): github-ship-watch asks the maintainer about it and opens its pull request, so triage posts no verdict on it, and `watch_state.py` keeps it out of ISSUES. That holds when `triage_state.py` reads it DECIDED too: its answer is github-ship-watch's to take up (its UPGRADE_PENDING row), so leave the reply and the `needs-decision` label alone.
+
 When the repo runs product intake (it has an `opportunity` label), also run `uv run --no-project python <product-intake>/scripts/intake_state.py <owner/repo>` from the checkout. It lists the opportunities a new request may fall under, and its ACCEPTED rows are features waiting for the spec gate: under "intake and triage" or when the user asks, take them into this pass.
 
 ### 2. Decide
