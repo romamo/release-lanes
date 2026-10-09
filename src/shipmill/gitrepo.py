@@ -11,6 +11,7 @@ from shipmill.errors import ReleaseError
 from shipmill.version import PATTERN, TAG_PREFIX, Version
 
 REMOTE = "origin"
+WORKFLOWS = ".github/workflows/"  # the CI a run resolves at its own commit, not at the tree it releases
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +81,14 @@ class Git:
 
     def changed_paths(self, since: str, rev: str = "HEAD") -> list[str]:
         return [p for p in self.run("diff", "--name-only", f"{since}..{rev}").splitlines() if p]
+
+    def differs(self, a: str, b: str, path: str) -> bool:
+        """Whether the trees of a and b differ under path; a git error raises rather than read as unchanged"""
+        args = ("diff", "--quiet", "--no-ext-diff", a, b, "--", path)
+        proc = self._proc(args)
+        if proc.returncode not in (0, 1):
+            raise ReleaseError(f"git {' '.join(args)} failed: {proc.stderr.decode(errors='replace').strip()}")
+        return proc.returncode == 1
 
     def tags(self) -> list[Tag]:
         """Release tags (v + a version) with their commit and creation time, oldest first;

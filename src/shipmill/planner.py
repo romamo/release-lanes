@@ -12,7 +12,7 @@ from shipmill.autonomy import Autonomy, Hold, Stage
 from shipmill.changelog import Changelog, Entry
 from shipmill.errors import ReleaseError
 from shipmill.github import GitHub
-from shipmill.gitrepo import Git, Tag
+from shipmill.gitrepo import WORKFLOWS, Git, Tag
 from shipmill.policy import PRIORITY, BumpFrom, Lane, LaneRule, Mode, Policy
 from shipmill.version import ZERO, Part, Version
 
@@ -87,6 +87,13 @@ class _Candidate:
     prs: tuple[int, ...] = ()
 
 
+@dataclass(frozen=True, slots=True)
+class _Deferred:
+    """Why a lane skips this run, named in the reason of the lane that releases instead"""
+
+    why: str
+
+
 @dataclass
 class Planner:
     git: Git
@@ -158,13 +165,13 @@ class Planner:
 
     # -- candidates ------------------------------------------------------------------------
 
-    def _candidate(self, lane: Lane, head: str) -> _Candidate | str:
+    def _candidate(self, lane: Lane, head: str) -> _Candidate | _Deferred | str:
         """What the lane would release from main's head, or why there is nothing to"""
         rule = self.policy.rule(lane)
         changelog = self.changelog_at(head)
         pending = changelog.pending(self.fragments_at(head))
         if lane is Lane.STABLE and rule.promote:
-            return self._promotion(rule)
+            return self._promotion(rule, head)
         if lane is Lane.DEV:
             covered = [t for t in self._tags if self.git.is_ancestor(head, t.commit)]
             if covered:
@@ -190,7 +197,7 @@ class Planner:
             return _Candidate(target.with_pre(rule.marker, n), head, f"{len(pending)} pending entries")
         return _Candidate(target, head, f"{len(pending)} pending entries")
 
-    def _promotion(self, rule: LaneRule) -> _Candidate | str:
+    def _promotion(self, rule: LaneRule, head: str) -> _Candidate | _Deferred | str:
         last = self.last_stable()
         floor = last.version if last else ZERO
         soak = dt.timedelta(days=rule.min_soak_days)
@@ -219,6 +226,13 @@ class Planner:
                 else f"no [{version}rcN] section"
             )
             return f"{rc.name}'s base has nothing pending under {fragments.where(self.policy)}, and {found}"
+        # the run's CI is a local reusable workflow, read at the run's commit, not at the rc's:
+        # once main's CI moved on, it would test the rc's tree with CI the rc never soaked with (D-28)
+        if self.git.differs(rc.commit, head, WORKFLOWS):
+            return _Deferred(
+                f"the CI workflows ({WORKFLOWS}) changed since {rc.name}; the next rc carries them"
+                " and soaks before it's promoted"
+            )
         return _Candidate(version, base, f"promotes {rc.name}, soaked {(self.now - rc.date).days} day(s)")
 
     def _hotfix(self, hotfix: Hotfix) -> _Candidate:
@@ -305,10 +319,11 @@ class Planner:
         skipped = []
         proposals = []
         unplanned: ReleaseError | None = None  # the stable lane's, when it couldn't work out a candidate
+        notes = []  # why a lane before the releasing one skipped, named in the release's reason
         for current in lanes:
             self.policy.rule(current)
             if hotfix:
-                candidate: _Candidate | str = self._hotfix(hotfix)
+                candidate: _Candidate | _Deferred | str = self._hotfix(hotfix)
             elif current is Lane.STABLE and lane is None:
                 # a stable lane that can't read its candidate (a bad rc section to fold, #296)
                 # doesn't stop rc and dev; the plan fails with its error only if they don't release
@@ -317,9 +332,14 @@ class Planner:
                 except ReleaseError as error:
                     unplanned = error
                     skipped.append(f"{current}: not planned, {error}")
+                    notes.append(f"{current}: not planned, {error}")
                     continue
             else:
                 candidate = self._candidate(current, head)
+            if isinstance(candidate, _Deferred):
+                skipped.append(f"{current}: {candidate.why}")
+                notes.append(f"{current}: {candidate.why}")
+                continue
             if isinstance(candidate, str):
                 skipped.append(f"{current}: {candidate}")
                 continue
@@ -350,11 +370,10 @@ class Planner:
                 else:
                     proposals.append(Proposal(current, candidate.version, candidate.base, cause))
                 continue
-            unplanned_note = f"; {Lane.STABLE}: not planned, {unplanned}" if unplanned else ""
             return Decision(
                 mode,
                 "release",
-                f"{current} {candidate.version}: {candidate.why}; {due}{unplanned_note}",
+                "; ".join([f"{current} {candidate.version}: {candidate.why}", due, *notes]),
                 current,
                 candidate.version,
                 candidate.base,

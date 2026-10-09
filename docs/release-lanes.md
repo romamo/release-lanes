@@ -30,7 +30,10 @@ before anything is tagged.
 - **A stable release promotes a soaked rc.** It stamps the commit the rc was built from, so
   it ships exactly the code the rc did. If main has not moved, main fast-forwards to the
   release; otherwise the release is tagged and a sync commit on main moves the released
-  entries into the new section and points main's version at it
+  entries into the new section and points main's version at it. When `.github/workflows/`
+  changed between the rc and main, stable skips, since the release's CI would run main's
+  workflows on the rc's code; the same run cuts the next rc, which carries the new CI and
+  soaks before it is promoted (D-28)
 - **A hotfix** starts from `release/X.Y` (or the last `X.Y.Z` tag), applies each named pull
   request's change, takes their CHANGELOG entries, releases `X.Y.(Z+1)`, and syncs main the
   same way
