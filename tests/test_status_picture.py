@@ -5,6 +5,7 @@ import dataclasses
 import datetime as dt
 import importlib.util
 import json
+import plistlib
 import subprocess
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ from shipmill.app import Answer, Identity, default_key
 from shipmill.cli import _parser, _status, main
 from shipmill.errors import ReleaseError
 from shipmill.gate import skills_dir
+from shipmill.launchd import label
 from shipmill.status import (
     Described,
     Facts,
@@ -32,6 +34,7 @@ from shipmill.status import (
     parse_job,
     parse_waketime,
     read_gate,
+    read_login,
     report,
 )
 from tests import test_app
@@ -422,6 +425,27 @@ def test_s009_27_a_refused_login_read_warns_and_reads_as_before(
     assert "NEEDS_DECISION" in out
     assert err.startswith("shipmill: the App's bot login is unknown, so its questions read unanswered: ")
     assert "GitHub refused the JWT" in err
+
+
+@pytest.mark.parametrize("job_key", [True, False])
+def test_s009_27_the_login_reads_with_the_key_the_app_check_would_use(tmp_path: Path, job_key: bool) -> None:
+    # the launchd job's --app-key, else the default key: read_gate's choice
+    root, home = app_repo(tmp_path)
+    agents = home / "Library" / "LaunchAgents"
+    agents.mkdir(parents=True)
+    passed = tmp_path / "job.pem"
+    passed.write_text("not a real key\n", encoding="utf-8")
+    args = ["shipmill", "gate", test_app.REPO, *(["--app-key", str(passed)] if job_key else []), "--repo-dir", "/x"]
+    with (agents / f"{label(test_app.REPO)}.plist").open("wb") as handle:
+        plistlib.dump({"ProgramArguments": args}, handle)
+    seen: list[Path] = []
+
+    def login(app_id: int, key: Path) -> str:
+        seen.append(key)
+        return test_app.BOT
+
+    assert read_login(test_app.REPO, root, home, "darwin", login) == test_app.BOT
+    assert seen == [passed if job_key else default_key(test_app.APP_ID, home)]
 
 
 class Refused(test_app.FakeApi):
