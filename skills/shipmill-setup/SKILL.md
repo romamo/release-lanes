@@ -126,14 +126,26 @@ from the cheapest that still gives what the user asked for:
 | Setup | What to change | Rough cost |
 |---|---|---|
 | By hand only | remove `push` and `schedule` from `release.yml`'s `on:`, keep `workflow_dispatch` | nothing while idle; a few minutes per release |
-| A fixed schedule, no quiet wait | lanes with `schedule` only; narrow the cron in `release.yml` by hand to the windows (e.g. `0 7 * * 1-5`) and remove `push` | about 2 job-minutes per tick |
+| A fixed schedule, no quiet wait | lanes with `schedule` only, no `milestone`; `init --caller --force` in step 4 writes one cron per window time instead of the hourly tick | about 2 job-minutes per push and per tick; a lane held at its window releases on the next push or window tick |
 | Release on every push | `quiet_minutes = 0`, the hourly cron | about 2 to 3 minutes per push, plus about 1,400 a month for the cron; a burst of merges cuts several releases |
 | The default | `quiet_minutes = 30`, the hourly cron | about 30 minutes per push, plus about 1,400 a month |
 
-`mode = "off"` sleeps no minutes, but releases nothing. Self-hosted runners aren't possible
-yet: say they wait for [#319](https://github.com/shipmill/shipmill/issues/319). Carry the
-user's choice into the decisions below, and make the `release.yml` edit in step 4, after
-`init` writes the file.
+`mode = "off"` sleeps no minutes, but releases nothing. Carry the user's choice into the
+decisions below, and make any `release.yml` edit in step 4, after `init` writes the file.
+
+**The runner.** On a private repo, ask with the decisions below where shipmill's release
+jobs run: GitHub-hosted (the default, billed as above) or a self-hosted runner, named by
+its labels (`self-hosted`, or a JSON list such as `["self-hosted", "linux"]`), which GitHub
+doesn't bill. The runner needs `bash`, `git`, and `curl`, and network access to
+`github.com`, `api.github.com`, `pypi.org`, and `files.pythonhosted.org`; `uv` comes from
+the workflows' `astral-sh/setup-uv` step
+([Self-hosted runners](https://github.com/shipmill/shipmill/blob/main/docs/release-lanes.md#self-hosted-runners)).
+When the user picks a self-hosted runner and a lane uses `quiet_minutes`, ask whether that
+runner also runs deploys. If it does, warn: a runner takes one job at a time, so the settle
+wait holds it for up to `quiet_minutes` after each push, and a deploy started meanwhile
+queues behind it. Offer the two fixes: give shipmill a runner of its own (another label or
+another instance), or drop `quiet_minutes` for a `schedule`. Carry the labels into step 4's
+`--runs-on`.
 
 ### The decisions
 
@@ -260,10 +272,23 @@ and `changelog.d/README.md`, which keeps the folder in git and is never read as 
 When the user turned fragments off, run `$CR init --ci <ci-file>.yml --no-fragments`, which
 writes neither. Tell the user that once fragments are on, every PR adds its entry as a new
 fragment and leaves `CHANGELOG.md` alone, and update the repo's own contributor rules
-(CLAUDE.md, AGENTS.md, CONTRIBUTING.md) that say to edit Unreleased. Edit the policy to the user's choices from step 3 (on a private repo, `release.yml`'s `on:`
-too, per [the setup chosen](#on-a-private-repository)), then add `version_lines` and
+(CLAUDE.md, AGENTS.md, CONTRIBUTING.md) that say to edit Unreleased. Edit the policy to the user's choices from step 3, then add `version_lines` and
 `after_stamp` (for uv projects `["uv lock --check"]`; for a project with a docs check that
 reads the version, that command too).
+
+`init` wrote `release.yml`'s schedule from its starting policy, so once the policy is
+edited, rewrite `release.yml` from it:
+
+```bash
+$CR init --caller --force --ci <ci-file>.yml
+```
+
+It writes only `release.yml`, with the schedule the edited policy needs (the hourly tick,
+one cron per window time, or none). For a self-hosted runner chosen in step 3, add
+`--runs-on <label>` or `--runs-on '<JSON list>'`, which puts every job of shipmill's
+release workflows on it. `--force` replaces any hand edit, so make the private repo's
+remaining `release.yml` edits (removing `push` and `schedule` for by hand only, per
+[the setup chosen](#on-a-private-repository)) after it.
 
 ## 5. Verify
 
@@ -323,6 +348,13 @@ or the tags are wrong; fix those, not the version.
    hand on purpose. In a gate session ask through the needs-decision protocol
    ([needs-decision.md](../github-issue-triage/references/needs-decision.md)), otherwise
    with AskUserQuestion
+
+   A warning row may follow: `RUNNER_SHARED` when `release.yml` passes a `runs-on` other
+   than `ubuntu-latest`, a lane sets `quiet_minutes` above 0, and a workflow an
+   environment's `workflow` or a lane's `dispatch` names has a job on the same runner
+   labels (the same set, a subset, or a superset). It names the workflow and the fixes from
+   step 3; it doesn't change the exit code, and `--fix` leaves it. Tell the user and let
+   them choose
 
    The checklist reads the setup, not the factory. When checking an existing setup, also
    run `$CR status <owner/repo>` in the repo's checkout and report the verdict on its first

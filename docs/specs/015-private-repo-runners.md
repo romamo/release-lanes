@@ -1,6 +1,6 @@
 # S-015: Self-hosted runners and a schedule from the policy
 
-status: approved
+status: built
 
 ## Problem
 
@@ -251,3 +251,16 @@ above; it is a warning, not part of setup's done states.
 - shipmill/shipmill#325: S-015-10, S-015-11, S-015-12
 
 ## Verification
+
+- S-015-1: ran the `test_s015_1` tests in `tests/test_runs_on.py` and read both workflows: each declares the `runs-on` string input defaulting to `ubuntu-latest`, all seven jobs set the `startsWith(...) && fromJSON(...) || inputs.runs-on` expression, the settle job's concurrency group is the one D-1 names, and actionlint passes on `.github/workflows/*.yml`
+- S-015-2: ran `test_s015_2_init_without_runs_on_writes_the_release_workflow_it_wrote_before`, the written `release.yml` equals the pinned pre-spec file byte for byte, with no `runs-on` line and `cron: "7 * * * *"`
+- S-015-3: ran the `test_s015_3` tests, `--runs-on self-hosted` writes `runs-on: self-hosted` and the list writes `runs-on: '["self-hosted","linux"]'` under `with:` in `prepare` and `land`, and actionlint accepts each file
+- S-015-4: ran the `test_s015_4` tests, `init --runs-on` exits 2 naming the value for each malformed form and writes no file
+- S-015-5: ran the `test_s015_5` tests in `tests/test_ticks.py`, a `milestone` lane or a promoting stable lane on `quiet_minutes` gets exactly `7 * * * *`, and the starting policy keeps today's `release.yml`
+- S-015-6: ran the `test_s015_6` tests, `Mon-Fri 07:00 UTC` gives `0 7 * * 1,2,3,4,5`, `Europe/Kyiv` both offsets, `Mon 01:00 Asia/Tokyo` gives `0 16 * * 0`, and two windows at one UTC time give one line
+- S-015-7: ran `test_s015_7_a_push_driven_policy_gets_no_schedule_key`, no `schedule:` key, `push` on the branch and `workflow_dispatch` with its inputs kept
+- S-015-8: ran the `test_s015_8` tests, `init --caller` writes only `release.yml` with `--runs-on`, refuses an existing file without `--force`, and exits 2 without a policy, with a policy that doesn't load, and with `--operate` or `--no-fragments`
+- S-015-9: ran the `test_s015_9` tests, `doctor` WARNs naming each missing cron and `init --caller --force`, and passes with an `M * * * *` cron, every needed line, or extra lines
+- S-015-10: ran the `test_s015_10` tests in `tests/test_runner_docs.py` and read `docs/release-lanes.md`: its "Self-hosted runners" section documents the input and `init --runs-on`, names `bash`, `git`, `curl`, `github.com`, `api.github.com`, and `astral-sh/setup-uv`, and says a runner takes one job at a time while the settle wait holds it; "The schedule in `release.yml`" says a held lane under a narrowed schedule releases on the next push or window tick
+- S-015-11: ran the `test_s015_11` tests and read `skills/shipmill-setup/SKILL.md`: step 3 asks for the runner on a private repo, asks whether a self-hosted runner also runs deploys when a lane uses `quiet_minutes`, and gives the warning and both fixes; step 4 runs `init --caller --force` after the policy is edited
+- S-015-12: ran the `test_s015_12` tests in `tests/test_setup_state.py`, `RUNNER_SHARED` names `deploy.yml` or `publish.yml` for equal, subset, and superset labels (a label, an inline list, a block list), and no row comes with `quiet_minutes` unset or 0, disjoint or only overlapping labels, no or the default `runs-on` in `release.yml`, or an expression; `test_s015_12_runner_shared_runs_under_python_310` runs it under Python 3.10, without tomllib

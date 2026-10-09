@@ -115,6 +115,29 @@ work out what it would promote (an rc section it can't fold, say), the run goes 
 dev and names the stable lane's error in its reason; it fails with that error only when no
 other lane releases or proposes.
 
+### The schedule in `release.yml`
+
+`shipmill init` derives `release.yml`'s cron from the policy it writes, and
+`shipmill init --caller --force` rewrites `release.yml` alone from the policy already in
+`.github/shipmill.toml`, so run it after editing the lanes (with the same `--ci` and
+`--runs-on`):
+
+- **The hourly tick** (`7 * * * *`) when any lane sets `milestone = true`, or the stable
+  lane sets both `promote_from` and `quiet_minutes`: a milestone empties when an issue
+  closes, and an rc finishes its soak while main is quiet, and neither starts a run
+- **One cron per window time** when the lanes trigger on `schedule` (and on `quiet_minutes`
+  without a promoting stable lane): each window's starts over the next year, in UTC, so a
+  time zone with daylight saving time gets a line for each of its offsets
+  (`Mon-Fri 07:00 Europe/Kyiv` gives `0 4 * * 1,2,3,4,5` and `0 5 * * 1,2,3,4,5`)
+- **No schedule** when no lane has a `schedule` and none needs the hourly tick: every run
+  starts from a push or by hand
+
+`push` and `workflow_dispatch` stay in every `release.yml`, and a push run plans every lane.
+Under a narrowed schedule, a lane that was held (a blocker, a freeze, a hold) or had nothing
+pending when its window opened releases on the next push or the next window tick, not
+within the hour as with the hourly tick. `shipmill doctor` warns when the policy needs a
+tick `release.yml` lacks, and never about an extra one.
+
 ### Cost on private repositories
 
 GitHub bills a private repository for the time its jobs spend on GitHub-hosted runners;
@@ -123,13 +146,46 @@ public repositories aren't billed. Two parts of the default setup run there:
 - **The quiet wait.** After a push, the `settle` job of `prepare.yml` sleeps
   `shipmill settle-minutes` minutes (the longest `quiet_minutes`) on `ubuntu-latest`, so
   each push that a newer one doesn't cancel costs about `quiet_minutes` billed minutes
-- **The hourly tick.** The cron in `release.yml` starts at least two jobs an hour, each
-  rounded up to a whole minute: about 1,400 job-minutes a month even when nothing releases
+- **The hourly tick.** When the policy needs it (above), the cron in `release.yml` starts
+  at least two jobs an hour, each rounded up to a whole minute: about 1,400 job-minutes a
+  month even when nothing releases
 
 With `mode = "off"`, `settle-minutes` prints 0 and the wait doesn't sleep. To pay less,
-release by hand only (drop `push` and `schedule` from `release.yml`), narrow the cron to the
-lanes' `schedule` windows (for example `0 7 * * 1-5`) and drop `push`, or set
-`quiet_minutes = 0`, which releases on every push.
+release by hand only (drop `push` and `schedule` from `release.yml`), use lanes that only
+trigger on `schedule`, so `init --caller --force` writes one cron per window instead of the
+hourly tick, set `quiet_minutes = 0`, which releases on every push, or run the jobs on a
+self-hosted runner (below), which GitHub doesn't bill.
+
+### Self-hosted runners
+
+`prepare.yml` and `land.yml` take a `runs-on` input, the runner for every one of their jobs:
+a label (`self-hosted`), or a JSON list of labels a runner must all carry
+(`'["self-hosted", "linux"]'`). Without it every job runs on `ubuntu-latest`.
+`shipmill init --runs-on <runner>` (or `init --caller --force --runs-on <runner>`) writes it
+under `with:` in both the `prepare` and the `land` job of `release.yml`:
+
+```yaml
+  prepare:
+    uses: shipmill/shipmill/.github/workflows/prepare.yml@v0
+    with:
+      runs-on: '["self-hosted","linux"]'
+```
+
+The runner needs:
+
+- `bash`, `git`, and `curl` on the path
+- network access to `github.com`, `api.github.com`, and the package index `uvx` installs
+  shipmill's dependencies from (`pypi.org`, `files.pythonhosted.org`)
+- nothing else: `uv` itself comes from the workflows' `astral-sh/setup-uv` step
+
+Your own CI workflow, which `release.yml`'s `ci` job calls, picks its runner itself.
+
+A runner takes one job at a time. After each push the `settle` job holds the runner for up
+to `quiet_minutes` while it waits, so a deploy started on the same runner meanwhile queues
+behind it. Give shipmill a runner of its own (another label, or another instance), or drop
+`quiet_minutes` for a `schedule`. shipmill-setup's `setup_state.py` reports `RUNNER_SHARED`
+when a deploy workflow named by an environment's `workflow` or a lane's `dispatch` runs on
+the same runner labels.
 
 ### Environments
 
@@ -397,7 +453,7 @@ The workflows call these; you can run them locally too.
 
 | Command | What it does |
 |---|---|
-| `init` | Write the policy and the calling workflow; `--operate` writes the operate one |
+| `init` | Write the policy and the calling workflow; `--caller` rewrites the calling workflow alone from the policy, `--runs-on` names the runner, `--operate` writes the operate one |
 | `operate` | Check environment health, promote after the bake, roll back; `--approve <env>`, `--approve-rollback <env>`, `--dry-run` |
 | `doctor` | Check the repository is ready; exit 1 on a failure |
 | `plan` | Decide whether a lane releases now; JSON on stdout |
