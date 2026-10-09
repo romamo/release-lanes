@@ -227,3 +227,11 @@ entry that supersedes it, never by editing an old one.
 - Why: A repo that turns fragments on mid-cycle must still promote an rc cut before the folder existed and run notes against an older tag; a revision that itself asked for fragments and lacks the folder is still a mistake that must fail
 - Applies to: src/shipmill/fragments.py, src/shipmill/planner.py, src/shipmill/propose.py, src/shipmill/stamp.py, changelog fragments
 - Enforced by: review
+
+## D-28: A stable promotion skips when the CI workflows changed since its rc
+
+- Decided: 2026-10-09, in shipmill/shipmill#317
+- Rule: When .github/workflows/ differs between the rc tag a stable lane would promote and the run's base, the stable lane skips with a reason naming the rc and the changed CI, and the same run plans the next lane (rc), so the next rc carries the new CI and soaks before it is promoted
+- Why: A local reusable workflow resolves at the commit that started the run, so a promotion's CI is main's while its tree is the rc's; a CI change that pairs with code fails every promotion of an older rc and, retried hourly, starves rc. Restarting the soak was chosen over promoting without a fresh CI run
+- Applies to: src/shipmill/planner.py, release lanes, stable promotion
+- Enforced by: review
