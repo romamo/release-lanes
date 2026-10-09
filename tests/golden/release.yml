@@ -1,0 +1,69 @@
+name: Release
+
+# shipmill: https://github.com/shipmill/shipmill. The policy in
+# .github/shipmill.toml decides what releases and when; this file only wires
+# shipmill's workflows to this repository's CI.
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "7 * * * *" # hourly: the policy decides whether a lane's window is open
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: "policy: follow the policy; a lane: release it now, skipping triggers but not gates"
+        type: choice
+        options: [policy, dev, rc, stable, hotfix]
+        default: policy
+      dry-run:
+        description: "Show the release commit, push nothing"
+        type: boolean
+        default: true
+      hotfix-prs:
+        description: "hotfix: merged pull requests to ship, such as 12,15"
+        type: string
+        default: ""
+      hotfix-from:
+        description: "hotfix: the stable tag to fix; empty takes the latest"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    uses: shipmill/shipmill/.github/workflows/prepare.yml@v0
+    with:
+      lane: ${{ inputs.lane != 'policy' && inputs.lane || '' }}
+      dry-run: ${{ inputs.dry-run || false }}
+      hotfix-prs: ${{ inputs.hotfix-prs || '' }}
+      hotfix-from: ${{ inputs.hotfix-from || '' }}
+    permissions:
+      contents: write # pushes the release commit's work branch
+      issues: write # blockers and milestones; opens the issue a hold or release = "propose" leads to
+      pull-requests: read # a hotfix's merge commits
+      actions: read # replaces a work branch a cancelled run left, once no other run owns it
+
+  ci:
+    needs: prepare
+    if: needs.prepare.outputs.sha != ''
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+
+  land:
+    needs: [prepare, ci]
+    if: always() && needs.prepare.outputs.sha != ''
+    uses: shipmill/shipmill/.github/workflows/land.yml@v0
+    with:
+      ci-result: ${{ needs.ci.result }}
+      lane: ${{ needs.prepare.outputs.lane }}
+      version: ${{ needs.prepare.outputs.version }}
+      sha: ${{ needs.prepare.outputs.sha }}
+      base: ${{ needs.prepare.outputs.base }}
+    permissions:
+      contents: write # main, release branches, tags, and releases
+      actions: write # starts the lane's dispatch workflows
+      issues: write # closes the issue release = "propose" opens, and proposes config upgrades

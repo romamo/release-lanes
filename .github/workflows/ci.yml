@@ -39,11 +39,18 @@ jobs:
         run: |
           uvx --from actionlint-py actionlint .github/workflows/*.yml
           uv run python -c "
-          from shipmill.init import Detected, caller_text
+          import sys
+          from pathlib import Path
+          from shipmill.init import Detected, RunsOn, caller_text
           from shipmill.policy import Style, VersionFiles
-          print(caller_text(Detected('demo', 'main', Style.KEEP_A_CHANGELOG, VersionFiles.NONE), 'ci.yml'))
-          " > "$RUNNER_TEMP/release.yml"
-          uvx --from actionlint-py actionlint -ignore 'ci.yml' "$RUNNER_TEMP/release.yml"
+          d = Detected('demo', 'main', Style.KEEP_A_CHANGELOG, VersionFiles.NONE)
+          out = Path(sys.argv[1])
+          (out / 'release.yml').write_text(caller_text(d, 'ci.yml'))
+          (out / 'release-label.yml').write_text(caller_text(d, 'ci.yml', RunsOn.parse('self-hosted')))
+          (out / 'release-list.yml').write_text(caller_text(d, 'ci.yml', RunsOn.parse('[\"self-hosted\", \"linux\"]')))
+          " "$RUNNER_TEMP"
+          uvx --from actionlint-py actionlint -ignore 'ci.yml' \
+            "$RUNNER_TEMP/release.yml" "$RUNNER_TEMP/release-label.yml" "$RUNNER_TEMP/release-list.yml"
           uv run python -c "from shipmill.init import operate_caller_text; print(operate_caller_text())" \
             > "$RUNNER_TEMP/operate.yml"
           uvx --from actionlint-py actionlint "$RUNNER_TEMP/operate.yml"

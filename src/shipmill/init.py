@@ -2,6 +2,8 @@
 its CHANGELOG style, its version file, and its default branch; and, unless told not to, the
 changelog fragments folder the policy names (spec 013)"""
 
+import json
+import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,6 +18,55 @@ from shipmill.upgrades import FRAGMENTS, fragments_readme_text
 
 BOT_REPO = "shipmill/shipmill"
 BOT_REF = "v0"
+
+
+@dataclass(frozen=True, slots=True)
+class RunsOn:
+    """The runner the release workflows' jobs run on (spec 015): one label, or a list of
+    labels that a runner must all carry, as prepare.yml's and land.yml's `runs-on` input takes"""
+
+    labels: tuple[str, ...]
+    listed: bool
+
+    # a bare YAML scalar can't start with an indicator; a runner label never does
+    _INDICATOR = re.compile(r"[-?:,\[\]{}#&*!|>'\"%@`]")
+    # a label YAML reads as the string it is when bare; any other (true, null, ~, 123, foo:)
+    # would reach the `string` input as a bool, a null, a number, or not parse at all
+    _PLAIN = re.compile(r"[A-Za-z][A-Za-z0-9_./-]*")
+    _NOT_STRINGS = frozenset({"true", "false", "null", "yes", "no", "on", "off", "y", "n"})
+
+    @classmethod
+    def parse(cls, text: str) -> RunsOn:
+        """A label, or a JSON list of labels when it starts with `[`"""
+        if text.startswith("["):
+            try:
+                value = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ReleaseError(f"--runs-on {text!r} starts with '[' but isn't JSON: {exc.msg}") from exc
+            if not (isinstance(value, list) and value and all(isinstance(v, str) and v for v in value)):
+                raise ReleaseError(f"--runs-on {text!r} is not a non-empty JSON list of non-empty strings")
+            return cls(tuple(value), listed=True)
+        if not text:
+            raise ReleaseError("--runs-on '' is empty; name a runner label, or a JSON list of labels")
+        if re.search(r"[\s'\",]", text):
+            raise ReleaseError(
+                f"--runs-on {text!r} is not a runner label: it holds whitespace, a quote, or a comma;"
+                ' for several labels pass a JSON list, such as \'["self-hosted", "linux"]\''
+            )
+        if cls._INDICATOR.match(text):
+            raise ReleaseError(f"--runs-on {text!r} is not a runner label: it starts with {text[0]!r}")
+        return cls((text,), listed=False)
+
+    def yaml(self) -> str:
+        """The input's value in release.yml: a label bare, a list as compact JSON in single quotes,
+        since an unquoted list would reach the workflow as a YAML sequence, not a string; a label
+        YAML would read as something else is single-quoted too"""
+        if not self.listed:
+            label = self.labels[0]
+            if self._PLAIN.fullmatch(label) and label.lower() not in self._NOT_STRINGS:
+                return label
+            return "'" + label.replace("'", "''") + "'"
+        return "'" + json.dumps(list(self.labels), separators=(",", ":")).replace("'", "''") + "'"
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,8 +214,11 @@ github_release = true
 '''
 
 
-def caller_text(d: Detected, ci: str) -> str:
+def caller_text(d: Detected, ci: str, runs_on: RunsOn | None = None) -> str:
+    """The Release workflow; runs_on: the runner prepare.yml's and land.yml's jobs run on,
+    which without it stay on their default, ubuntu-latest (spec 015)"""
     uses = f"{BOT_REPO}/.github/workflows"
+    runner = "" if runs_on is None else f"\n      runs-on: {runs_on.yaml()}"
     return f"""name: Release
 
 # shipmill: https://github.com/{BOT_REPO}. The policy in
@@ -206,7 +260,7 @@ jobs:
       lane: ${{{{ inputs.lane != 'policy' && inputs.lane || '' }}}}
       dry-run: ${{{{ inputs.dry-run || false }}}}
       hotfix-prs: ${{{{ inputs.hotfix-prs || '' }}}}
-      hotfix-from: ${{{{ inputs.hotfix-from || '' }}}}
+      hotfix-from: ${{{{ inputs.hotfix-from || '' }}}}{runner}
     permissions:
       contents: write # pushes the release commit's work branch
       issues: write # blockers and milestones; opens the issue a hold or release = "propose" leads to
@@ -229,7 +283,7 @@ jobs:
       lane: ${{{{ needs.prepare.outputs.lane }}}}
       version: ${{{{ needs.prepare.outputs.version }}}}
       sha: ${{{{ needs.prepare.outputs.sha }}}}
-      base: ${{{{ needs.prepare.outputs.base }}}}
+      base: ${{{{ needs.prepare.outputs.base }}}}{runner}
     permissions:
       contents: write # main, release branches, tags, and releases
       actions: write # starts the lane's dispatch workflows
@@ -289,12 +343,13 @@ class Initialized:
     written: tuple[Path, ...]
 
 
-def init(root: Path, ci: str, force: bool, fragments: bool = True) -> Initialized:
+def init(root: Path, ci: str, force: bool, fragments: bool = True, runs_on: RunsOn | None = None) -> Initialized:
     """Write .github/shipmill.toml and the caller workflow, and with fragments the fragments
-    folder's README.md (spec 013). The policy or the caller already there refuses without
-    force; with force, they are overwritten. A README.md already in the folder is kept."""
+    folder's README.md (spec 013); runs_on: the caller passes it as the release workflows'
+    runner (spec 015). The policy or the caller already there refuses without force; with
+    force, they are overwritten. A README.md already in the folder is kept."""
     d = detect(root)
-    files = [(root / CONFIG_PATH, policy_text(d, fragments)), (root / CALLER, caller_text(d, ci))]
+    files = [(root / CONFIG_PATH, policy_text(d, fragments)), (root / CALLER, caller_text(d, ci, runs_on))]
     present = [path for path, _ in files if path.exists()]
     if present and not force:
         names = ", ".join(str(p.relative_to(root)) for p in present)

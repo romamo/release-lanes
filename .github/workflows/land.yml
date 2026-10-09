@@ -29,6 +29,10 @@ on:
       tool:
         type: string
         default: "git+https://github.com/shipmill/shipmill@v0"
+      runs-on:
+        description: "The runner for every job: a label, or a JSON list of labels"
+        type: string
+        default: "ubuntu-latest"
 
 # No workflow-level permissions: each job sets its own, except close-proposal and upgrade,
 # which take the caller's grant, so a caller that grants no `issues: write` still starts this
@@ -40,7 +44,7 @@ jobs:
     concurrency:
       group: shipmill
       cancel-in-progress: false
-    runs-on: ubuntu-latest
+    runs-on: ${{ startsWith(inputs.runs-on, '[') && fromJSON(inputs.runs-on) || inputs.runs-on }}
     permissions:
       contents: write # main, release branches, tags, and releases
       actions: write # starts dispatch workflows; a push with this token starts none
@@ -71,7 +75,7 @@ jobs:
   # landed. Under any other release autonomy it reads nothing from GitHub
   close-proposal:
     needs: land
-    runs-on: ubuntu-latest
+    runs-on: ${{ startsWith(inputs.runs-on, '[') && fromJSON(inputs.runs-on) || inputs.runs-on }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -92,7 +96,7 @@ jobs:
   cleanup:
     needs: land
     if: always()
-    runs-on: ubuntu-latest
+    runs-on: ${{ startsWith(inputs.runs-on, '[') && fromJSON(inputs.runs-on) || inputs.runs-on }}
     permissions:
       contents: write
     steps:
@@ -118,7 +122,7 @@ jobs:
     concurrency:
       group: shipmill-upgrade
       cancel-in-progress: false
-    runs-on: ubuntu-latest
+    runs-on: ${{ startsWith(inputs.runs-on, '[') && fromJSON(inputs.runs-on) || inputs.runs-on }}
     steps:
       - uses: actions/checkout@v7
         with:

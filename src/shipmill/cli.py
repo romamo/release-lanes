@@ -18,7 +18,8 @@
                   makes one's edit in the checkout and commits nothing; --propose opens or updates
                   one shipmill-upgrade issue per pending upgrade, as land.yml runs it after a release
   init            write a starting policy, the calling workflow, and changelog.d/README.md for changelog
-                  fragments (--no-fragments: no fragments; --operate: only the operate workflow)
+                  fragments (--no-fragments: no fragments; --operate: only the operate workflow;
+                  --runs-on: the release jobs' runner, a label or a JSON list of labels)
   gate            start a Claude Code session for the repo only when its state needs one; each tick,
                   held or not, prunes the worktrees that landed, as `worktrees --prune` does
   worktrees       list the repository's worktrees, each REMOVABLE once its work landed, or KEPT and why;
@@ -114,7 +115,7 @@ from shipmill.gate import (
 )
 from shipmill.github import UPGRADE_LABEL, GhCli, GitHub
 from shipmill.gitrepo import Git
-from shipmill.init import init, init_operate
+from shipmill.init import RunsOn, init, init_operate
 from shipmill.land import ActionsRun, Prepared, Stop, cleanup, land, prepare, work_branch
 from shipmill.launchd import DEFAULT_TOOL, build, install, remove
 from shipmill.notify import Desktop
@@ -288,6 +289,12 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help=f"write only {OPERATE_CALLER}, which runs shipmill operate every 10 minutes",
     )
+    p.add_argument(
+        "--runs-on",
+        metavar="RUNNER",
+        help=f"the runner shipmill's release jobs run on, written into {CALLER}: a label, such as self-hosted,"
+        ' or a JSON list of labels, such as \'["self-hosted", "linux"]\' (default: ubuntu-latest)',
+    )
 
     p = sub.add_parser(
         "gate",
@@ -439,12 +446,16 @@ def main(
     if args.command == "upgrade":
         return _upgrade(root, args, github or GhCli(root))
     hub = github or GhCli(root)
-    if args.command == "init" and args.operate:
-        print(f"wrote {init_operate(root, args.force).relative_to(root)}")
-        print(f"next: run `{cli_command()} doctor`")
-        return 0
     if args.command == "init":
-        initialized = init(root, args.ci, args.force, fragments=not args.no_fragments)
+        # checked before any write, on every path (spec 015)
+        runs_on = None if args.runs_on is None else RunsOn.parse(args.runs_on)
+        if args.operate:
+            if runs_on is not None:
+                raise ReleaseError(f"--runs-on sets {CALLER}'s runner; --operate writes only {OPERATE_CALLER}")
+            print(f"wrote {init_operate(root, args.force).relative_to(root)}")
+            print(f"next: run `{cli_command()} doctor`")
+            return 0
+        initialized = init(root, args.ci, args.force, fragments=not args.no_fragments, runs_on=runs_on)
         for path in initialized.written:
             print(f"wrote {path.relative_to(root)}")
         print(f"next: review the policy, then run `{cli_command()} doctor`")

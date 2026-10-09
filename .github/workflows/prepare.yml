@@ -27,6 +27,10 @@ on:
         description: "Where uvx installs shipmill from"
         type: string
         default: "git+https://github.com/shipmill/shipmill@v0"
+      runs-on:
+        description: "The runner for every job: a label, or a JSON list of labels"
+        type: string
+        default: "ubuntu-latest"
     outputs:
       lane:
         value: ${{ jobs.prepare.outputs.lane }}
@@ -50,7 +54,7 @@ jobs:
     concurrency:
       group: ${{ github.event_name == 'push' && 'shipmill-settle' || format('shipmill-settle-{0}', github.run_id) }}
       cancel-in-progress: true
-    runs-on: ubuntu-latest
+    runs-on: ${{ startsWith(inputs.runs-on, '[') && fromJSON(inputs.runs-on) || inputs.runs-on }}
     permissions:
       contents: read
     steps:
@@ -80,7 +84,7 @@ jobs:
     concurrency:
       group: shipmill
       cancel-in-progress: false
-    runs-on: ubuntu-latest
+    runs-on: ${{ startsWith(inputs.runs-on, '[') && fromJSON(inputs.runs-on) || inputs.runs-on }}
     outputs:
       action: ${{ steps.plan.outputs.action }}
       mode: ${{ steps.plan.outputs.mode }}
@@ -164,7 +168,7 @@ jobs:
     concurrency:
       group: shipmill
       cancel-in-progress: false
-    runs-on: ubuntu-latest
+    runs-on: ${{ startsWith(inputs.runs-on, '[') && fromJSON(inputs.runs-on) || inputs.runs-on }}
     steps:
       - uses: actions/checkout@v7
         with:
