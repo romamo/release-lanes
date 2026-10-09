@@ -28,7 +28,7 @@ Turn a backlog into a decision on every issue, a comment that records it, and a 
 8. **A contract change is designed before it's dispatched.** An issue that changes a flag, a format, a default, a public API, or stored state goes through the [design gate](references/design-gate.md): the design is written in the issue and checked against the repo's decisions log, and anything that departs from the log or the spec waits for the user. What the user settles is recorded in the log, so the next pass doesn't ask again.
 9. **A feature is specified before it's dispatched.** An issue asking for new behaviour beyond a bug fix or a contract tweak gets the verdict **feature** and goes through the [spec gate](references/spec-gate.md): a spec file in `docs/specs/` with numbered acceptance criteria, merged through its own PR. No implementer starts before that PR merges; merging it is the approval.
 10. **A user's new request goes to product intake first.** A request for a new capability that no accepted opportunity covers gets the verdict **opportunity**, not **feature**: product intake groups it with the requests for the same outcome, and only the maintainer accepts or declines the group (D-10). Triage writes a spec only for an accepted opportunity, a request an accepted one covers, or an issue the maintainer filed ([triage-rubric.md](references/triage-rubric.md), A new capability).
-11. **Gate sessions ask on GitHub first; Headless: nobody answers in the session.** A session is a gate session when its prompt carries the gate's `Gate session:` paragraph (interactive) or its `Headless:` paragraph; one where AskUserQuestion is unavailable counts as headless. In a gate session, every question this skill would ask (the design gate's, a PR's "decisions for you") follows the [needs-decision protocol](references/needs-decision.md) before anything else: a marked comment mentioning the user and the `needs-decision` label. An interactive gate session then also asks with AskUserQuestion, and on an answer there posts it on the item, removes the label, and goes on; a headless one leaves the item while the rest moves on. A denied tool call is such a decision too. A session the user started by hand asks with AskUserQuestion only. An answered item is work again: remove the label before acting on the reply.
+11. **Gate sessions ask on GitHub first; Headless: nobody answers in the session.** A session is a gate session when its prompt carries the gate's `Gate session:` paragraph (interactive) or its `Headless:` paragraph; one where AskUserQuestion is unavailable counts as headless. In a gate session, every question this skill would ask (the design gate's, a PR's "decisions for you") follows the [needs-decision protocol](references/needs-decision.md) before anything else: a marked comment mentioning the user and the `needs-decision` label. An interactive gate session then also asks with AskUserQuestion, and on an answer there posts it on the item, removes the label, and goes on; a headless one leaves the item while the rest moves on. A denied tool call is such a decision too, unless it chained commands that are each on the list: a headless session runs one allowlisted command per Bash call, so it reruns those as separate calls ([A denied tool call is a decision](references/needs-decision.md#a-denied-tool-call-is-a-decision)); tell implementer agents the same in their brief. A session the user started by hand asks with AskUserQuestion only. An answered item is work again: remove the label before acting on the reply.
 12. **Write as the App when the repo has one.** When `.github/shipmill.toml` sets `[agents] app_id`, every `gh` call that writes (an issue, a comment, a label, a pull request, a review, a merge, a release) runs as `shipmill gh <the same arguments>` from the repo's checkout, in every session, gated or started by hand, so its author is the App's bot, not the maintainer (spec 012, D-14). When `shipmill` isn't on PATH, and in a headless gate session, whose allowlist has `Bash(uvx *)` and no bare `shipmill`, run `uvx --from git+https://github.com/shipmill/shipmill@v0 shipmill gh ...`. Reads may keep plain `gh`. A `shipmill gh` that exits 2 is a stop: report its message and never retry the write with plain `gh`. Tell implementer agents the same in their brief.
 
 ## Judgment versus scripts
@@ -49,12 +49,14 @@ Run it with `uv run --no-project python <skill>/scripts/triage_state.py`. It rec
 
 ```bash
 uv run --no-project python <skill>/scripts/triage_state.py <owner/repo> --closed 40
-git fetch origin && git status -sb && git worktree list
+git fetch origin
+git status -sb
+git worktree list
 gh label list -R <owner/repo>
 ```
 
 Also check:
-- The release phase: `git tag -l | tail -3` and the version in the manifest. It sets the bar in the rubric
+- The release phase: `git for-each-ref --sort=-creatordate --count=3 refs/tags` and the version in the manifest. It sets the bar in the rubric
 - The check commands, from AGENTS.md, CLAUDE.md, or the CI workflow
 - Other sessions on this repo, with ListAgents
 

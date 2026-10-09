@@ -394,6 +394,38 @@ def test_d21_each_skill_asks_on_github_first_in_every_gate_session(skill: str) -
     assert "started by hand asks with AskUserQuestion only" in text
 
 
+def test_a_chained_call_is_rerun_one_command_per_call_not_routed_around() -> None:
+    # #312: a compound command is denied whole when one part is off the list; rerunning its
+    # allowlisted commands as separate calls is not routing around it, an unlisted one stays a decision
+    section = folded(SKILLS / "github-issue-triage" / "references" / "needs-decision.md").split(
+        "## A denied tool call is a decision", 1
+    )[1]
+    section = section.split("## ", 1)[0]
+    assert "One allowlisted command per Bash call." in section
+    assert "`git -C <dir> ...`, not `cd <dir> && ...`" in section
+    assert "rerun them as separate calls" in section
+    unlisted = "A command that isn't on the list is different. Don't retry it in another form or route around it."
+    assert unlisted in section
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "github-issue-triage/SKILL.md",
+        "github-issue-resolve/SKILL.md",
+        "github-pr-triage/SKILL.md",
+        "github-issue-triage/references/implementer-brief.md",
+        "github-pr-triage/references/reviewer-brief.md",
+    ],
+)
+def test_each_skill_and_brief_carries_the_one_command_per_call_rule(path: str) -> None:
+    # #312: a subagent gets the rule its headless parent follows, so it doesn't stop on a chain
+    text = folded(SKILLS / path)
+    assert "one allowlisted command per bash call" in text.lower()
+    assert "separate calls" in text
+    assert "&& git" not in text  # the briefs' own examples run one command per call
+
+
 def test_d21_the_reference_covers_interactive_gate_sessions() -> None:
     ref = folded(SKILLS / "github-issue-triage" / "references" / "needs-decision.md")
     assert "**`Gate session:`** an interactive session" in ref
