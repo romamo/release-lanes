@@ -7,6 +7,31 @@ bot.
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-10-09
+
+### Changed
+
+- `shipmill init` derives `release.yml`'s schedule from the policy (spec 015): the hourly tick
+  only when a lane sets `milestone` or the stable lane promotes with `quiet_minutes`, one cron
+  per UTC window time when the lanes are schedule-only, and no `schedule:` at all when every
+  run starts from a push or by hand, so a private repo stops paying for idle hourly runs. The
+  starting policy still gets the hourly tick. `shipmill init --caller` rewrites only
+  `release.yml` from the existing policy (with `--ci` and `--runs-on`), and `shipmill doctor`
+  warns on a `schedule` check naming each cron the policy needs that `release.yml` lacks (#324)
+
+### Added
+
+- Self-hosted runner docs: `docs/release-lanes.md` gains "Self-hosted runners" (the `runs-on` input, `init --runs-on`, what the runner needs, and the settle wait holding it) and "The schedule in `release.yml`"; shipmill-setup asks for the runner on a private repo, warns when a self-hosted runner also runs deploys, and rewrites `release.yml` with `init --caller --force` after editing the policy; `setup_state.py` warns with `RUNNER_SHARED` when a deploy or dispatch workflow runs on shipmill's runner labels while a lane sets `quiet_minutes` (#325)
+
+### Fixed
+
+- With `[agents] app_id` set, a gate session's prompt names the App's `<slug>[bot]` login and
+  tells the session to pass `--bot-login '<slug>[bot]'` to `triage_state.py` and
+  `watch_state.py`, and github-issue-triage's steps 1 and 7 say so too, so a session's own
+  reads no longer show an App question the maintainer answered as NEEDS_DECISION, or, with
+  `--trusted-only`, an issue the App opened as UNTRUSTED; a repo without an App gets the same
+  prompt as before (#329)
+
 ## [0.44.0] - 2026-10-09
 
 ### Fixed
@@ -1386,7 +1411,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.44.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.45.0...HEAD
+[0.45.0]: https://github.com/shipmill/shipmill/compare/v0.44.0...v0.45.0
 [0.44.0]: https://github.com/shipmill/shipmill/compare/v0.43.0...v0.44.0
 [0.43.0]: https://github.com/shipmill/shipmill/compare/v0.42.0...v0.43.0
 [0.42.0]: https://github.com/shipmill/shipmill/compare/v0.41.2...v0.42.0
