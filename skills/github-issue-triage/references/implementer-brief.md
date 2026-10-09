@@ -3,7 +3,7 @@
 Send one brief per agent (at most two issues each, grouped by the files they touch), all in one message (`subagent_type: general-purpose`, `isolation: "worktree"`). Fill in the `{...}` fields. Name each issue's specific risks: the brief is the only context the agent gets.
 
 ```text
-Repo {owner/repo} (remote origin), {one line: what the project is and its release phase}. You are in an isolated git worktree. Implement {one GitHub issue | two GitHub issues, each on its own branch and PR}, branched from the latest origin/{default} (`git fetch origin && git switch -c <branch> origin/{default}`). Other PRs merge while you work: right before pushing, `git fetch origin && git rebase origin/{default}` and re-run the checks.
+Repo {owner/repo} (remote origin), {one line: what the project is and its release phase}. You are in an isolated git worktree. Implement {one GitHub issue | two GitHub issues, each on its own branch and PR}, branched from the latest origin/{default} (`git fetch origin`, then `git switch -c <branch> origin/{default}`). Other PRs merge while you work: right before pushing, `git fetch origin`, then `git rebase origin/{default}`, and re-run the checks.
 
 Follow the github-issue-resolve skill's phases 2 to 6 (verify the claim on the current default branch, implement with a regression test, verify, commit, push, PR), with these overrides:
 - Do NOT comment on, label, or close issues, and do NOT merge. Report back instead
@@ -12,6 +12,7 @@ Follow the github-issue-resolve skill's phases 2 to 6 (verify the claim on the c
 - Commits: named paths only (`git commit -m "..." -- <paths>`), with a message ending {attribution line}
 - PR body: summary, test notes, `Fixes #N`, ending {PR attribution line}
 - Keep gh calls to a handful and never poll: the API rate limit is shared
+- {In a headless gate session:} Run one allowlisted command per Bash call: `git -C <dir>`, not `cd <dir> &&`; no variable assignments, `;` or `&&` chains, or pipes into tools not on the list. A chained call is denied whole when any part isn't on the list; rerun its commands as separate calls. A command that isn't on the list at all is a "decision for you": stop and report it (github-issue-triage's needs-decision.md, A denied tool call is a decision)
 - Rules: {rules_files, e.g. AGENTS.md}; {project rules in one line, e.g. uv run, fail fast, no monkeypatching}
 - Settled decisions this change must respect: {the output of `decisions.py find` for the touched paths and areas, or "none recorded"}. Departing from one, or from the design below, is a "decision for you": stop and report it, don't ship it
 - {For a spec's build issue:} The spec is `docs/specs/{NNN}-{slug}.md`, merged. Acceptance criteria this issue delivers: {the output of `specs.py criteria NNN`, or the ids this issue covers}. Each one needs a test that proves it and names its id: `test_sNNN_k_...` (Go `TestSNNN_k...`), or a `proves: S-NNN-k` comment line above the test; `specs.py coverage --spec NNN` must list one for each. {For the spec's last open build issue: also follow spec-gate.md's "Verify the whole spec": set `status: built`, fill in its Issues and Verification sections, and run `specs.py check` and `specs.py coverage`.} Departing from a criterion, or finding one that can't hold, is a "decision for you"

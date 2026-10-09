@@ -50,7 +50,11 @@ An interactive gate session that gets the answer through AskUserQuestion puts th
 
 ## A denied tool call is a decision
 
-A headless session runs with an allowlist of tools and can't prompt for more, so Claude Code denies a call outside it. Don't retry it in another form or route around it. Treat the denial as a decision for the user: post the comment above on the item you were working on, naming the tool and the command you tried, with the options (widen the gate's allowlist with `--claude-arg=--allowedTools --claude-arg "<tool>"` on `shipmill gate` or `shipmill launchd`, or do that step by hand), add the label, and leave the item. The allowlist grows from these comments, in review, instead of from guesses.
+A headless session runs with an allowlist of tools and can't prompt for more, so Claude Code denies a call outside it.
+
+**One allowlisted command per Bash call.** Claude Code checks each part of a compound command on its own, and one part that isn't on the list denies the whole call, which reads like "Bash was denied". So a headless session runs one command per Bash call: `git -C <dir> ...`, not `cd <dir> && ...`; no variable assignments, no `;` or `&&` chains, and no pipes into tools that aren't on the list (use `gh --jq` and the Read and Grep tools instead). When a denied call chained commands and every command the step needs is on the list, rerun them as separate calls: that isn't routing around the list, since each call passes it on its own.
+
+A command that isn't on the list is different. Don't retry it in another form or route around it. Treat the denial as a decision for the user: post the comment above on the item you were working on, naming the tool and the command you tried, with the options (widen the gate's allowlist with `--claude-arg=--allowedTools --claude-arg "<tool>"` on `shipmill gate` or `shipmill launchd`, or do that step by hand), add the label, and leave the item. The allowlist grows from these comments, in review, instead of from guesses.
 
 ## While it waits
 

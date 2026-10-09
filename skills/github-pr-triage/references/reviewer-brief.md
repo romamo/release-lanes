@@ -6,10 +6,11 @@ Fill in the `{...}` fields and send one brief per PR, all in one message so the 
 
 ```text
 Review GitHub PR #{N} of {owner/repo} ("{title}", fixes #{issue}). The repo is at {repo_path}, and you are in an isolated worktree of it. Goal: a merge-or-refuse verdict. Do NOT push, comment on GitHub, or merge.
+{In a headless gate session:} Run one allowlisted command per Bash call: `git -C <dir>`, not `cd <dir> &&`; no variable assignments, `;` or `&&` chains, or pipes into tools not on the list. A chained call is denied whole when any part isn't on the list; rerun its commands as separate calls. A command that isn't on the list at all is a finding: stop that step and report it (github-issue-triage's needs-decision.md, A denied tool call is a decision).
 
 {context: what the PR claims, what it's stacked on, whether the default branch has moved, and any peer session working near it (don't touch its worktree)}
 
-1. `git fetch origin && git fetch origin pull/{N}/head:review-{N} && git checkout review-{N}`. Rebase onto origin/{default} locally and report which files conflicted and how you resolved each:
+1. `git fetch origin`, `git fetch origin pull/{N}/head:review-{N}`, then `git checkout review-{N}`. Rebase onto origin/{default} locally and report which files conflicted and how you resolved each:
    - CHANGELOG: keep every entry from both sides, and check that new entries sit under Unreleased, not inside a released section. {When `.github/shipmill.toml` sets `[changelog] fragments`: the PR adds its entry as a new fragment in that folder and leaves `CHANGELOG.md` alone; `changelog_guard.py check --base origin/{default}` must exit 0, and on a line added under Unreleased move the entry into the fragment it names}
    - A count or version both sides changed: recompute it from each side's baseline and confirm by running the test
 2. Run the project's checks in the foreground (timeout 600000 ms): {check_commands}. Known flaky tests: {flakes}. For any other failure, say whether it also fails on origin/{default}.
@@ -33,7 +34,7 @@ Use this for a PR that merged before anyone reviewed it. Same shape, but the bra
 ```text
 Post-merge review of GitHub PR #{N} of {owner/repo} ("{title}"). It is already merged. Your job is to find bugs the merge shipped. Do NOT push, comment on GitHub, or open PRs.
 
-1. `git fetch origin && git checkout -B review-{N} origin/{default}`. Find what landed: `gh pr view {N} --json commits,mergeCommit,body`, plus any follow-up commits touching the same code ({follow_ups}).
+1. `git fetch origin`, then `git checkout -B review-{N} origin/{default}`. Find what landed: `gh pr view {N} --json commits,mergeCommit,body`, plus any follow-up commits touching the same code ({follow_ups}).
 2. {pr_specific_risks}. Also check it composes with PRs that merged next to it and touched the same code ({neighbours}).
 3. Run the project's checks, then fix each real bug on review-{N} with a regression test (the CHANGELOG entry goes under Unreleased → Fixed, or in a new fragment under `### Fixed` when `.github/shipmill.toml` sets `[changelog] fragments`).
 4. Final report, under 250 words: CLEAN / BUGS FOUND, findings with file:line, test results, HEAD SHA.
