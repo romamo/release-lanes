@@ -36,7 +36,7 @@ classifiers = [
 shipmill = "shipmill.cli:run"
 
 [project.urls]
-Homepage = "https://shipmill.github.io/shipmill/"
+Homepage = "https://shipmill.dev/"
 Documentation = "https://github.com/shipmill/shipmill/tree/main/docs"
 Repository = "https://github.com/shipmill/shipmill"
 Issues = "https://github.com/shipmill/shipmill/issues"

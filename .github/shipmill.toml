@@ -40,7 +40,7 @@ replace = '"version": "{version}"'
 [environments.github-pages]
 lane = "stable"
 workflow = "deploy.yml"
-health = "https://shipmill.github.io/shipmill/health.json"
+health = "https://shipmill.dev/health.json"
 
 [operate]
 rollback_after = 3
