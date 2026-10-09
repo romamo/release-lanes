@@ -1,6 +1,6 @@
 name: Deploy
 
-# shipmill's own deploy target: GitHub Pages at https://shipmill.github.io/shipmill/. land
+# shipmill's own deploy target: GitHub Pages at https://shipmill.dev/. land
 # starts it on each stable tag, and shipmill operate on a rollback, with -f tag=<tag>
 # -f environment=github-pages; by hand, run it on the tag too (--ref <tag>), or it fails. The site is site/ at the tag plus a health.json naming the
 # release, {"version": "X.Y.Z"}, which shipmill operate checks against the deployed tag.
