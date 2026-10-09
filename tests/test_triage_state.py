@@ -635,3 +635,57 @@ def test_a_request_an_accepted_opportunity_covers_holds_on_it(ts: ModuleType) ->
     assert ts.upstream_refs(item, REPO) == [ref]
     for state, expected in (("OPEN", "BLOCKED"), ("CLOSED", "UNBLOCKED")):
         assert ts.classify_open(item, "Triage:", "postponed", {ref: state}, None, REPO)[0] == expected
+
+
+# #309: a triage comment paragraph whose one sentence says "depends on" in passing, and whose
+# later sentence names an open issue as context, held the issue on that issue
+PARAGRAPH = (
+    "What the spec settled: a `TIMEOUT` error's `retryable` equals the declared entry. A new"
+    " criterion: a command whose run length depends on its input declares `retryable: false`,"
+    " naming a larger `--timeout`. No schema change, and the long-run problem itself moved to"
+    " spec/spec#83."
+)
+
+
+def test_309_a_hold_word_in_another_sentence_of_the_line_holds_nothing(ts: ModuleType) -> None:
+    item = issue(("2026-10-08T10:00:00Z", f"Triage: **implement**, unblocked.\n\n{PARAGRAPH}\n"))
+    assert ts.upstream_refs(item, REPO) == []
+    states = {("spec", "spec", 83): "OPEN"}
+    assert ts.classify_open(item, "Triage:", "postponed", states, None, REPO)[0] == "NEEDS_PR"
+    # a closing sentence about the decision doesn't hold on the refs of the sentence before
+    verdict = "Triage: **implement**, unblocked: o/up#82 closed with o/up#85 merged. Waits on your decision below."
+    assert ts.upstream_refs(issue(("2026-10-08T10:00:00Z", verdict)), REPO) == []
+
+
+@pytest.mark.parametrize(
+    ("line", "held"),
+    [
+        ("On hold: waits on o/up#82. When it closes, align with what it settles.", ("o", "up", 82)),
+        ("Blocked by o/up#5", ("o", "up", 5)),
+        ("blocked on https://github.com/o/up/issues/5.", ("o", "up", 5)),
+        ("On hold: the build waits on o/r#12, the spec", ("o", "r", 12)),
+        ("On hold: built under o/r#40, the accepted opportunity", ("o", "r", 40)),
+        (
+            "On hold: #3 goes below the spec's default, e.g. #4 stays as is, decided in o/up#9."
+            " Meanwhile #59 stays open, rebased onto main.",
+            ("o", "up", 9),
+        ),
+        ("Pending https://github.com/o/up/pull/7 (the spec PR).", ("o", "up", 7)),
+        ("This waits on #61. It is next.", ("o", "r", 61)),
+        ("The parser is ready. On hold: waits on o/up#3.", ("o", "up", 3)),
+        # an abbreviation before a capitalised owner ends no sentence
+        ("On hold: waits on an upstream fix, e.g. PyCQA/flake8#5", ("PyCQA", "flake8", 5)),
+        ("On hold: blocked by upstream, i.e. Acme/lib#5.", ("Acme", "lib", 5)),
+        ("On hold: waits on upstream (cf. Microsoft/vscode#5)", ("Microsoft", "vscode", 5)),
+        ("Blocked: our fix vs. Acme/lib#6 upstream", ("Acme", "lib", 6)),
+        # a version or a dotted repo name ends none either
+        ("On hold: waits on https://github.com/o/r.js/issues/3 since 0.41.2. Then go.", ("o", "r.js", 3)),
+    ],
+)
+def test_309_the_documented_hold_lines_still_hold(ts: ModuleType, line: str, held: tuple[str, str, int]) -> None:
+    assert ts.upstream_refs(issue(("2026-10-08T10:00:00Z", line)), REPO) == [held]
+
+
+def test_309_the_feature_templates_hold_line_still_holds(ts: ModuleType) -> None:
+    item = issue(("2026-09-01T10:00:00Z", template("Feature")))
+    assert ts.upstream_refs(item, REPO) == [("o", "r", 41)]

@@ -83,7 +83,7 @@ RELEASE_PROBLEMS = ("BOT_FAILED", "BOT_STALLED", "BOT_PLAN_FAILED", "WORK_BRANCH
 
 # triage_state.py's issue states by the line they're listed on (S-009-18)
 ISSUE_LINES = (
-    ("to triage", ("NEW", "REVISIT", "SPEC_REFUSED", "UNFILLED", "DONE_NOT_CLOSED")),
+    ("to triage", ("NEW", "DECIDED", "REVISIT", "SPEC_REFUSED", "UNFILLED", "DONE_NOT_CLOSED")),
     ("to build", ("NEEDS_PR", "UNBLOCKED")),
     ("in progress", ("IN_PROGRESS",)),
     ("parked", ("BLOCKED", "POSTPONED", "TRIAGED")),

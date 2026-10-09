@@ -208,6 +208,7 @@ TRIAGE_ACTION = {
     "SPEC_REFUSED",
     "REVISIT",
     "DONE_NOT_CLOSED",
+    "DECIDED",
     "SUSPECT_CLOSE",
 }
 POLICY = Path(".github/shipmill.toml")
