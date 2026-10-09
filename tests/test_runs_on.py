@@ -83,6 +83,33 @@ def test_s015_3_a_list_reaches_the_input_as_the_json_it_names() -> None:
     assert json.loads(written[1:-1].replace("''", "'")) == ["self-hosted", "linux", "it's"]
 
 
+@pytest.mark.parametrize(
+    ("label", "written"),
+    [
+        ("self-hosted", "self-hosted"),
+        ("ubuntu-22.04", "ubuntu-22.04"),
+        ("Linux_X64", "Linux_X64"),
+        # bare, YAML reads these as a bool, a null, a number, or a mapping that doesn't parse
+        ("true", "'true'"),
+        ("False", "'False'"),
+        ("null", "'null'"),
+        ("~", "'~'"),
+        ("123", "'123'"),
+        ("0x1F", "'0x1F'"),
+        (".inf", "'.inf'"),
+        ("1e3", "'1e3'"),
+        ("yes", "'yes'"),
+        ("foo:", "'foo:'"),
+    ],
+)
+def test_s015_3_a_label_reaches_the_input_as_the_string_it_names(repo: Repo, label: str, written: str) -> None:
+    assert RunsOn.parse(label).yaml() == written
+    assert main(["--repo", str(repo.root), "init", "--force", "--runs-on", label]) == 0
+    jobs = _jobs((repo.root / CALLER).read_text(encoding="utf-8"))
+    for name in ("prepare", "land"):
+        assert f"      runs-on: {written}\n" in jobs[name], name
+
+
 INVALID = [
     "",
     "self hosted",

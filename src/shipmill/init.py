@@ -30,6 +30,10 @@ class RunsOn:
 
     # a bare YAML scalar can't start with an indicator; a runner label never does
     _INDICATOR = re.compile(r"[-?:,\[\]{}#&*!|>'\"%@`]")
+    # a label YAML reads as the string it is when bare; any other (true, null, ~, 123, foo:)
+    # would reach the `string` input as a bool, a null, a number, or not parse at all
+    _PLAIN = re.compile(r"[A-Za-z][A-Za-z0-9_./-]*")
+    _NOT_STRINGS = frozenset({"true", "false", "null", "yes", "no", "on", "off", "y", "n"})
 
     @classmethod
     def parse(cls, text: str) -> RunsOn:
@@ -55,9 +59,13 @@ class RunsOn:
 
     def yaml(self) -> str:
         """The input's value in release.yml: a label bare, a list as compact JSON in single quotes,
-        since an unquoted list would reach the workflow as a YAML sequence, not a string"""
+        since an unquoted list would reach the workflow as a YAML sequence, not a string; a label
+        YAML would read as something else is single-quoted too"""
         if not self.listed:
-            return self.labels[0]
+            label = self.labels[0]
+            if self._PLAIN.fullmatch(label) and label.lower() not in self._NOT_STRINGS:
+                return label
+            return "'" + label.replace("'", "''") + "'"
         return "'" + json.dumps(list(self.labels), separators=(",", ":")).replace("'", "''") + "'"
 
 
