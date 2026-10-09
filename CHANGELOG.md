@@ -7,6 +7,19 @@ bot.
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-10-09
+
+### Fixed
+
+- `shipmill status --rows` and `--json`, and the summary after a failed App check, read with the App's `--bot-login` when the config sets `[agents] app_id` and its key is on this host, so an App question the maintainer answered no longer reads NEEDS_DECISION (#311)
+- `shipmill settle-minutes` prints 0 when the policy's mode is `off`, so the settle job no longer sleeps billed runner minutes after every push for a run that then skips; the release lanes reference adds the cost on private repositories, and shipmill-setup reads the repo's visibility and, on a private repo, offers the cheaper setups with rough monthly figures before choosing lanes (#318)
+
+### Changed
+
+- shipmill's site is at `https://shipmill.dev/`, and its health URL is
+  `https://shipmill.dev/health.json`; the old `shipmill.github.io/shipmill` addresses
+  redirect there. The package homepage and the plugin's homepage point at it (#315)
+
 ## [0.42.0] - 2026-10-09
 
 ### Added
@@ -1357,7 +1370,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.42.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.43.0...HEAD
+[0.43.0]: https://github.com/shipmill/shipmill/compare/v0.42.0...v0.43.0
 [0.42.0]: https://github.com/shipmill/shipmill/compare/v0.41.2...v0.42.0
 [0.41.2]: https://github.com/shipmill/shipmill/compare/v0.41.1...v0.41.2
 [0.41.1]: https://github.com/shipmill/shipmill/compare/v0.41.0...v0.41.1
