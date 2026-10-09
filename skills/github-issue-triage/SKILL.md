@@ -43,6 +43,8 @@ Where each issue stands is a deterministic question, so a script answers it. Wha
 
 Run it with `uv run --no-project python <skill>/scripts/triage_state.py`. It recognises a triage comment by its `Triage:` prefix (`--marker`) and a deferral by the `postponed` label (`--postponed-label`). A merged PR saying only "Part of #N" links the issue without making it DONE_NOT_CLOSED: a split issue whose rest is postponed reads POSTPONED. A hand-closed issue with the `release-blocker` label (`--hold-label`) is a release hold, not a SUSPECT_CLOSE. Nor is an incident closed as completed by hand (the `incident` label, `--incident-label`): it closes once the environment is healthy, and github-ship-watch's POSTMORTEM_DUE follows it up. The script can't read the shipmill config, so pass `--incident-label` when `[operate] incident_label` isn't `incident`. It links a PR to an issue by a closing keyword in the PR's title or body, because GitHub's own `willCloseTarget` misses some. It treats an issue as blocked when it has a `blocked` label, or when a sentence of a comment line saying "on hold", "blocked", or "waits on" links an issue or pull request (`owner/repo#N` or its URL in that sentence, or a plain `#N` of the same repo right after "waits on", "depends on", "blocked by", "decided in", or the like; a plain `#N` elsewhere on the line is context, not a hold), or, once the issue is triaged, when a line of its body starts with "Depends on" and names an issue (`owner/repo#N`, or `#N` in the same repo: a build issue split from a spec); it then checks whether that issue has closed or that pull request merged. A pull request closed without merging (a refused spec) reads SPEC_REFUSED until a newer triage comment decides again. Everything else is judgment: the verdict, the grouping, the brief, and whether a report's decision needs the user.
 
+When `.github/shipmill.toml` sets `[agents] app_id`, the App's needs-decision questions count only with `--bot-login '<slug>[bot]'`; without it, an App question the maintainer answered still reads NEEDS_DECISION, and with `--trusted-only` an issue the App opened reads UNTRUSTED. Pass it to every `triage_state.py` and `watch_state.py` run, quoted, since zsh globs the brackets otherwise. A gate session's prompt names the login; run by hand, `shipmill gate --dry-run` prints it (`would launch as <slug>[bot]`).
+
 ## Workflow
 
 ### 1. Take stock
@@ -54,6 +56,8 @@ git status -sb
 git worktree list
 gh label list -R <owner/repo>
 ```
+
+With `[agents] app_id` set, the first line is `triage_state.py <owner/repo> --closed 40 --bot-login '<slug>[bot]'` ([Judgment versus scripts](#judgment-versus-scripts)).
 
 Also check:
 - The release phase: `git for-each-ref --sort=-creatordate --count=3 refs/tags` and the version in the manifest. It sets the bar in the rubric
@@ -112,7 +116,7 @@ Hand the PRs to github-pr-triage with the user's scope. It owns the CI gate, reb
 
 ### 7. Close the loop
 
-Re-run `triage_state.py`. New issues arrive during a pass: 16 did in one session. For each flag:
+Re-run `triage_state.py`, with step 1's `--bot-login '<slug>[bot]'` when `[agents] app_id` is set. New issues arrive during a pass: 16 did in one session. For each flag:
 - **DONE_NOT_CLOSED:** close it, citing the PR. A rebase-merge doesn't always fire "Fixes #N"
 - **SUSPECT_CLOSE:** reopen it if the fix hasn't landed, and explain why. For example, a commit message quoting `--body="Fixes #12"` closed #12 before its rule existed
 - **UNBLOCKED:** the upstream decision landed. Read it, update the plan on the issue, and resume or re-dispatch the held PR. When it waited on a spec PR, follow spec-gate.md, When the spec merges: link the spec in the issue body, split the spec into build issues with `specs.py split`, file them in order, link them as sub-issues of the feature issue, and record them in the spec's Issues section. A build issue reads UNBLOCKED when its last dependency closes: comment **implement** and dispatch it. A feature issue reads UNBLOCKED when its last build issue closes: confirm the spec says `status: built` with every criterion verified (spec-gate.md, Verify the whole spec), doing that in a docs PR if the last build PR didn't, then close the feature issue

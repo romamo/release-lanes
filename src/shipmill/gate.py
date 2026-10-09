@@ -240,12 +240,24 @@ UNTRUSTED = (
 )
 
 
-def prompt(template: str, repo: str, work: Sequence[Finding], now: dt.datetime) -> str:
-    """The session's prompt lists each finding by state and subject only, never its detail (#114)"""
+def bot_line(login: str) -> str:
+    """The line a prompt carries with [agents] app_id set (#329): the state the session reads
+    again must count the App's needs-decision questions and issues as the gate's read does;
+    the login is quoted, as zsh globs its brackets otherwise"""
+    return (
+        f"The gate's App writes as {login}: pass --bot-login '{login}' to triage_state.py and"
+        " watch_state.py, so its needs-decision questions and the issues it opened read as its own."
+    )
+
+
+def prompt(template: str, repo: str, work: Sequence[Finding], now: dt.datetime, bot: str | None = None) -> str:
+    """The session's prompt lists each finding by state and subject only, never its detail
+    (#114); bot, the App's <slug>[bot] when [agents] app_id is set, adds bot_line"""
     found = "\n".join(f"- {f.brief()}" for f in work)
     stamp = now.isoformat(timespec="minutes")
     head = template.replace("{repo}", repo)
-    return f"{head}\n\nThe shipmill gate found this at {stamp} (from code):\n{found}\n\n{UNTRUSTED}"
+    app = "" if bot is None else f"\n\n{bot_line(bot)}"
+    return f"{head}\n\nThe shipmill gate found this at {stamp} (from code):\n{found}\n\n{UNTRUSTED}{app}"
 
 
 def headless_paragraph(login: str) -> str:
@@ -258,9 +270,11 @@ def headless_paragraph(login: str) -> str:
     )
 
 
-def headless_prompt(template: str, repo: str, work: Sequence[Finding], now: dt.datetime, login: str) -> str:
+def headless_prompt(
+    template: str, repo: str, work: Sequence[Finding], now: dt.datetime, login: str, bot: str | None = None
+) -> str:
     """The mode 1 prompt with the headless paragraph at its end"""
-    return f"{prompt(template, repo, work, now)}\n\n{headless_paragraph(login)}"
+    return f"{prompt(template, repo, work, now, bot)}\n\n{headless_paragraph(login)}"
 
 
 def gate_paragraph(login: str) -> str:
@@ -275,9 +289,11 @@ def gate_paragraph(login: str) -> str:
     )
 
 
-def interactive_prompt(template: str, repo: str, work: Sequence[Finding], now: dt.datetime, login: str) -> str:
+def interactive_prompt(
+    template: str, repo: str, work: Sequence[Finding], now: dt.datetime, login: str, bot: str | None = None
+) -> str:
     """The mode 1 prompt with the gate paragraph at its end"""
-    return f"{prompt(template, repo, work, now)}\n\n{gate_paragraph(login)}"
+    return f"{prompt(template, repo, work, now, bot)}\n\n{gate_paragraph(login)}"
 
 
 def refuse_headless_args(args: Sequence[str]) -> None:
@@ -953,7 +969,8 @@ def gate(
     a blocked session reads the config. With [agents] app_id set, app checks the App's key,
     installation, and bot account before the state is read, in either mode and dry run or
     not, so a failure reads no state, and the state read passes --bot-login <slug>[bot]
-    (D-21, #206). On LAUNCH, on a real run only,
+    (D-21, #206); a LAUNCH's prompt then names that login with bot_line, so the session's own
+    reads pass it too (#329). On LAUNCH, on a real run only,
     app_env writes the session's helpers and gives its `--settings` env; both happen before
     any session is stopped or started, so a failure stops none and starts none (D-14). The
     decision then names the bot as its identity. app_key_named (`--app-key`) without app_id
@@ -1025,11 +1042,11 @@ def gate(
         raise ReleaseError("a gate session's questions mention your gh login, but no login read was given")
     host = login()
     if headless:
-        text = headless_prompt(agents.prompt, repo, decision.work, now, host)
+        text = headless_prompt(agents.prompt, repo, decision.work, now, host, read.bot_login)
         if identity is None:  # GitHub doesn't notify anyone of their own mention (spec 005)
             decision = replace(decision, asks_as=host)
     else:
-        text = interactive_prompt(agents.prompt, repo, decision.work, now, host)
+        text = interactive_prompt(agents.prompt, repo, decision.work, now, host, read.bot_login)
     if dry_run:
         return decision, None, waiting, pruned
     env = None

@@ -297,6 +297,42 @@ def test_d21_the_interactive_prompt_ends_with_the_gate_paragraph_naming_the_logi
     assert text == prompt("/t", REPO, [ISSUES], NOW) + "\n\n" + paragraph
 
 
+# #329: a session that reran triage_state.py without --bot-login read the App's answered
+# question as NEEDS_DECISION, and under --trusted-only the App's own issues as UNTRUSTED
+
+
+def launched_text(claude: FakeClaude) -> str:
+    """The prompt of the one session a tick started, interactive or headless"""
+    texts = [text for _, text in claude.launched] + [text for _, text, _, _ in claude.started]
+    [text] = texts
+    return text
+
+
+@pytest.mark.parametrize("config", [interactive(APP_ID), headless(APP_ID)])
+def test_329_with_an_app_the_prompt_names_its_bot_login(checkout: Git, tmp_path: Path, config: AgentsConfig) -> None:
+    claude = FakeClaude()
+    prepared = Prepared(checkout, gh_path(tmp_path))
+    tick(checkout, config, claude, Reads(), app=app_check_for(tmp_path), app_env=prepared)
+    text = launched_text(claude)
+    line = (
+        f"The gate's App writes as {BOT}: pass --bot-login '{BOT}' to triage_state.py and"
+        " watch_state.py, so its needs-decision questions and the issues it opened read as its own."
+    )
+    ending = gate_paragraph(LOGIN) if config.mode is Mode.INTERACTIVE else headless_paragraph(LOGIN)
+    assert text == prompt("/t", REPO, [ISSUES], NOW) + "\n\n" + line + "\n\n" + ending
+    assert prompt("/t", REPO, [ISSUES], NOW, BOT) + "\n\n" + ending == text
+
+
+@pytest.mark.parametrize("config", [interactive(), headless()])
+def test_329_without_an_app_the_prompt_names_no_bot_login(checkout: Git, config: AgentsConfig) -> None:
+    claude = FakeClaude()
+    tick(checkout, config, claude, Reads())
+    text = launched_text(claude)
+    ending = gate_paragraph(LOGIN) if config.mode is Mode.INTERACTIVE else headless_paragraph(LOGIN)
+    assert text == prompt("/t", REPO, [ISSUES], NOW) + "\n\n" + ending
+    assert "--bot-login" not in text and "[bot]" not in text
+
+
 def test_d21_an_interactive_launch_whose_login_read_fails_starts_nothing(checkout: Git) -> None:
     claude = FakeClaude()
     with pytest.raises(ReleaseError, match="HTTP 401"):
