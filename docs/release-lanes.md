@@ -112,6 +112,22 @@ work out what it would promote (an rc section it can't fold, say), the run goes 
 dev and names the stable lane's error in its reason; it fails with that error only when no
 other lane releases or proposes.
 
+### Cost on private repositories
+
+GitHub bills a private repository for the time its jobs spend on GitHub-hosted runners;
+public repositories aren't billed. Two parts of the default setup run there:
+
+- **The quiet wait.** After a push, the `settle` job of `prepare.yml` sleeps
+  `shipmill settle-minutes` minutes (the longest `quiet_minutes`) on `ubuntu-latest`, so
+  each push that a newer one doesn't cancel costs about `quiet_minutes` billed minutes
+- **The hourly tick.** The cron in `release.yml` starts at least two jobs an hour, each
+  rounded up to a whole minute: about 1,400 job-minutes a month even when nothing releases
+
+With `mode = "off"`, `settle-minutes` prints 0 and the wait doesn't sleep. To pay less,
+release by hand only (drop `push` and `schedule` from `release.yml`), narrow the cron to the
+lanes' `schedule` windows (for example `0 7 * * 1-5`) and drop `push`, or set
+`quiet_minutes = 0`, which releases on every push.
+
 ### Environments
 
 An optional `[environments]` section names where releases deploy, each through a deploy
@@ -389,7 +405,7 @@ The workflows call these; you can run them locally too.
 | `cleanup` | Delete a release commit's work branch |
 | `sync` | Bring a stable release made off main into main, to recover a failed sync |
 | `notes` | Print a release's notes |
-| `settle-minutes` | Print how long to wait after a push |
+| `settle-minutes` | Print how long to wait after a push: the longest `quiet_minutes`, 0 when `mode = "off"` |
 | `upgrade` | List the config upgrades this repo hasn't decided; `--apply <id>` makes one's edit in the checkout, `--json` |
 | `gate` | Start a Claude Code session for a repo only when its state needs one, with the config's `[agents]` prompt ([agent modes](design/agent-modes.md)) |
 | `launchd` | Run `gate` for a dedicated checkout every few minutes on a Mac |

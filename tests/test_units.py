@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 
 from shipmill.changelog import Changelog, Entry
+from shipmill.cli import main
 from shipmill.errors import ReleaseError
 from shipmill.github import PROPOSAL_LABEL, Forbidden, GhCli
 from shipmill.policy import Lane, Policy, Style
@@ -75,6 +76,21 @@ class TestPolicy:
         assert policy.quiet_minutes == 30
         assert policy.rule(Lane.STABLE).promote
         assert policy.blocker_lanes == {Lane.RC, Lane.STABLE}
+
+    @pytest.mark.parametrize(("mode", "minutes"), [("off", "0"), ("dry-run", "30"), ("release", "30")])
+    def test_settle_minutes_is_0_when_the_mode_is_off(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], mode: str, minutes: str
+    ) -> None:
+        # a private repo pays for the settle job's sleep; with mode off plan skips anyway (#318)
+        path = tmp_path / ".github" / "shipmill.toml"
+        path.parent.mkdir()
+        path.write_text(POLICY.replace('mode = "release"', f'mode = "{mode}"'), encoding="utf-8")
+        assert main(["--repo", str(tmp_path), "settle-minutes"]) == 0
+        assert capsys.readouterr().out == f"{minutes}\n"
+        assert self.load(POLICY.replace('mode = "release"', f'mode = "{mode}"')).quiet_minutes == 30
+
+    def test_settle_minutes_is_0_with_no_quiet_lane(self) -> None:
+        assert self.load(POLICY.replace("[lanes.dev]\nquiet_minutes = 30\n", "")).settle_minutes == 0
 
     @pytest.mark.parametrize(
         ("change", "message"),
