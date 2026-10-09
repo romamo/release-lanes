@@ -2,6 +2,8 @@
 
 import importlib.util
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -587,3 +589,155 @@ def test_a_home_folder_without_shadowing_skills_is_done(ss: ModuleType, tmp_path
     (row,) = ss.skill_rows(tmp_path, ss.watch_module())
     assert row.state == "SKILLS_OK"
     assert row.state in ss.DONE
+
+
+# -- spec 015: RUNNER_SHARED ----------------------------------------------------------------
+
+RUNNER_CALLER = """name: Release
+on:
+  push:
+    branches: [main]
+jobs:
+  prepare:
+    uses: shipmill/shipmill/.github/workflows/prepare.yml@v0
+    with:
+      lane: ${{ inputs.lane != 'policy' && inputs.lane || '' }}
+      runs-on: RUNNER
+  ci:
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+  land:
+    needs: [prepare, ci]
+    uses: shipmill/shipmill/.github/workflows/land.yml@v0
+    with:
+      sha: ${{ needs.prepare.outputs.sha }}
+      runs-on: RUNNER
+"""
+RUNNER_CONFIG = """name = "demo"
+mode = "release"
+
+[lanes.stable]
+QUIET
+dispatch = [
+  "publish.yml",  # PyPI
+]
+
+[environments.production]
+lane = "stable"
+workflow = "deploy.yml"
+"""
+DEPLOY = """on:
+  workflow_dispatch:
+jobs:
+  ref:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo checked
+  deploy:
+    needs: ref
+    runs-on: LABELS
+    environment: ${{ inputs.environment }}
+    steps:
+      - run: |
+          echo deploy
+"""
+
+
+def runner_repo(root: Path, runner: str | None, labels: str, quiet: str = "quiet_minutes = 30") -> Path:
+    caller = RUNNER_CALLER.replace("RUNNER", runner) if runner else CALLER
+    write(root, ".github/workflows/release.yml", caller)
+    write(root, ".github/shipmill.toml", RUNNER_CONFIG.replace("QUIET", quiet))
+    write(root, ".github/workflows/deploy.yml", DEPLOY.replace("LABELS", labels))
+    return root
+
+
+@pytest.mark.parametrize(
+    ("runner", "labels"),
+    [
+        ("self-hosted", "self-hosted"),  # the same set
+        ('\'["self-hosted","linux"]\'', "self-hosted"),  # the deploy's set is a subset
+        ("self-hosted", "[self-hosted, linux]"),  # a superset, as an inline list
+        ('\'["self-hosted","linux"]\'', "\n      - linux\n      - Self-Hosted  # labels ignore case"),
+        ("'self-hosted' # quoted, with a comment", "'self-hosted'"),
+    ],
+)
+def test_s015_12_a_deploy_on_shipmills_runner_reads_runner_shared(
+    ss: ModuleType, tmp_path: Path, runner: str, labels: str
+) -> None:
+    runner_repo(tmp_path, runner, labels)
+    (row,) = ss.runner_rows(tmp_path, ss.watch_module())
+    assert row.state == "RUNNER_SHARED"
+    assert row.detail.startswith("deploy.yml's job deploy runs on ")
+    assert "the settle wait holds it for up to 30 minutes after each push" in row.detail
+    assert "give shipmill a runner of its own (another label or instance), or drop quiet_minutes" in row.detail
+
+
+def test_s015_12_a_dispatch_workflow_on_shipmills_runner_is_named(ss: ModuleType, tmp_path: Path) -> None:
+    runner_repo(tmp_path, "self-hosted", "deploy-box")
+    write(tmp_path, ".github/workflows/publish.yml", DEPLOY.replace("LABELS", "[self-hosted]"))
+    (row,) = ss.runner_rows(tmp_path, ss.watch_module())
+    assert row.detail.startswith("publish.yml's job deploy runs on self-hosted, as shipmill's release jobs do")
+
+
+@pytest.mark.parametrize(
+    ("runner", "labels", "quiet"),
+    [
+        ("self-hosted", "self-hosted", ""),  # quiet_minutes unset
+        ("self-hosted", "self-hosted", "quiet_minutes = 0"),
+        ("self-hosted", "deploy-box", "quiet_minutes = 30"),  # disjoint labels
+        ('\'["self-hosted","build"]\'', "[self-hosted, deploy]", "quiet_minutes = 30"),  # overlapping only
+        (None, "ubuntu-latest", "quiet_minutes = 30"),  # no runs-on in release.yml
+        ("ubuntu-latest", "ubuntu-latest", "quiet_minutes = 30"),  # the default, written out
+        ("${{ vars.RUNNER }}", "self-hosted", "quiet_minutes = 30"),  # only the run resolves it
+        ("self-hosted", "${{ matrix.runner }}", "quiet_minutes = 30"),  # an expression isn't compared
+        ("self-hosted", "\n      group: deployers\n      labels: [self-hosted]", "quiet_minutes = 30"),  # a group
+    ],
+)
+def test_s015_12_no_runner_shared_row_otherwise(
+    ss: ModuleType, tmp_path: Path, runner: str | None, labels: str, quiet: str
+) -> None:
+    runner_repo(tmp_path, runner, labels, quiet)
+    assert ss.runner_rows(tmp_path, ss.watch_module()) == []
+
+
+def test_s015_12_a_yaml_list_passed_to_the_string_input_fails(ss: ModuleType, tmp_path: Path) -> None:
+    runner_repo(tmp_path, "[self-hosted, linux]", "self-hosted")
+    with pytest.raises(SystemExit) as exc:
+        ss.runner_rows(tmp_path, ss.watch_module())
+    assert exc.value.code == 2
+
+
+def test_s015_12_runner_shared_is_a_warning_not_a_done_state(ss: ModuleType) -> None:
+    done = [ss.Row(state, "") for state in sorted(ss.DONE)]
+    assert ss.exit_code([*done, ss.Row("RUNNER_SHARED", "deploy.yml")]) == 0
+    assert "RUNNER_SHARED" not in ss.DONE
+    assert ss.exit_code([*done, ss.Row("LANDING_OFF", "#1")]) == 1
+
+
+def test_s015_12_the_310_reader_reads_lanes_and_environments_as_tomllib_does(ss: ModuleType) -> None:
+    ws, where = ss.watch_module(), Path(".github/shipmill.toml")
+    text = RUNNER_CONFIG.replace("QUIET", "quiet_minutes = 30") + '\n[lanes.dev]\ndispatch = ["dev.yml"]\n'
+    want = (30, ["publish.yml", "dev.yml", "deploy.yml"])
+    assert ss.lane_runner_config(ws.tomllib.loads(text), where) == want
+    assert ss.lane_runner_config_310(text, where, ws) == want
+    with pytest.raises(SystemExit):
+        ss.lane_runner_config_310("[lanes]\nstable = { quiet_minutes = 30 }\n", where, ws)
+
+
+def test_s015_12_runner_shared_runs_under_python_310(tmp_path: Path) -> None:
+    runner_repo(tmp_path, '\'["self-hosted","linux"]\'', "[self-hosted]")
+    uv = shutil.which("uv")
+    assert uv is not None, "uv runs the skill scripts"
+    code = (
+        "import importlib.util, sys; from pathlib import Path\n"
+        "spec = importlib.util.spec_from_file_location('setup_state', sys.argv[1])\n"
+        "ss = importlib.util.module_from_spec(spec); sys.modules['setup_state'] = ss; spec.loader.exec_module(ss)\n"
+        "ws = ss.watch_module(); assert ws.tomllib is None, 'tomllib on 3.10'\n"
+        "print(sys.version_info[:2], [r.state for r in ss.runner_rows(Path(sys.argv[2]), ws)])\n"
+    )
+    command = [uv, "run", "--no-project", "--python", "3.10", "python", "-c", code, str(SCRIPT), str(tmp_path)]
+    done = subprocess.run(command, capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "(3, 10) ['RUNNER_SHARED']"

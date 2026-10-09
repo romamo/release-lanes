@@ -79,12 +79,24 @@ the config loader reads it, so a section without the key has prs = false):
                merges when green, or land them by hand. --fix leaves it: it needs the user
   LANDING_OK   prs = true, no [agents] section, or no pull request waits to land
 
+Runner (spec 015; a warning, read only when release.yml passes shipmill's prepare.yml or
+land.yml a runs-on other than ubuntu-latest and a lane sets quiet_minutes above 0):
+  RUNNER_SHARED  a workflow named by an environment's workflow or a lane's dispatch has a
+                 job whose runs-on labels are the same set as shipmill's, a subset, or a
+                 superset, one row per workflow: the settle wait holds that runner for up
+                 to quiet_minutes after each push, and a deploy queues behind it. A job
+                 whose runs-on is an expression (${{ ... }}) or a runner group's mapping
+                 isn't compared. --fix leaves it
+
 Exit 0 when every row is RELEASE_READY, AGENTS_OK, PLUGIN_OK, SKILLS_OK, LABELS_OK,
-BRANCH_DELETE_ON, or LANDING_OK, 1 otherwise (AGENTS_NO_APP, AGENTS_NO_MODE,
-AGENTS_UNPREFIXED, PLUGIN_OUTDATED, SKILL_SHADOWED, and LANDING_OFF included), 2 on bad
-input, a malformed settings.json or config (its [agents] read as github-ship-watch reads
-it), an [agents] prs that isn't a TOML boolean, both config files, a git or gh failure (a failed
-read of the repo setting never reads as off), or a malformed `claude plugin list --json`.
+BRANCH_DELETE_ON, or LANDING_OK (RUNNER_SHARED, a warning, leaves the exit code alone), 1
+otherwise (AGENTS_NO_APP, AGENTS_NO_MODE, AGENTS_UNPREFIXED, PLUGIN_OUTDATED,
+SKILL_SHADOWED, and LANDING_OFF included), 2 on bad input, a malformed settings.json or
+config (its [agents] read as github-ship-watch reads it; its [lanes] and [environments]
+too when the runner is read), an [agents] prs that isn't a TOML boolean, both config files,
+a runs-on in release.yml that isn't a label or a quoted JSON list of labels, a git or gh
+failure (a failed read of the repo setting never reads as off), or a malformed
+`claude plugin list --json`.
 Needs git and an authenticated gh, uvx for --fix's labels with app_id set, and claude on PATH
 to read the plugin's installs. Python
 3.10+, standard library only.
@@ -136,6 +148,12 @@ NO_MODE = (
     ' or mode = "headless" (shipmill-setup\'s step 4)'
 )
 DONE = {"RELEASE_READY", "AGENTS_OK", "PLUGIN_OK", "SKILLS_OK", "LABELS_OK", "BRANCH_DELETE_ON", "LANDING_OK"}
+# rows that warn without being part of setup's done states: they leave the exit code alone
+WARNINGS = {"RUNNER_SHARED"}
+# the runner prepare.yml's and land.yml's runs-on input defaults to (spec 015)
+DEFAULT_RUNNER = "ubuntu-latest"
+# a job of release.yml that calls shipmill's prepare.yml or land.yml, from a repo or locally
+SHIPMILL_JOB = re.compile(r"(?:^|/)\.github/workflows/(?:prepare|land)\.ya?ml(?:@\S*)?$")
 # the plugin's name: a prompt calls its skills as /shipmill:<name> (#236)
 PREFIX = PLUGIN.partition("@")[0]
 
@@ -474,6 +492,226 @@ def landing_row(repo: str, repo_dir: Path, gh: Callable[[list[str]], str] = run)
     )
 
 
+# -- runner --------------------------------------------------------------------------------
+# A workflow is read without a YAML library: the block mappings a workflow is written in, by
+# indentation, which is all runs-on and the jobs around it need
+
+
+def indent(line: str) -> int:
+    return len(line) - len(line.lstrip(" "))
+
+
+def content(line: str) -> bool:
+    """Neither blank nor a comment"""
+    return bool(line.strip()) and not line.lstrip().startswith("#")
+
+
+def children(lines: list[str]) -> dict[str, tuple[str, list[str]]]:
+    """The keys of a block mapping at its own indent, each with the value on its line and the
+    lines under it; a sequence item at the key's own indent belongs to the key, as YAML reads it"""
+    rows = [line for line in lines if content(line)]
+    if not rows:
+        return {}
+    depth = indent(rows[0])
+    found: dict[str, tuple[str, list[str]]] = {}
+    key: str | None = None
+    for line in lines:
+        if not content(line):
+            continue
+        if indent(line) > depth or (indent(line) == depth and line.lstrip().startswith("- ")):
+            if key is not None:
+                found[key][1].append(line)
+            continue
+        if indent(line) < depth:
+            break
+        pair = re.match(r"^\s*(\"[^\"]*\"|'[^']*'|[^\s#'\"-][^:#]*?)\s*:(?:\s+(.*))?$", line)
+        key = None if pair is None else pair.group(1).strip("\"'")
+        if key is not None:
+            found[key] = ((pair.group(2) or "").strip(), [])
+    return found
+
+
+def scalar(text: str) -> str:
+    """A one-line YAML scalar: a quoted one unquoted, a plain one without its comment"""
+    single = re.match(r"^'((?:[^']|'')*)'\s*(?:#.*)?$", text)
+    if single:
+        return single.group(1).replace("''", "'")
+    double = re.match(r'^("(?:[^"\\]|\\.)*")\s*(?:#.*)?$', text)
+    if double:
+        value: str = json.loads(double.group(1))
+        return value
+    return re.split(r"\s+#", text, maxsplit=1)[0].strip()
+
+
+def jobs(text: str) -> dict[str, dict[str, tuple[str, list[str]]]]:
+    """Each job of a workflow, as its keys"""
+    top = children(text.splitlines())
+    if "jobs" not in top:
+        return {}
+    return {name: children(body) for name, (_, body) in children(top["jobs"][1]).items()}
+
+
+def job_labels(value: str, under: list[str]) -> frozenset[str] | None:
+    """A job's runs-on labels: a label, an inline list, or a block list; None for an
+    expression, which only the run resolves, or a runner group's mapping (spec 015 leaves
+    groups out), so neither is compared"""
+    items: list[str]
+    flow = re.match(r"^\[(.*)\]\s*(?:#.*)?$", value)
+    if flow:
+        items = [scalar(item.strip()) for item in flow.group(1).split(",") if item.strip()]
+    elif value and not value.startswith("#"):
+        items = [scalar(value)]
+    else:
+        listed = [re.match(r"^\s*-\s+(.*)$", line) for line in under]
+        if not listed or any(item is None for item in listed):
+            return None
+        items = [scalar(item.group(1).strip()) for item in listed if item is not None]
+    if not items or any(not item or "${{" in item for item in items):
+        return None
+    return frozenset(item.casefold() for item in items)
+
+
+def shipmill_runners(text: str, where: Path) -> list[frozenset[str]]:
+    """The runs-on each job calling shipmill's prepare.yml or land.yml passes, other than the
+    default: a label, or a JSON list of labels in a quoted string, as the input takes it. An
+    expression is left out, since only the run resolves it"""
+    found: list[frozenset[str]] = []
+    for name, keys in jobs(text).items():
+        if not SHIPMILL_JOB.search(scalar(keys.get("uses", ("", []))[0])) or "with" not in keys:
+            continue
+        given = children(keys["with"][1]).get("runs-on")
+        if given is None:
+            continue
+        raw, under = given
+        if raw.startswith("[") or not raw or under:
+            fail(f"{where}: job {name} passes runs-on as a YAML list; the input takes a label or a quoted JSON list")
+        value = scalar(raw)
+        if "${{" in value:
+            continue
+        labels: object = [value]
+        if value.startswith("["):
+            try:
+                labels = json.loads(value)
+            except json.JSONDecodeError as exc:
+                fail(f"{where}: job {name}'s runs-on {value!r} starts with '[' but isn't JSON: {exc.msg}")
+        if not (isinstance(labels, list) and labels and all(isinstance(v, str) and v for v in labels)):
+            fail(f"{where}: job {name}'s runs-on {value!r} is not a label or a non-empty JSON list of labels")
+        runner = frozenset(label.casefold() for label in labels)
+        if runner != {DEFAULT_RUNNER} and runner not in found:
+            found.append(runner)
+    return found
+
+
+def lane_runner_config(raw: dict[str, Any], where: Path) -> tuple[int, list[str]]:
+    """The longest quiet_minutes across the lanes and the workflows the environments' workflow
+    and the lanes' dispatch name, from the parsed config"""
+    lanes, environments = raw.get("lanes", {}), raw.get("environments", {})
+    if not isinstance(lanes, dict) or not isinstance(environments, dict):
+        fail(f"{where}: lanes and environments must be tables")
+    quiet, workflows = 0, []
+    for name, table in lanes.items():
+        if not isinstance(table, dict):
+            fail(f"{where}: lanes.{name} is not a table")
+        minutes, dispatch = table.get("quiet_minutes", 0), table.get("dispatch", [])
+        if isinstance(minutes, bool) or not isinstance(minutes, int):
+            fail(f"{where}: lanes.{name} quiet_minutes must be an integer, got {minutes!r}")
+        if not (isinstance(dispatch, list) and all(isinstance(w, str) for w in dispatch)):
+            fail(f"{where}: lanes.{name} dispatch must be a list of workflow files, got {dispatch!r}")
+        quiet = max(quiet, minutes)
+        workflows += dispatch
+    for name, table in environments.items():
+        workflow = table.get("workflow") if isinstance(table, dict) else None
+        if not isinstance(workflow, str):
+            fail(f"{where}: environments.{name} needs a workflow file")
+        workflows.append(workflow)
+    return quiet, list(dict.fromkeys(workflows))
+
+
+def lane_runner_config_310(text: str, where: Path, ws: ModuleType) -> tuple[int, list[str]]:
+    """lane_runner_config on Python 3.10, without tomllib: plain [lanes.<name>] and
+    [environments.<name>] tables of one-line keys and a dispatch list; any other form is
+    refused rather than misread"""
+    unreadable = (
+        f"{where}: can't read [lanes] or [environments] on Python 3.10: use 3.11+ or plain"
+        " [lanes.<name>] and [environments.<name>] tables"
+    )
+    tables = ws.toml_tables(text)
+    nested = re.search(r"^\s*[\"']?(?:lanes|environments)[\"']?\s*[.=]", tables.get("", ""), re.MULTILINE)
+    if nested or not ws.blank(tables.get("lanes", "")) or not ws.blank(tables.get("environments", "")):
+        fail(unreadable)
+    quiet, workflows, deploys = 0, [], []  # the lanes' dispatch first, as tomllib's reading lists them
+    for name, body in tables.items():
+        parts = name.split(".")
+        if parts[0] not in ("lanes", "environments") or len(parts) == 1:
+            continue
+        if len(parts) != 2:
+            fail(unreadable)
+        if parts[0] == "environments":
+            workflow = ws.toml_string(body, "workflow")
+            if workflow is None:
+                fail(f"{where}: environments.{parts[1]} needs a workflow file (or can't be read on Python 3.10)")
+            deploys.append(workflow)
+            continue
+        minutes = re.search(r"^\s*[\"']?quiet_minutes[\"']?\s*=\s*(\d+)\s*(?:#.*)?$", body, re.MULTILINE)
+        if minutes is None and re.search(r"^\s*[\"']?quiet_minutes[\"']?\s*=", body, re.MULTILINE):
+            fail(unreadable)
+        quiet = max(quiet, int(minutes.group(1)) if minutes else 0)
+        dispatch = re.search(r"^\s*[\"']?dispatch[\"']?\s*=\s*\[(.*?)\]", body, re.MULTILINE | re.DOTALL)
+        if dispatch is None:
+            if re.search(r"^\s*[\"']?dispatch[\"']?\s*=", body, re.MULTILINE):
+                fail(unreadable)
+            continue
+        strings = r"\"([^\"]*)\"|'([^']*)'"
+        rest = re.sub(r"#[^\n]*", "", re.sub(strings, "", dispatch.group(1)))
+        if rest.replace(",", "").strip():
+            fail(unreadable)
+        workflows += [double or single for double, single in re.findall(strings, dispatch.group(1))]
+    return quiet, list(dict.fromkeys(workflows + deploys))
+
+
+def runner_rows(repo_dir: Path, ws: ModuleType) -> list[Row]:
+    """RUNNER_SHARED for each deploy workflow with a job on shipmill's runner, while a lane's
+    settle wait holds that runner after a push (spec 015); the config is read only then"""
+    caller, config = repo_dir / CALLER, config_file(repo_dir)
+    if not caller.is_file() or config is None:
+        return []
+    runners = shipmill_runners(caller.read_text(encoding="utf-8"), caller)
+    if not runners:
+        return []
+    text = config.read_text(encoding="utf-8")
+    if ws.tomllib is None:
+        quiet, workflows = lane_runner_config_310(text, config, ws)
+    else:
+        try:
+            raw = ws.tomllib.loads(text)
+        except ws.tomllib.TOMLDecodeError as exc:
+            fail(f"{config}: {exc}")
+        quiet, workflows = lane_runner_config(raw, config)
+    if quiet <= 0:
+        return []
+    rows = []
+    for workflow in workflows:
+        path = repo_dir / ".github" / "workflows" / workflow
+        if not path.is_file():  # doctor reports a missing deploy workflow
+            continue
+        for job, keys in jobs(path.read_text(encoding="utf-8")).items():
+            labels = job_labels(*keys["runs-on"]) if "runs-on" in keys else None
+            shared = next((r for r in runners if labels is not None and (labels <= r or r <= labels)), None)
+            if shared is None:
+                continue
+            rows.append(
+                Row(
+                    "RUNNER_SHARED",
+                    f"{workflow}'s job {job} runs on {', '.join(sorted(labels or ()))}, as shipmill's release jobs"
+                    f" do ({', '.join(sorted(shared))}): a runner takes one job at a time, so the settle wait holds"
+                    f" it for up to {quiet} minutes after each push and a deploy queues behind it; give shipmill a"
+                    " runner of its own (another label or instance), or drop quiet_minutes for a schedule",
+                )
+            )
+            break
+    return rows
+
+
 # -- main ----------------------------------------------------------------------------------
 
 
@@ -526,10 +764,16 @@ def main() -> int:
         labels_row(missing, wanted),
         branch_delete_row(args.repo, args.fix),
         landing_row(args.repo, repo_dir),
+        *runner_rows(repo_dir, ws),
     ]
     for row in rows:
         print(json.dumps({"state": row.state, "detail": row.detail}) if args.json else row.text())
-    return 0 if all(row.state in DONE for row in rows) else 1
+    return exit_code(rows)
+
+
+def exit_code(rows: list[Row]) -> int:
+    """0 when every row but a warning is done, 1 otherwise"""
+    return 0 if all(row.state in DONE for row in rows if row.state not in WARNINGS) else 1
 
 
 if __name__ == "__main__":
