@@ -7,6 +7,16 @@ bot.
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-10-09
+
+### Added
+
+- Config upgrades are asked about and carried out: `watch_state.py` reports an open `shipmill-upgrade` issue as `UPGRADE_PENDING` (or in NEEDS_DECISION while its question waits), github-ship-watch asks the maintainer through the needs-decision protocol under `[autonomy] upgrade = "propose"` and opens the upgrade pull request as the App on `shipmill/upgrade-<id>`, github-pr-triage merges it only on an accepting answer from an owner, member, or collaborator or under `act`, and `shipmill upgrade --propose` takes the `shipmill-upgrade-later` ("not now") label off only once a newer shipmill release changes the upgrade (#281)
+
+### Fixed
+
+- An answered needs-decision issue reads DECIDED in `triage_state.py`, an action the gate starts a session for on the next tick instead of after its retry window, and a hold word in one sentence of a comment line no longer holds the issue on a link another sentence names (#309)
+
 ## [0.41.2] - 2026-10-09
 
 ### Fixed
@@ -1347,7 +1357,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.41.2...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.42.0...HEAD
+[0.42.0]: https://github.com/shipmill/shipmill/compare/v0.41.2...v0.42.0
 [0.41.2]: https://github.com/shipmill/shipmill/compare/v0.41.1...v0.41.2
 [0.41.1]: https://github.com/shipmill/shipmill/compare/v0.41.0...v0.41.1
 [0.41.0]: https://github.com/shipmill/shipmill/compare/v0.40.0...v0.41.0
