@@ -7,6 +7,22 @@ bot.
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-10-09
+
+### Fixed
+
+- A stable promotion skips when `.github/workflows/` changed since the rc it would promote, since the release's CI runs main's workflows on the rc's code, and the same run cuts the next rc instead, which carries the new CI and soaks before it is promoted (#317)
+
+### Added
+
+- The reusable `prepare.yml` and `land.yml` take a `runs-on` input, a runner label or a JSON
+  list of labels, that every one of their jobs runs on; it defaults to `ubuntu-latest`, so a
+  caller that passes nothing runs as before. `shipmill init --runs-on <runner>` writes it
+  into `release.yml`'s `prepare` and `land` jobs, a label bare and a list as compact JSON in
+  single quotes, and exits 2 naming the value for one that isn't a runner label or a
+  non-empty JSON list of labels, writing no file; without the flag `release.yml` is the one
+  `init` wrote before (spec 015) (#323)
+
 ## [0.43.0] - 2026-10-09
 
 ### Fixed
@@ -1370,7 +1386,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.43.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.44.0...HEAD
+[0.44.0]: https://github.com/shipmill/shipmill/compare/v0.43.0...v0.44.0
 [0.43.0]: https://github.com/shipmill/shipmill/compare/v0.42.0...v0.43.0
 [0.42.0]: https://github.com/shipmill/shipmill/compare/v0.41.2...v0.42.0
 [0.41.2]: https://github.com/shipmill/shipmill/compare/v0.41.1...v0.41.2
