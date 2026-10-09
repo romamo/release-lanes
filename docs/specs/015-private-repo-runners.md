@@ -246,4 +246,8 @@ above; it is a warning, not part of setup's done states.
 
 ## Issues
 
+- shipmill/shipmill#323: S-015-1, S-015-2, S-015-3, S-015-4
+- shipmill/shipmill#324: S-015-5, S-015-6, S-015-7, S-015-8, S-015-9
+- shipmill/shipmill#325: S-015-10, S-015-11, S-015-12
+
 ## Verification
