@@ -310,6 +310,61 @@ def test_a_bad_rc_section_to_fold_leaves_the_rc_lane_releasing(repo: Repo) -> No
         plan(repo, at_day(9), event=Event.MANUAL, lane=Lane.STABLE)
 
 
+CI = ".github/workflows/ci.yml"
+
+
+def test_changed_ci_skips_stable_and_cuts_the_next_rc(repo: Repo) -> None:  # #317, D-28
+    repo.merge(1, "Added", "Feature A", CI, "uses: ruff 0.6\n")
+    release(repo, plan(repo, at_day(1)))
+    repo.at(at_day(2))
+    repo.merge(2, "Fixed", "Pin ruff 0.7 in CI", CI, "uses: ruff 0.7\n")  # main's CI moves on after the rc
+    skip = "stable: the CI workflows (.github/workflows/) changed since v1.1.0rc1; the next rc carries them"
+
+    # rc1 has soaked, but its tree would run main's CI: stable skips, and the same run cuts rc2
+    decision = plan(repo, at_day(7))
+    assert (decision.action, decision.lane, str(decision.version)) == ("release", Lane.RC, "1.1.0rc2")
+    assert skip in decision.reason
+    release(repo, decision)
+
+    # until rc2, with the new CI, has soaked, the ripe rc is still rc1: stable skips, by hand too
+    by_hand = plan(repo, at_day(9), event=Event.MANUAL, lane=Lane.STABLE)
+    assert by_hand.action == "skip" and skip in by_hand.reason
+
+    # rc2 carries main's CI: once soaked, it promotes
+    decision = plan(repo, at_day(10), event=Event.MANUAL, lane=Lane.STABLE)
+    assert (decision.action, str(decision.version)) == ("release", "1.1.0")
+
+
+def test_a_new_workflow_file_skips_stable(repo: Repo) -> None:  # #317, D-28
+    repo.merge(1, "Added", "Feature A", CI, "uses: ruff 0.6\n")
+    release(repo, plan(repo, at_day(1)))
+    repo.at(at_day(2))
+    repo.merge(2, "Added", "A new CI job", ".github/workflows/lint.yml", "jobs: {}\n")  # a new file counts too
+    decision = plan(repo, at_day(4), event=Event.MANUAL, lane=Lane.STABLE)
+    assert decision.action == "skip"
+    assert decision.reason == (
+        "stable: the CI workflows (.github/workflows/) changed since v1.1.0rc1; the next rc carries them"
+        " and soaks before it's promoted"
+    )
+
+
+def test_unchanged_ci_still_promotes(repo: Repo) -> None:  # #317, D-28
+    repo.merge(1, "Added", "Feature A", CI, "uses: ruff 0.6\n")
+    release(repo, plan(repo, at_day(1)))
+    rc_base = repo.git.remote_branch("main")
+    repo.at(at_day(2))
+    # main moves on outside .github/workflows/, even elsewhere under .github/: only the CI counts
+    repo.merge(2, "Fixed", "Fix B", "src/b.py", "B = 1\n")
+    repo.merge(3, "Fixed", "Code owners", ".github/CODEOWNERS", "* @o\n")
+    decision = plan(repo, at_day(4), event=Event.MANUAL, lane=Lane.STABLE)
+    assert (decision.action, str(decision.version), decision.base) == ("release", "1.1.0", rc_base)
+
+
+def test_the_ci_comparison_fails_on_a_git_error(repo: Repo) -> None:  # #317
+    with pytest.raises(ReleaseError, match="git diff --quiet"):
+        repo.git.differs("v9.9.9rc1", "HEAD", ".github/workflows/")
+
+
 def test_hotfix_ships_chosen_prs_from_the_release_branch(repo: Repo) -> None:
     repo.merge(1, "Added", "Feature A, not ready", "src/a.py", "A = 1\n")
     repo.merge(2, "Fixed", "Urgent fix", "src/app.py", "VALUE = 2\n")
