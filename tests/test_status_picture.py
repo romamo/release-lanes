@@ -3,17 +3,20 @@ summary"""
 
 import dataclasses
 import datetime as dt
+import importlib.util
 import json
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
 from shipmill.agents import AgentsConfig, Mode
-from shipmill.app import Identity, default_key
+from shipmill.app import Answer, Identity, default_key
 from shipmill.cli import _parser, _status, main
 from shipmill.errors import ReleaseError
+from shipmill.gate import skills_dir
 from shipmill.status import (
     Described,
     Facts,
@@ -311,9 +314,140 @@ def test_s009_15_with_the_app_the_reads_pass_its_bot_login(tmp_path: Path, capsy
         assert cmd[-2:] == ["--bot-login", test_app.BOT]
         assert "--trusted-only" not in cmd
     assert "  github app     active" in capsys.readouterr().out
-    rows = Fake(0)
-    assert _status(root, _parser().parse_args(["--repo", str(root), "status", "--rows"]), rows, api, signer) == 0
-    assert "--bot-login" not in rows.seen[0]
+
+
+TRIAGE_STATE = skills_dir() / "github-issue-triage" / "scripts" / "triage_state.py"
+
+
+def triage_state() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("triage_state_status", TRIAGE_STATE)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+class Asked(Fake):
+    """The reads of one issue the App's bot asked about and the owner answered, classified
+    by triage_state.py as the command's --bot-login has it"""
+
+    def __init__(self) -> None:
+        super().__init__(1)
+        self.ts = triage_state()
+
+    def state(self, cmd: list[str]) -> str:
+        login = cmd[cmd.index("--bot-login") + 1] if "--bot-login" in cmd else None
+        comments = [
+            {"author": {"login": "demo-agent", "__typename": "Bot"}, "authorAssociation": "CONTRIBUTOR"},
+            {"author": {"login": "owner", "__typename": "User"}, "authorAssociation": "OWNER"},
+        ]
+        comments[0]["body"], comments[1]["body"] = f"{self.ts.DECISION_MARKER}\nWhich one?", "The first."
+        issue = {
+            "author": {"login": "owner"},
+            "authorAssociation": "OWNER",
+            "labels": {"nodes": [{"name": self.ts.DECISION_LABEL}]},
+            "comments": {"nodes": comments},
+        }
+        found = self.ts.gated(issue, login, False)
+        assert found is not None
+        return str(found[0])
+
+    def __call__(self, cmd: list[str]) -> subprocess.CompletedProcess[str]:
+        self.seen.append(cmd)
+        if cmd[1].endswith("watch_state.py"):
+            row = {"state": self.state(cmd), "subject": test_app.REPO, "detail": "#6", "agent": False}
+            out = json.dumps(row) + "\n" if "--json" in cmd else f"{row['state']} {test_app.REPO} #6\n"
+            return subprocess.CompletedProcess(cmd, 1, out, "")
+        if cmd[1].endswith("triage_state.py"):
+            out = json.dumps({"number": 6, "state": self.state(cmd), "title": "t", "note": ""}) + "\n"
+            return subprocess.CompletedProcess(cmd, 1, out, "")
+        return super().__call__(cmd)
+
+
+def app_repo(tmp_path: Path, app_id: bool = True, key: bool = True) -> tuple[Path, Path]:
+    root = repo_with_release(tmp_path / "repo", test_app.REPO)
+    (root / ".github").mkdir()
+    config = '[agents]\nprompt = "/t"\nmode = "headless"\n' + (f"app_id = {test_app.APP_ID}\n" if app_id else "")
+    (root / ".github" / "shipmill.toml").write_text(config, encoding="utf-8")
+    home = tmp_path / "home"
+    if key:
+        path = default_key(test_app.APP_ID, home)
+        path.parent.mkdir(parents=True)
+        path.write_text("not a real key\n", encoding="utf-8")
+        path.chmod(0o600)
+    return root, home
+
+
+@pytest.mark.parametrize("flag", ["--rows", "--json"])
+def test_s009_27_rows_and_json_read_the_apps_question_as_answered(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], flag: str
+) -> None:
+    # #311: an App's question and the owner's reply read DECIDED, not NEEDS_DECISION, with one GitHub call
+    root, home = app_repo(tmp_path)
+    api, signer = test_app.FakeApi(), test_app.FakeSigner()
+    reads = Asked()
+    args = _parser().parse_args(["--repo", str(root), "status", flag])
+    assert _status(root, args, reads, api, signer, home=home, platform="linux", now=NOW) == 1
+    assert reads.seen[0][-2:] == ["--bot-login", test_app.BOT]
+    out = capsys.readouterr().out
+    assert "DECIDED" in out and "NEEDS_DECISION" not in out
+    assert [path for path, _ in api.calls] == ["/app"]
+
+
+@pytest.mark.parametrize("flag", ["--rows", "--json"])
+@pytest.mark.parametrize(("app_id", "key"), [(False, True), (True, False)])
+def test_s009_27_without_an_app_id_or_its_key_rows_and_json_read_as_before(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], flag: str, app_id: bool, key: bool
+) -> None:
+    root, home = app_repo(tmp_path, app_id=app_id, key=key)
+    api, reads = test_app.FakeApi(), Asked()
+    args = _parser().parse_args(["--repo", str(root), "status", flag])
+    assert _status(root, args, reads, api, test_app.FakeSigner(), home=home, platform="linux", now=NOW) == 1
+    assert "--bot-login" not in reads.seen[0]
+    assert "NEEDS_DECISION" in capsys.readouterr().out
+    assert api.calls == []
+
+
+def test_s009_27_a_refused_login_read_warns_and_reads_as_before(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root, home = app_repo(tmp_path)
+    reads = Asked()
+    args = _parser().parse_args(["--repo", str(root), "status", "--json"])
+    refused = Refused()
+    assert _status(root, args, reads, refused, test_app.FakeSigner(), home=home, platform="linux", now=NOW) == 1
+    assert "--bot-login" not in reads.seen[0]
+    out, err = capsys.readouterr()
+    assert "NEEDS_DECISION" in out
+    assert err.startswith("shipmill: the App's bot login is unknown, so its questions read unanswered: ")
+    assert "GitHub refused the JWT" in err
+
+
+class Refused(test_app.FakeApi):
+    """GitHub refusing the App's JWT"""
+
+    def get(self, path: str, token: str | None) -> Answer:
+        self.calls.append((path, token))
+        return Answer(401, '{"message": "Bad credentials"}')
+
+
+def test_s009_27_a_failed_app_check_still_reads_with_the_bot_login(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # the App isn't installed: the picture shows the failure, and its question still reads answered
+    root, home = app_repo(tmp_path)
+    api, reads = test_app.FakeApi(installed=False), Asked()
+    args = _parser().parse_args(["--repo", str(root), "status"])
+    assert _status(root, args, reads, api, test_app.FakeSigner(), home=home, platform="linux", now=NOW) == 1
+    states = [c for c in reads.seen if c[1].endswith(("watch_state.py", "triage_state.py"))]
+    assert len(states) == 2
+    for cmd in states:
+        assert cmd[-2:] == ["--bot-login", test_app.BOT]
+    out, err = capsys.readouterr()
+    assert "  github app     not connected: app demo-agent is not installed on romamo/demo" in out
+    assert "needs decision" not in out
+    assert err == ""
 
 
 URL = f"https://github.com/{REPO}"

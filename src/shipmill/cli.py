@@ -65,6 +65,7 @@ from shipmill.app import (
     Signer,
     UrllibApi,
     app_check,
+    app_login,
     app_token,
     cache_outside,
     check_key,
@@ -828,9 +829,22 @@ def _status(
     def check(app_id: int, key: Path) -> Identity:
         return app_check(slug, key, home, signer, api)(app_id, when)
 
+    def bot_login(app_id: int, key: Path) -> str | None:
+        try:
+            return app_login(signer, api)(app_id, key, when)
+        except ReleaseError as exc:  # the picture shows the App check's own failure instead
+            if not picture:
+                print(
+                    f"shipmill: the App's bot login is unknown, so its questions read unanswered: {exc}",
+                    file=sys.stderr,
+                )
+            return None
+
     # the picture reads as the gate's App, whose needs-decision questions are its own (spec 005)
     gate = status.read_gate(slug, top, home, platform, run, check, os.getuid()) if picture else None
     login = None if gate is None else gate.login
+    if login is None:  # #311: --rows, --json, or a failed check still count the App's questions
+        login = status.read_login(slug, top, home, platform, bot_login)
     proc = run(watch_command(slug, top, StateRead(bot_login=login), json=not args.rows))
     sys.stderr.write(proc.stderr)  # S-008-10: warnings on 0 and 1, the whole traceback on a failure
     if state_failed(proc):

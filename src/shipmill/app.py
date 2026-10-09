@@ -235,13 +235,19 @@ class NotInstalled(ReleaseError):
     """The App has no installation on the repo; the message is spec 004's, S-004-5"""
 
 
-def installation(app_id: int, repo: str, token: str, api: Api) -> Installation:
-    """Spec 004, At launch step 3: the App's slug, then its installation on repo, which must
-    grant every permission in the table"""
+def app_slug(app_id: int, token: str, api: Api) -> str:
+    """The App's slug, from GET /app with its JWT"""
     app = _ok(api.get("/app", token), "/app", app_id)
     slug = app.get("slug")
     if not isinstance(slug, str) or not slug:
         raise ReleaseError(f"GET /app for app_id {app_id} gave no slug")
+    return slug
+
+
+def installation(app_id: int, repo: str, token: str, api: Api) -> Installation:
+    """Spec 004, At launch step 3: the App's slug, then its installation on repo, which must
+    grant every permission in the table"""
+    slug = app_slug(app_id, token, api)
     path = f"/repos/{repo}/installation"
     answer = api.get(path, token)
     if answer.status == 404:
@@ -313,6 +319,21 @@ def app_check(repo: str, key: Path | None, home: Path, signer: Signer, api: Api)
         return Identity(app_id, found.slug, bot_id(found.slug, app_id, api), path)
 
     return check
+
+
+AppLogin = Callable[[int, Path, dt.datetime], str]
+
+
+def app_login(signer: Signer, api: Api) -> AppLogin:
+    """The App's bot login, `<slug>[bot]`, with the key at the path: the JWT and GET /app
+    alone, one GitHub call, without the full check's installation and bot account reads
+    (#311). Whose needs-decision questions are the gate's (D-21), whether or not the App is
+    installed and granted today; any failure raises ReleaseError"""
+
+    def login(app_id: int, key: Path, now: dt.datetime) -> str:
+        return f"{app_slug(app_id, jwt(app_id, check_key(key), now, signer), api)}[bot]"
+
+    return login
 
 
 CACHE = "app-token.json"  # in the gate's state folder, `$(git rev-parse --git-common-dir)/shipmill`

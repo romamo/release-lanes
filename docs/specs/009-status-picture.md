@@ -154,6 +154,14 @@ with `--bot-login <slug>[bot]`, as the gate does, so a needs-decision question t
 bot asked counts as a question and the maintainer's reply as its answer. The report still
 leaves out `--trusted-only`, so a person sees every item (spec 008).
 
+Without a passing check (`--rows` and `--json`, which skip it, or a failed check), the reads
+still pass `--bot-login <slug>[bot]` when the config sets `[agents] app_id` and the key the
+check would use is on this host (#311): the App's JWT and `GET /app` alone give the slug,
+one GitHub call. A key missing on this host, or a refused read, leaves the login out, as
+before; for `--rows` and `--json` a refused read prints a warning to stderr, and the picture
+shows the check's own failure. Without the key the login can't be read: the App's id alone
+names no slug.
+
 ### Flags and exit codes
 
 - `--rows` prints `watch_state.py`'s table unchanged, as `shipmill status` did under spec
@@ -196,7 +204,7 @@ leaves out `--trusted-only`, so a person sees every item (spec 008).
   unchanged, and the exit code is spec 008's whatever the verdict
 - S-009-15: with a passing App check, the report's `watch_state.py` and `triage_state.py`
   reads pass `--bot-login <slug>[bot]` and never `--trusted-only`; `--rows` and `--json`
-  read as spec 008 does
+  read as spec 008 does (amended in #311, see S-009-27)
 - S-009-16: the report's first line is `owner/name (https://github.com/owner/name):
   <VERDICT>`, with no list of reasons under it; each reason the verdict has is a line of
   the summary
@@ -234,6 +242,11 @@ leaves out `--trusted-only`, so a person sees every item (spec 008).
 - S-009-26: open pull requests in `PRS_OPEN` are a WAITS ON YOU reason naming them, the
   setting, and the fix when `[agents] prs = false` or the config has no `[agents]`, and a
   WORKING reason (`pull request #N to land`), never WAITS, with `prs = true`
+- S-009-27: with `[agents] app_id` set and its key on this host, `--rows`, `--json`, and a
+  report whose App check failed read with `--bot-login <slug>[bot]`, the slug from one `GET
+  /app`, so the App's question followed by an owner's reply reads DECIDED, not
+  NEEDS_DECISION; without an app_id or the key they read as before with no GitHub call, and
+  a refused read leaves the login out with a warning on stderr for `--rows` and `--json`
 
 ## Out of scope
 
@@ -261,6 +274,7 @@ leaves out `--trusted-only`, so a person sees every item (spec 008).
 - shipmill/shipmill#211: S-009-1, S-009-2, S-009-3, S-009-4, S-009-5, S-009-6, S-009-7, S-009-8, S-009-9, S-009-10, S-009-11, S-009-12, S-009-13, S-009-14, S-009-15
 - shipmill/shipmill#212: S-009-16, S-009-17, S-009-18, S-009-19, S-009-20, S-009-21, S-009-22, S-009-23
 - shipmill/shipmill#231: S-009-24, S-009-25, S-009-26
+- shipmill/shipmill#311: S-009-27
 
 ## Verification
 
@@ -295,3 +309,4 @@ real on this repo on 2026-10-07: WORKING, with the summary's lines as Each line 
 - S-009-24: `test_s009_24_open_pull_requests_are_listed_to_land_newest_first` and `test_s009_24_an_unreadable_pull_request_row_fails`, passing
 - S-009-25: `test_s009_25_the_landing_line_says_whether_the_gate_lands_pull_requests`, passing
 - S-009-26: `test_s009_26_pull_requests_no_gate_lands_wait_on_you` and `test_s009_26_pull_requests_the_gate_lands_are_work_not_waiting`, passing
+- S-009-27: `test_s009_27_rows_and_json_read_the_apps_question_as_answered`, `test_s009_27_without_an_app_id_or_its_key_rows_and_json_read_as_before`, `test_s009_27_a_refused_login_read_warns_and_reads_as_before`, and `test_s009_27_a_failed_app_check_still_reads_with_the_bot_login`, passing
