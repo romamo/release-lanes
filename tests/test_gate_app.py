@@ -238,7 +238,7 @@ def test_s004_6_claude_gets_settings_after_the_name_and_no_token(checkout: Git, 
     [listing, started] = recorder.commands
     assert listing[:3] == ["claude", "agents", "--json"]
     settings = json.dumps({"env": expected_env(checkout, tmp_path)})
-    text = interactive_prompt("/t", REPO, [ISSUES], NOW, HOST)
+    text = interactive_prompt("/t", REPO, [ISSUES], NOW, HOST, BOT)  # #329: the prompt names the bot
     assert started == ["claude", "--bg", "-n", NAME, "--settings", settings, "--permission-mode=auto", text]
     assert not (state_dir(checkout) / CACHE).exists()  # nothing was minted, so no token can be in it
     assert "GH_TOKEN" not in settings and "x-access-token" not in settings
