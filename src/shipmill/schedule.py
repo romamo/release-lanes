@@ -37,13 +37,16 @@ class Window:
         """The newest window start at or before now, within the last week"""
         local = now.astimezone(self.zone)
         for back in range(8):
-            day = local.date() - dt.timedelta(days=back)
-            if day.weekday() not in self.weekdays:
-                continue
-            start = dt.datetime.combine(day, self.time, tzinfo=self.zone)
-            if start <= local:
-                return start.astimezone(dt.UTC)
+            start = self.start_on(local.date() - dt.timedelta(days=back))
+            if start is not None and start <= local:
+                return start
         return None
+
+    def start_on(self, day: dt.date) -> dt.datetime | None:
+        """The window's start, in UTC, on a day of its own zone; None on a day it doesn't open"""
+        if day.weekday() not in self.weekdays:
+            return None
+        return dt.datetime.combine(day, self.time, tzinfo=self.zone).astimezone(dt.UTC)
 
 
 def _weekdays(spec: str, text: str) -> frozenset[int]:
