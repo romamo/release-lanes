@@ -391,7 +391,9 @@ def test_s014_15_status_lists_an_upgrade_issue_on_its_upgrade_line_only(state: s
     # answered), but github-ship-watch owns it: it is no issue to triage
     found = lines(facts(upgrades=[Offer(PLUGIN, 42)], issues=[StatusIssue(42, state), StatusIssue(7, "NEW")]))
     triage = [line for line in found if "/issues/7" in line or "/issues/42" in line]
-    assert [line for line in triage if "/issues/42" in line] == [f"                 fix: https://github.com/{REPO}/issues/42"]
+    assert [line for line in triage if "/issues/42" in line] == [
+        f"                 fix: https://github.com/{REPO}/issues/42"
+    ]
     assert any(line.startswith("  to triage") and "/issues/7" in line for line in found)
 
 

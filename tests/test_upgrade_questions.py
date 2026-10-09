@@ -89,8 +89,7 @@ def test_s014_11_the_issue_rows_leave_upgrade_issues_to_ship_watch() -> None:
     )
     # an answered upgrade question reads DECIDED in triage_state.py, still ship-watch's to take up
     assert (
-        "That holds when `triage_state.py` reads it DECIDED too: its answer is github-ship-watch's to take up"
-        in triage
+        "That holds when `triage_state.py` reads it DECIDED too: its answer is github-ship-watch's to take up" in triage
     )
 
 
