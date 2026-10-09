@@ -37,6 +37,7 @@ repo:
 
 | Fact | Where to look | What the bot needs |
 |---|---|---|
+| Visibility | `gh repo view --json visibility` | `PRIVATE` or `INTERNAL`: GitHub bills its Actions minutes, so step 3 starts with [the cost](#on-a-private-repository) |
 | Default branch | `git symbolic-ref refs/remotes/origin/HEAD` | the policy's `branch` |
 | CHANGELOG style | `CHANGELOG.md` headings | `## [Unreleased]` with `## [X.Y.Z] - YYYY-MM-DD` and compare links (keep-a-changelog), or `## Unreleased` with `## X.Y.Z — YYYY-MM-DD` (dash) |
 | Entry shape | the Unreleased section | keep-a-changelog: `- ` bullets under `### Category` headings, continuation lines indented; dash: one `### Title` block per entry |
@@ -113,6 +114,28 @@ have that checkout. Fix the rest by hand:
   `tests/smoke_test.py` that calls one public function replaces the `import` line
 
 ## 3. Choose the lanes with the user
+
+### On a private repository
+
+Skip this for a public repo, which GitHub doesn't bill. On a private one, before proposing
+lanes, tell the user what the default costs in billed Actions minutes on GitHub-hosted
+runners ([Cost on private repositories](https://github.com/shipmill/shipmill/blob/main/docs/release-lanes.md#cost-on-private-repositories)),
+and offer these setups, each with its rough figure. List them cheapest first, starting
+from the cheapest that still gives what the user asked for:
+
+| Setup | What to change | Rough cost |
+|---|---|---|
+| By hand only | remove `push` and `schedule` from `release.yml`'s `on:`, keep `workflow_dispatch` | nothing while idle; a few minutes per release |
+| A fixed schedule, no quiet wait | lanes with `schedule` only; narrow the cron in `release.yml` by hand to the windows (e.g. `0 7 * * 1-5`) and remove `push` | about 2 job-minutes per tick |
+| Release on every push | `quiet_minutes = 0`, the hourly cron | about 2 to 3 minutes per push, plus about 1,400 a month for the cron; a burst of merges cuts several releases |
+| The default | `quiet_minutes = 30`, the hourly cron | about 30 minutes per push, plus about 1,400 a month |
+
+`mode = "off"` sleeps no minutes, but releases nothing. Self-hosted runners aren't possible
+yet: say they wait for [#319](https://github.com/shipmill/shipmill/issues/319). Carry the
+user's choice into the decisions below, and make the `release.yml` edit in step 4, after
+`init` writes the file.
+
+### The decisions
 
 These are the user's decisions. Ask them together, with the defaults below as the
 recommendation:
@@ -237,7 +260,8 @@ and `changelog.d/README.md`, which keeps the folder in git and is never read as 
 When the user turned fragments off, run `$CR init --ci <ci-file>.yml --no-fragments`, which
 writes neither. Tell the user that once fragments are on, every PR adds its entry as a new
 fragment and leaves `CHANGELOG.md` alone, and update the repo's own contributor rules
-(CLAUDE.md, AGENTS.md, CONTRIBUTING.md) that say to edit Unreleased. Edit the policy to the user's choices from step 3, then add `version_lines` and
+(CLAUDE.md, AGENTS.md, CONTRIBUTING.md) that say to edit Unreleased. Edit the policy to the user's choices from step 3 (on a private repo, `release.yml`'s `on:`
+too, per [the setup chosen](#on-a-private-repository)), then add `version_lines` and
 `after_stamp` (for uv projects `["uv lock --check"]`; for a project with a docs check that
 reads the version, that command too).
 

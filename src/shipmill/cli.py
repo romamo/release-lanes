@@ -172,7 +172,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--repo", type=Path, default=Path.cwd(), help="the repository checkout (default: .)")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    sub.add_parser("settle-minutes", help="print the longest quiet_minutes in the policy")
+    sub.add_parser("settle-minutes", help="print the longest quiet_minutes in the policy, 0 when its mode is off")
 
     p = sub.add_parser("plan", help="decide whether a lane releases now")
     p.add_argument("--event", choices=[e.value for e in Event], help="default: $GITHUB_EVENT_NAME, else manual")
@@ -476,7 +476,7 @@ def main(
     git = Git(root, policy.bot_name, policy.bot_email)
     today = dt.datetime.now(dt.UTC).date()
     if args.command == "settle-minutes":
-        print(policy.quiet_minutes)
+        print(policy.settle_minutes)
     elif args.command == "plan":
         event = Event(args.event or os.environ.get("GITHUB_EVENT_NAME") or Event.MANUAL.value)
         lane = Lane(args.lane) if args.lane else None

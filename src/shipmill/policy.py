@@ -210,8 +210,13 @@ class Policy:
 
     @property
     def quiet_minutes(self) -> int:
-        """How long the settle job waits after a push: the longest quiet trigger"""
+        """The longest quiet trigger across the lanes"""
         return max((r.quiet_minutes or 0 for r in self.lanes.values()), default=0)
+
+    @property
+    def settle_minutes(self) -> int:
+        """How long the settle job waits after a push: none when the mode is off, since plan then skips"""
+        return 0 if self.mode is Mode.OFF else self.quiet_minutes
 
 
 def _lane(lane: Lane, t: Table) -> LaneRule:
