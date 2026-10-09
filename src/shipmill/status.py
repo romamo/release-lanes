@@ -13,9 +13,10 @@ import shlex
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from shipmill.agent_as_person import NAME as AGENT_AS_PERSON
 from shipmill.agent_as_person import Flagged
@@ -398,6 +399,47 @@ def describe(git: Git, rev: str) -> Described:
     return Described(tag, int(past))
 
 
+def _raw(root: Path) -> Mapping[str, Any]:
+    return read(config_path(root)) if (root / CONFIG_PATH).is_file() else {}
+
+
+def _plist_path(repo: str, home: Path) -> Path:
+    return home / "Library" / "LaunchAgents" / f"{label(repo)}.plist"
+
+
+def _plist(path: Path) -> dict[str, object]:
+    with path.open("rb") as handle:
+        plist = plistlib.load(handle)
+    if not isinstance(plist, dict):
+        raise ReleaseError(f"{path} is not a launchd job")
+    return plist
+
+
+def _job_key(plist: dict[str, object]) -> Path | None:
+    """The key the gate's launchd job passes it (`--app-key`), or None for the default key"""
+    args = plist.get("ProgramArguments")
+    if isinstance(args, list) and "--app-key" in args[:-1]:
+        return Path(str(args[args.index("--app-key") + 1]))
+    return None
+
+
+def read_login(
+    repo: str, root: Path, home: Path, platform: str, login: Callable[[int, Path], str | None]
+) -> str | None:
+    """#311: the App bot's login for the reads the App check didn't give one (`--rows`,
+    `--json`, or a failed check), from the key read_gate's check would use: None without
+    [agents] app_id, or when that key isn't on this host"""
+    agents = AgentsConfig.load(root) if "agents" in _raw(root) else None
+    if agents is None or agents.app_id is None:
+        return None
+    key = None
+    plist_path = _plist_path(repo, home)
+    if platform == "darwin" and plist_path.is_file():
+        key = _job_key(_plist(plist_path))
+    path = key if key is not None else default_key(agents.app_id, home)
+    return login(agents.app_id, path) if path.is_file() else None
+
+
 def read_gate(
     repo: str,
     root: Path,
@@ -410,21 +452,16 @@ def read_gate(
     """[agents] from the checkout's config; on a Mac, the gate's launchd job, its log, and the
     last wake; with an app_id, the App check, with the key the job passes the gate
     (`--app-key`), else the App's default key, unless that key isn't on this host"""
-    raw = read(config_path(root)) if (root / CONFIG_PATH).is_file() else {}
+    raw = _raw(root)
     agents = AgentsConfig.load(root) if "agents" in raw else None
     table = raw.get("agents")
     mode_set = isinstance(table, dict) and "mode" in table
     launchd = platform == "darwin"
     job, key, woke = None, None, None
-    plist_path = home / "Library" / "LaunchAgents" / f"{label(repo)}.plist"
+    plist_path = _plist_path(repo, home)
     if agents is not None and launchd and plist_path.is_file():
-        with plist_path.open("rb") as handle:
-            plist = plistlib.load(handle)
-        if not isinstance(plist, dict):
-            raise ReleaseError(f"{plist_path} is not a launchd job")
-        args = plist.get("ProgramArguments")
-        if isinstance(args, list) and "--app-key" in args[:-1]:
-            key = Path(str(args[args.index("--app-key") + 1]))
+        plist = _plist(plist_path)
+        key = _job_key(plist)
         proc = run(["launchctl", "print", f"gui/{uid}/{label(repo)}"])
         printed = proc.stdout if proc.returncode == 0 else None
         log_path = plist.get("StandardOutPath")
