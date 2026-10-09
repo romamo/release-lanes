@@ -7,6 +7,16 @@ bot.
 
 ## [Unreleased]
 
+## [0.41.2] - 2026-10-09
+
+### Fixed
+
+- A headless gate session no longer stops on a chained Bash call whose commands are all on
+  the allowlist (`cd <dir> && git push`): the skills and the implementer and reviewer briefs
+  run one allowlisted command per Bash call (`git -C <dir>`, no `;` or `&&` chains or pipes
+  into unlisted tools) and rerun a denied chain as separate calls; a command that isn't on
+  the list is still a needs-decision (#312)
+
 ## [0.41.1] - 2026-10-08
 
 ### Fixed
@@ -1337,7 +1347,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.41.1...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.41.2...HEAD
+[0.41.2]: https://github.com/shipmill/shipmill/compare/v0.41.1...v0.41.2
 [0.41.1]: https://github.com/shipmill/shipmill/compare/v0.41.0...v0.41.1
 [0.41.0]: https://github.com/shipmill/shipmill/compare/v0.40.0...v0.41.0
 [0.40.0]: https://github.com/shipmill/shipmill/compare/v0.39.0...v0.40.0
