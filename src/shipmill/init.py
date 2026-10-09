@@ -2,6 +2,7 @@
 its CHANGELOG style, its version file, and its default branch; and, unless told not to, the
 changelog fragments folder the policy names (spec 013)"""
 
+import datetime as dt
 import json
 import re
 import tomllib
@@ -9,11 +10,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from shipmill import UVX
-from shipmill.config import CONFIG_PATH
+from shipmill.config import CONFIG_PATH, config_path, loads
 from shipmill.doctor import CALLER, OPERATE_CALLER
 from shipmill.errors import ReleaseError
 from shipmill.gitrepo import Git
-from shipmill.policy import Style, VersionFiles
+from shipmill.policy import Policy, Style, VersionFiles
+from shipmill.ticks import HOURLY_TICKS, Ticks, needed
 from shipmill.upgrades import FRAGMENTS, fragments_readme_text
 
 BOT_REPO = "shipmill/shipmill"
@@ -214,9 +216,10 @@ github_release = true
 '''
 
 
-def caller_text(d: Detected, ci: str, runs_on: RunsOn | None = None) -> str:
+def caller_text(d: Detected, ci: str, runs_on: RunsOn | None = None, ticks: Ticks = HOURLY_TICKS) -> str:
     """The Release workflow; runs_on: the runner prepare.yml's and land.yml's jobs run on,
-    which without it stay on their default, ubuntu-latest (spec 015)"""
+    which without it stay on their default, ubuntu-latest; ticks: the schedule the policy
+    needs, the hourly tick by default (spec 015)"""
     uses = f"{BOT_REPO}/.github/workflows"
     runner = "" if runs_on is None else f"\n      runs-on: {runs_on.yaml()}"
     return f"""name: Release
@@ -228,9 +231,7 @@ def caller_text(d: Detected, ci: str, runs_on: RunsOn | None = None) -> str:
 on:
   push:
     branches: [{d.branch}]
-  schedule:
-    - cron: "7 * * * *" # hourly: the policy decides whether a lane's window is open
-  workflow_dispatch:
+{ticks.yaml()}  workflow_dispatch:
     inputs:
       lane:
         description: "policy: follow the policy; a lane: release it now, skipping triggers but not gates"
@@ -343,13 +344,23 @@ class Initialized:
     written: tuple[Path, ...]
 
 
-def init(root: Path, ci: str, force: bool, fragments: bool = True, runs_on: RunsOn | None = None) -> Initialized:
+def init(
+    root: Path,
+    ci: str,
+    force: bool,
+    fragments: bool = True,
+    runs_on: RunsOn | None = None,
+    today: dt.date | None = None,
+) -> Initialized:
     """Write .github/shipmill.toml and the caller workflow, and with fragments the fragments
     folder's README.md (spec 013); runs_on: the caller passes it as the release workflows'
-    runner (spec 015). The policy or the caller already there refuses without force; with
+    runner, and its schedule is the one the written policy needs from today, by default the
+    UTC date (spec 015). The policy or the caller already there refuses without force; with
     force, they are overwritten. A README.md already in the folder is kept."""
     d = detect(root)
-    files = [(root / CONFIG_PATH, policy_text(d, fragments)), (root / CALLER, caller_text(d, ci, runs_on))]
+    policy = policy_text(d, fragments)
+    ticks = needed(Policy.parse(loads(policy, str(CONFIG_PATH)), CONFIG_PATH.name), today or _today())
+    files = [(root / CONFIG_PATH, policy), (root / CALLER, caller_text(d, ci, runs_on, ticks))]
     present = [path for path, _ in files if path.exists()]
     if present and not force:
         names = ", ".join(str(p.relative_to(root)) for p in present)
@@ -361,6 +372,25 @@ def init(root: Path, ci: str, force: bool, fragments: bool = True, runs_on: Runs
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
     return Initialized(tuple(path for path, _ in files))
+
+
+def init_caller(root: Path, ci: str, force: bool, runs_on: RunsOn | None = None, today: dt.date | None = None) -> Path:
+    """Write only the caller workflow, from the policy already in .github/shipmill.toml, so
+    its schedule follows an edited policy (spec 015); a policy that isn't there or doesn't
+    load refuses, and so does a caller already there without force"""
+    policy = Policy.load(config_path(root))
+    path = root / CALLER
+    if path.exists() and not force:
+        raise ReleaseError(f"{CALLER} exists; pass --force to overwrite")
+    d = Detected(policy.name, policy.branch, policy.style, policy.version_files)
+    text = caller_text(d, ci, runs_on, needed(policy, today or _today()))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _today() -> dt.date:
+    return dt.datetime.now(dt.UTC).date()
 
 
 def init_operate(root: Path, force: bool) -> Path:

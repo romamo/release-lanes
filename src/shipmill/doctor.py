@@ -1,6 +1,7 @@
 """Check that a repository is ready for the bot: its policy, CHANGELOG, version files, and the
 workflows the bot calls"""
 
+import datetime as dt
 import importlib.util
 import re
 import sys
@@ -10,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from shipmill import cli_command, fragments
+from shipmill import cli_command, fragments, ticks
 from shipmill.agent_as_person import NAME as AGENT_AS_PERSON
 from shipmill.agent_as_person import Flagged
 from shipmill.autonomy import HOLD_LABEL, Autonomy, Hold
@@ -108,11 +109,13 @@ def doctor(
     plugins: PluginRows | None = None,
     people: PeopleReader | None = None,
     repo: str | None = None,
+    today: dt.date | None = None,
 ) -> list[Check]:
     """github reads the open hold and the shipmill-upgrade issues; None (no gh) reports that
     it can't. plugins reads the shipmill plugin's installs on this host; None checks none.
     people reads spec 012's AGENT_AS_PERSON items, only when [agents] app_id is set; None
-    checks none. repo, owner/name, links an upgrade's issue; None names it by number"""
+    checks none. repo, owner/name, links an upgrade's issue; None names it by number. today
+    starts the year of window starts the schedule check reads; None takes the UTC date"""
     checks: list[Check] = []
 
     def add(ok: bool, name: str, detail: str, warn: bool = False) -> None:
@@ -226,6 +229,7 @@ def doctor(
         text = caller.read_text(encoding="utf-8")
         uses_bot = all(re.search(rf"uses:\s*\S*/\.github/workflows/{name}\b", text) for name in _BOT_WORKFLOWS)
         add(uses_bot, "workflow", f"{CALLER} calls prepare.yml and land.yml")
+        checks.append(_schedule(policy, text, today or dt.datetime.now(dt.UTC).date()))
         for m in _LOCAL_USES.finditer(text):
             if m["file"] in _BOT_WORKFLOWS:  # the bot's own, when a repository hosts it
                 continue
@@ -246,6 +250,26 @@ def doctor(
     if people is not None and policy.agents is not None and policy.agents.app_id is not None:
         checks.append(agent_as_person_check(people))
     return checks
+
+
+def _schedule(policy: Policy, caller: str, today: dt.date) -> Check:
+    """Spec 015: a WARN naming each cron the policy's triggers need that the caller lacks,
+    with the fix; an extra tick costs minutes, not releases, so it is never warned about (D-9)"""
+    needs = ticks.needed(policy, today)
+    lacks = ticks.missing(needs, ticks.crons(caller))
+    if lacks:
+        listed = ", ".join(f'"{line}"' for line in lacks)
+        detail = (
+            f"{CALLER} lacks the cron{'' if len(lacks) == 1 else 's'} {listed} the policy's triggers need,"
+            " so a due lane waits for the next push:"
+            f" rewrite it with `{cli_command()} init --caller --force`"
+        )
+        return Check("WARN", "schedule", detail)
+    if needs.hourly:
+        return Check("PASS", "schedule", f"{CALLER} has the hourly tick the policy's triggers need")
+    if needs.windows:
+        return Check("PASS", "schedule", f"{CALLER} has a cron for each window time: {', '.join(needs.lines())}")
+    return Check("PASS", "schedule", "the policy needs no scheduled tick: a push or a person starts each run")
 
 
 def _deploy(path: Path, environment: str, caller: Path, operated: bool) -> Check:

@@ -43,14 +43,19 @@ jobs:
           from pathlib import Path
           from shipmill.init import Detected, RunsOn, caller_text
           from shipmill.policy import Style, VersionFiles
+          from shipmill.ticks import Tick, Ticks
           d = Detected('demo', 'main', Style.KEEP_A_CHANGELOG, VersionFiles.NONE)
           out = Path(sys.argv[1])
+          windows = Ticks(hourly=False, windows=(Tick(0, 4, (1, 2, 3, 4, 5)), Tick(0, 16, (0,))))
           (out / 'release.yml').write_text(caller_text(d, 'ci.yml'))
           (out / 'release-label.yml').write_text(caller_text(d, 'ci.yml', RunsOn.parse('self-hosted')))
           (out / 'release-list.yml').write_text(caller_text(d, 'ci.yml', RunsOn.parse('[\"self-hosted\", \"linux\"]')))
+          (out / 'release-windows.yml').write_text(caller_text(d, 'ci.yml', ticks=windows))
+          (out / 'release-push.yml').write_text(caller_text(d, 'ci.yml', ticks=Ticks(hourly=False)))
           " "$RUNNER_TEMP"
           uvx --from actionlint-py actionlint -ignore 'ci.yml' \
-            "$RUNNER_TEMP/release.yml" "$RUNNER_TEMP/release-label.yml" "$RUNNER_TEMP/release-list.yml"
+            "$RUNNER_TEMP/release.yml" "$RUNNER_TEMP/release-label.yml" "$RUNNER_TEMP/release-list.yml" \
+            "$RUNNER_TEMP/release-windows.yml" "$RUNNER_TEMP/release-push.yml"
           uv run python -c "from shipmill.init import operate_caller_text; print(operate_caller_text())" \
             > "$RUNNER_TEMP/operate.yml"
           uvx --from actionlint-py actionlint "$RUNNER_TEMP/operate.yml"

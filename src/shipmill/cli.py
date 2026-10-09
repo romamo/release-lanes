@@ -19,7 +19,9 @@
                   one shipmill-upgrade issue per pending upgrade, as land.yml runs it after a release
   init            write a starting policy, the calling workflow, and changelog.d/README.md for changelog
                   fragments (--no-fragments: no fragments; --operate: only the operate workflow;
-                  --runs-on: the release jobs' runner, a label or a JSON list of labels)
+                  --caller: only the calling workflow, from the existing policy; --runs-on: the
+                  release jobs' runner, a label or a JSON list of labels); the calling workflow's
+                  schedule is the one the policy's triggers need
   gate            start a Claude Code session for the repo only when its state needs one; each tick,
                   held or not, prunes the worktrees that landed, as `worktrees --prune` does
   worktrees       list the repository's worktrees, each REMOVABLE once its work landed, or KEPT and why;
@@ -115,7 +117,7 @@ from shipmill.gate import (
 )
 from shipmill.github import UPGRADE_LABEL, GhCli, GitHub
 from shipmill.gitrepo import Git
-from shipmill.init import RunsOn, init, init_operate
+from shipmill.init import RunsOn, init, init_caller, init_operate
 from shipmill.land import ActionsRun, Prepared, Stop, cleanup, land, prepare, work_branch
 from shipmill.launchd import DEFAULT_TOOL, build, install, remove
 from shipmill.notify import Desktop
@@ -290,6 +292,11 @@ def _parser() -> argparse.ArgumentParser:
         help=f"write only {OPERATE_CALLER}, which runs shipmill operate every 10 minutes",
     )
     p.add_argument(
+        "--caller",
+        action="store_true",
+        help=f"write only {CALLER}, from the existing {CONFIG_PATH}: its schedule follows the policy's triggers",
+    )
+    p.add_argument(
         "--runs-on",
         metavar="RUNNER",
         help=f"the runner shipmill's release jobs run on, written into {CALLER}: a label, such as self-hosted,"
@@ -449,6 +456,13 @@ def main(
     if args.command == "init":
         # checked before any write, on every path (spec 015)
         runs_on = None if args.runs_on is None else RunsOn.parse(args.runs_on)
+        if args.caller:
+            for flag, given in (("--operate", args.operate), ("--no-fragments", args.no_fragments)):
+                if given:
+                    raise ReleaseError(f"--caller writes only {CALLER}, from the existing policy; drop {flag}")
+            print(f"wrote {init_caller(root, args.ci, args.force, runs_on).relative_to(root)}")
+            print(f"next: run `{cli_command()} doctor`")
+            return 0
         if args.operate:
             if runs_on is not None:
                 raise ReleaseError(f"--runs-on sets {CALLER}'s runner; --operate writes only {OPERATE_CALLER}")
