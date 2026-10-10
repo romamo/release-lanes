@@ -48,6 +48,34 @@ Read it from the tags and the manifest version.
 - **Small part, big part:** ship the small part now, and postpone the rest. For example, an unsupported annotation raising `RegistrationError` now, with typed lists of objects later.
 - **Spec-governed behaviour:** when the fix would depart from a spec the project implements (a default value, a required field), the verdict is **clarify**. File an issue on the spec repo with the requirement IDs, the exact numbers, and a proposal, then link it.
 
+## Links between issues
+
+An issue waits on another in either of two forms, and `triage_state.py` reads them as one set, in any repo:
+
+- **Text:** a body line `Depends on owner/repo#N` (or `#N` in the same repo), read once the issue is triaged. Any reader sees it, and a forge without issue relations still holds on it
+- **Native:** an issue GitHub records it blocked by (`blockedBy`), or a sub-issue. The note marks a hold only GitHub records `(native)` and a sub-issue `(child)`, such as `o/r#12:open(child)`; a parent's note starts with `children K/N closed`. Where the forge can't read them, the script holds on text alone and prints one `note: native relations unavailable:` line
+
+Write a link with `chains.py link`, which writes both forms at once: `chains.py link <owner/repo#N> --blocked-by <owner/repo#M>` (N waits on M) or `chains.py link <owner/repo#P> --child <owner/repo#C>` (C under P, and P waits on it). Run again, it prints `already linked` and changes nothing; when the forge refuses the relation (no dependencies or sub-issues there, a cross-owner link) it still writes the line and prints `text only: <error>`. It exits 2 naming the reference for a malformed one, a missing issue, a pull request, or an issue linked to itself. A relation someone set in the UI holds as it is: don't copy it into text.
+
+## A person's item
+
+Label an issue `human` when only a person can do it: a server change, a key rotation, a payment, a step that needs a secret. Assign who does it, and give it a `## Check` section: a command or a URL, and what it must return. Its assignees need not be collaborators; a session acts on the trusted author's `## Check`, never on a report's text. It counts as triaged from the start, so its holds apply with no triage comment, no implementer is dispatched for it, and `--wip` never counts it.
+
+`triage_state.py` reads it, after UNTRUSTED, NEEDS_DECISION, and DECIDED, as:
+
+| State | Means | The session |
+|---|---|---|
+| NO_ASSIGNEE | Labelled `human`, no assignee | Asks the maintainer who does it, through the [needs-decision protocol](needs-decision.md), so the item waits on the answer instead of being taken up every tick |
+| BLOCKED | A hold is still open, as for any issue | Nothing |
+| HANDOFF_DUE | Every hold closed (or it never had one), and no hand-off came after the newest close | Posts the hand-off ([comments.md](comments.md), A person's item): GitHub's mention is the notification |
+| WITH_PERSON | A hand-off came after the newest hold closed, and no done report after it | Nothing, however old: one mention per unblock, no reminders. github-ship-watch lists it with the assignees it waits on |
+| VERIFY_DUE | A done report came after the newest hand-off | Runs the `## Check`. It holds: a comment with what was checked and what came back, then close the issue as completed, which unblocks what it held. It fails: a new hand-off saying what failed and what came back, so it reads WITH_PERSON again. No `## Check`: close it on the report, saying so |
+| VERIFY_CLOSED | Closed as completed by someone other than the `--bot-login`, with a `## Check`, and no verified comment after the close | Runs the `## Check`. It holds: the verified comment. It fails: reopen the issue with a hand-off saying what failed, and everything it held reads BLOCKED again |
+
+A hand-off is a comment whose first line is `<!-- shipmill:handoff -->`, and a verified comment one whose first line is `<!-- shipmill:verified -->`; each counts only from the `--bot-login` or an OWNER, MEMBER, or COLLABORATOR (D-16). A done report is a comment whose first line starts with `done`, in any case, by an assignee or a trusted author.
+
+A check the session's tools can't run (a host it can't reach, a command outside a headless session's allowlist) goes to the maintainer through the [needs-decision protocol](needs-decision.md), with two options: "close it on the report" and "it isn't done". Never close a person's item on a check that didn't run without that answer.
+
 ## Flags from `triage_state.py`
 
 | Flag | Act |
@@ -60,7 +88,12 @@ Read it from the tags and the manifest version.
 | BLOCKED | Nothing, until the upstream issue closes or the spec PR merges |
 | UNFILLED | A `Depends on #{Bk}` placeholder from `specs.py split` was never filled in: edit the issue body to name the dependency's number |
 | SPEC_REFUSED | The spec PR it waits on closed without merging: the spec was refused. Decide again in a new triage comment: revise the spec in a new PR (with a new hold line), postpone, or won't fix |
-| UNBLOCKED | Read the upstream outcome, update the plan on the issue, then resume. A dependency noted `:not_planned` was closed without its work: decide again whether the issue still stands |
+| UNBLOCKED | Read the upstream outcome, update the plan on the issue, then resume. A dependency noted `:not_planned` was closed without its work: decide again whether the issue still stands. A parent whose holds are only its children (each noted `(child)`) is done: close it with a comment listing each child and how it closed ([comments.md](comments.md), A parent's close); a feature issue first gets its spec verified ([spec-gate.md](spec-gate.md), Verify the whole spec) |
+| NO_ASSIGNEE | A person's item nobody is assigned to: ask the maintainer who does it (below) |
+| HANDOFF_DUE | A person's item whose holds all closed: post the hand-off (below) |
+| WITH_PERSON | Nothing: it waits on its assignees, however long. Never mention them again |
+| VERIFY_DUE | A done report came after the hand-off: run the `## Check` (below) |
+| VERIFY_CLOSED | A person closed their item by hand: run its `## Check` (below) |
 | DECIDED | A trusted person answered its needs-decision question: read the reply, remove the `needs-decision` label, and act on it ([needs-decision.md](needs-decision.md), Taking up an answered item) |
 | POSTPONED | Skip it |
 | REVISIT | A stable release came out after it was postponed. Apply this rubric again under the new phase |

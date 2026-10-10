@@ -58,16 +58,8 @@ A build issue is sized for one PR. Group the criteria that change the same code 
 
 1. **Propose the graph.** `specs.py split NNN --repo <owner/repo> --group 1,2 --group 3 --after 2:1` prints one build issue per `--group` of criterion numbers, in the order given, with its title, its body naming its `S-NNN-k` criteria, and a `Depends on <owner/repo>#{Bk}` line for each `--after B:A` (B depends on A, and A comes first). With no `--group`, every criterion goes into one issue. It splits only an `approved` spec that passes `check`, and only the criteria no build issue has yet, so a spec that gained criteria later splits again for just those. `--json` prints the same as one object
 2. **File them in order.** `gh issue create --body-file` for each, replacing every `{Bk}` with the number the earlier issue got. `triage_state.py` reads each `Depends on` line as a hold: the issue reads BLOCKED while its dependency is open, UNBLOCKED once it closes, and UNFILLED while a `{Bk}` is left in
-3. **Link each as a sub-issue** of the feature issue, where the repo allows it (GitHub's GraphQL `addSubIssue`; a repo without sub-issues skips this step):
-
-   ```bash
-   parent=$(gh api graphql -f query='query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r){issue(number:$n){id}}}' \
-     -f o=<owner> -f r=<repo> -F n=<feature> -q .data.repository.issue.id)
-   gh api graphql -f query='mutation($p:ID!,$u:String!){addSubIssue(input:{issueId:$p,subIssueUrl:$u}){subIssue{number}}}' \
-     -f p="$parent" -f u=https://github.com/<owner>/<repo>/issues/<build issue>
-   ```
-
-4. **Hold the feature issue on them.** Add a `Depends on <owner/repo>#N` line per build issue to the feature issue's body, so it reads BLOCKED while the build runs and UNBLOCKED when the last build issue closes
+3. **Link the dependencies natively.** For each `Depends on` line `split` printed, `chains.py link <owner/repo>#<build issue> --blocked-by <owner/repo>#<dependency>`: it adds GitHub's relation and finds the line already there. Where the forge refuses the relation it prints `text only:` and the line holds alone ([triage-rubric.md](triage-rubric.md), Links between issues)
+4. **Put each under the feature issue.** `chains.py link <owner/repo>#<feature> --child <owner/repo>#<build issue>` makes it a sub-issue and adds a `Depends on` line for it to the feature issue's body, so the feature issue reads BLOCKED while the build runs, with `children K/N closed` in its note, and UNBLOCKED when the last build issue closes
 5. **Record the assignment.** Fill the spec's Issues section with the lines `split` printed, numbers filled in, in one docs PR: `- owner/repo#N: S-NNN-1, S-NNN-2`. `specs.py check` then holds every criterion of an approved or built spec to exactly one build issue there; an approved spec with no Issues lines hasn't been split yet and passes
 6. **Comment implement** on each build issue, naming the spec, and dispatch as below
 
@@ -78,6 +70,7 @@ A build issue is sized for one PR. Group the criteria that change the same code 
 - **WIP limit:** when the config has `[roadmap] wip = N` (#70 adds it to the config schema; until it lands the config refuses an unknown `[roadmap]` table, so don't add one), at most N issues are in progress (an open PR or a running implementer) at once. `triage_state.py --wip N` reports the room left and the ready issues, oldest first; build issues are filed in build order, so the oldest go first. With no `[roadmap] wip`, there is no limit
 - Each implementer brief carries the criteria its build issue delivers, from the issue body or `specs.py criteria NNN` (see [implementer-brief.md](implementer-brief.md)). A departure from a criterion is a "decision for you", never a quiet deviation
 - **The last build issue:** the brief for the one whose PR closes the last open build issue also carries "Verify the whole spec" below, and its PR body says `Fixes #<feature>` too, so the feature issue closes with it
+- **A step only a person can do** (a server change, a key rotation, a payment): file it as its own issue labelled `human`, assigned to that person, with a `## Check` section, and link it into the build with `chains.py link` like any build issue. No implementer is dispatched for it; triage hands it off when its dependencies close and checks the result ([triage-rubric.md](triage-rubric.md), A person's item)
 
 ## Tests name the criteria they prove
 
