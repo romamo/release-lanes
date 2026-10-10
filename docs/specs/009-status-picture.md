@@ -62,7 +62,8 @@ summary (Each line):
   pull request waits on a decision (`NEEDS_DECISION`), the gate's last decision is
   `WAITING`, a hold is open (`HOLD`: a person stopped the factory on purpose, D-15, so
   it's theirs to lift, not a fault), a promotion waits on approval (`PROMOTION_DUE`), a
-  postmortem is due, an item is `UNTRUSTED`, the plugin or the CLI is older than
+  postmortem is due, an item is `UNTRUSTED`, a chain's item has no gate or the chain walk
+  fails (`CHAIN_NO_GATE`, `CHAIN_UNREADABLE`, spec 017), the plugin or the CLI is older than
   shipmill's latest release, the repo keeps merged branches (`BRANCH_DELETE_OFF`), the
   gate has no App, or `[agents]` is set and this Mac has no launchd job for the repo
   (another host, or a `/loop`, may run the gate; the report reads only this one). Or open
@@ -129,12 +130,15 @@ label on the first line of each group:
   its own link, never a label search
 - **hold** (`HOLD`), **incident** (`INCIDENT_OPEN`), **postmortem** (`POSTMORTEM_DUE`),
   **promotion** (`PROMOTION_DUE`, with the run's link), **operate** (`OPERATE_FAILED`,
-  `UNHEALTHY`), **untrusted** (`UNTRUSTED`), **suspect close**, and **branches**
-  (`BRANCH_DELETE_OFF`: `merged branches kept`)
+  `UNHEALTHY`), **untrusted** (`UNTRUSTED`), **chain** (`CHAIN_NO_GATE`,
+  `CHAIN_UNREADABLE`, spec 017, each a WAITS ON YOU reason with its fix), **suspect
+  close**, **verify close** (`VERIFY_CLOSED`, not counted among the open issues), and
+  **branches** (`BRANCH_DELETE_OFF`: `merged branches kept`)
 - **to triage**, **to build**, **in progress**, and **parked**, by `triage_state.py
   --json`'s states as before: to triage (`NEW`, `REVISIT`, `SPEC_REFUSED`, `UNFILLED`,
-  `DONE_NOT_CLOSED`), to build (`NEEDS_PR`, `UNBLOCKED`), in progress (`IN_PROGRESS`),
-  parked (`BLOCKED`, `POSTPONED`, `TRIAGED`); **to land**, after in progress, the open
+  `DONE_NOT_CLOSED`, and spec 017's `HANDOFF_DUE`, `VERIFY_DUE`, `NO_ASSIGNEE`), to build
+  (`NEEDS_PR`, `UNBLOCKED`), in progress (`IN_PROGRESS`), parked (`BLOCKED`, `POSTPONED`,
+  `TRIAGED`, and `WITH_PERSON` with the logins it waits on); **to land**, after in progress, the open
   pull requests in the `PRS_OPEN` row (whose detail is only `#N` tokens; any other detail
   fails the report), newest first; and **drafts**, the draft pull requests
 - **sessions** and **runs**: the gate's sessions (`AGENT_SESSION` rows whose detail starts

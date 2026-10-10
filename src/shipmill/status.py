@@ -57,8 +57,19 @@ STUCK_ROWS = (
     "UNHEALTHY",
     "INCIDENT_OPEN",
 )
-# a hold is a person stopping the factory on purpose (D-15): theirs to lift, not a fault
-YOURS_ROWS = ("HOLD", "PROMOTION_DUE", "POSTMORTEM_DUE", "UNTRUSTED", "BRANCH_DELETE_OFF", "SHIPMILL_OUTDATED")
+# a hold is a person stopping the factory on purpose (D-15): theirs to lift, not a fault. A
+# chain's item in a repo without a gate, or a chain walk that fails, waits on a person too
+# (spec 017): neither stops this repo's releases, and no session can clear it
+CHAIN_ROWS = ("CHAIN_NO_GATE", "CHAIN_UNREADABLE")
+YOURS_ROWS = (
+    "HOLD",
+    "PROMOTION_DUE",
+    "POSTMORTEM_DUE",
+    "UNTRUSTED",
+    "BRANCH_DELETE_OFF",
+    "SHIPMILL_OUTDATED",
+    *CHAIN_ROWS,
+)
 RELEASE_ROWS = ("BOT_OK", "BOT_NONE", "BOT_FAILED", "BOT_STALLED", "BOT_PLAN_FAILED", "WORK_BRANCH_STALE")
 TAG_ROWS = ("PUBLISHED", "PUBLISHING", "NOT_PUBLISHED", "PREDATES_PUBLISH", "NO_REGISTRY", "UNANNOUNCED")
 # rows whose facts the summary shows in their own words; any other goes under "other" (S-009-13)
@@ -85,12 +96,32 @@ RELEASE_PROBLEMS = ("BOT_FAILED", "BOT_STALLED", "BOT_PLAN_FAILED", "WORK_BRANCH
 
 # triage_state.py's issue states by the line they're listed on (S-009-18)
 ISSUE_LINES = (
-    ("to triage", ("NEW", "DECIDED", "REVISIT", "SPEC_REFUSED", "UNFILLED", "DONE_NOT_CLOSED")),
+    (
+        "to triage",
+        # a person's item's hand-off, check, and missing assignee are a session's to do (spec 017)
+        (
+            "NEW",
+            "DECIDED",
+            "REVISIT",
+            "SPEC_REFUSED",
+            "UNFILLED",
+            "DONE_NOT_CLOSED",
+            "HANDOFF_DUE",
+            "VERIFY_DUE",
+            "NO_ASSIGNEE",
+        ),
+    ),
     ("to build", ("NEEDS_PR", "UNBLOCKED")),
     ("in progress", ("IN_PROGRESS",)),
-    ("parked", ("BLOCKED", "POSTPONED", "TRIAGED")),
+    ("parked", ("BLOCKED", "POSTPONED", "TRIAGED", "WITH_PERSON")),  # WITH_PERSON: with its assignees
 )
-CLOSED_STATES = {"SUSPECT_CLOSE"}  # read for recently closed issues, not open ones
+# read for recently closed issues, not open ones: a close to check, each state on its line
+# with what checking it takes (a person's item closed by hand: its ## Check, spec 017)
+CLOSED_LINES = (("suspect close", "SUSPECT_CLOSE", ""), ("verify close", "VERIFY_CLOSED", ": run its ## Check"))
+CLOSED_STATES = {state for _, state, _ in CLOSED_LINES}
+# a GitHub login, as triage_state.py's WITH_PERSON line names its assignees: watch_state.py's
+# LOGIN (tests/test_ship_watch.py keeps them equal); shown, never any other text (D-16)
+LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\[bot\])?$")
 # the needs-decision items share one fix, shown once after the group (S-011-12)
 DECISION_FIX = "answer the needs-decision question on each item named"
 
@@ -139,11 +170,13 @@ class Row:
 @dataclass(frozen=True, slots=True)
 class Issue:
     """One of triage_state.py's JSON lines; note is its note, such as the pull requests that
-    cover it (`#409:open`) or what a blocked issue waits on (`owner/repo#5:open`)"""
+    cover it (`#409:open`) or what a blocked issue waits on (`owner/repo#5:open`); assignees
+    the logins a WITH_PERSON issue waits on (spec 017), empty for any other"""
 
     number: int
     state: str
     note: str = ""
+    assignees: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,7 +309,18 @@ def parse_rows(text: str) -> list[Row]:
 
 def parse_issues(text: str) -> list[Issue]:
     found = (r for r in map(json.loads, text.splitlines()) if r)
-    return [Issue(int(r["number"]), str(r["state"]), str(r["note"])) for r in found]
+    return [Issue(int(r["number"]), str(r["state"]), str(r["note"]), person_logins(r)) for r in found]
+
+
+def person_logins(raw: Mapping[str, Any]) -> tuple[str, ...]:
+    """A WITH_PERSON line's assignees, the logins it waits on, as watch_state.py reads them; a
+    WITH_PERSON line without a list of logins is malformed. Any other line has none"""
+    if raw["state"] != "WITH_PERSON":
+        return ()
+    found = raw.get("assignees")
+    if not isinstance(found, list) or not found or not all(isinstance(p, str) and LOGIN.match(p) for p in found):
+        raise ReleaseError(f"triage_state.py printed a WITH_PERSON line without its assignees: {raw!r}")
+    return tuple(found)
 
 
 def parse_job(
@@ -864,7 +908,20 @@ def issue_value(repo: str, issue: Issue) -> str:
         return shown
     if issue.state in ("POSTPONED", "TRIAGED"):
         return f"{shown} {issue.state.lower()}"
+    if issue.state == "WITH_PERSON":  # the logins it waits on, never the note's text (D-16)
+        return f"{shown} ({' '.join(f'@{p}' for p in issue.assignees)})"
     return shown
+
+
+CHAIN_ITEM = re.compile(r"(?P<repo>[\w.-]+/[\w.-]+)#(?P<number>[1-9]\d*)")
+
+
+def chain_value(r: Row) -> str:
+    """A CHAIN_NO_GATE or CHAIN_UNREADABLE row in its own words, its item (owner/repo#N, which
+    may be another repo's) with its link"""
+    found = CHAIN_ITEM.fullmatch(r.subject)
+    subject = f"{r.subject} {github(found['repo'])}/issues/{found['number']}" if found else r.subject
+    return f"{r.state} {subject}: {r.detail}"
 
 
 def pull_value(facts: Facts, number: int) -> str:
@@ -909,8 +966,10 @@ def item_lines(facts: Facts) -> list[str]:
     lines += _fixed("operate", [(f"{r.subject} {r.detail}", fixed(r)) for r in of("OPERATE_FAILED", "UNHEALTHY")])
     untrusted = [(r, int(n)) for r in of("UNTRUSTED") for n in re.findall(r"#(\d+)", r.detail)]
     lines += _fixed("untrusted", [(item(repo, n, n in pulls), fixed(r)) for r, n in untrusted])
-    suspect = sorted((i.number for i in facts.issues if i.state in CLOSED_STATES), reverse=True)
-    lines += _group("suspect close", [item(repo, n, False) for n in suspect])
+    lines += _fixed("chain", [(chain_value(r), fixed(r)) for r in of(*CHAIN_ROWS)])
+    for name, state, check in CLOSED_LINES:
+        closed = sorted((i.number for i in facts.issues if i.state == state), reverse=True)
+        lines += _group(name, [f"{item(repo, n, False)}{check}" for n in closed])
     lines += _fixed("branches", [("merged branches kept", fixed(r)) for r in of("BRANCH_DELETE_OFF")][:1])
     lines += _fixed("upgrade", [upgrade_value(facts, o) for o in facts.upgrades])
     # an upgrade's issue is github-ship-watch's, listed on its upgrade line, never as triage's work

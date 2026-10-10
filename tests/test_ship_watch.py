@@ -550,6 +550,10 @@ def test_s011_11_status_reads_the_same_transient_errors(ws: ModuleType) -> None:
     assert (found.GH_PAUSE, found.GH_RERUN) == (ws.GH_PAUSE, ws.GH_RERUN)
 
 
+def test_status_reads_a_person_items_logins_as_the_watch_does(ws: ModuleType) -> None:
+    assert shipmill_status.LOGIN.pattern == ws.LOGIN.pattern
+
+
 def test_the_template_names_no_incident(ws: ModuleType) -> None:
     template = SCRIPT.parents[3] / "docs" / "postmortems" / "TEMPLATE.md"
     text = template.read_text(encoding="utf-8")
