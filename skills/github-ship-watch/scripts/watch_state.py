@@ -95,6 +95,13 @@ Intake (github-issue-triage's triage_state.py):
   UNTRUSTED       with --trusted-only, the issues triage_state.py reads as UNTRUSTED and
                   the pull requests whose head is in a fork, as #N only (reported, never an
                   action: an interactive session takes them up, D-16)
+  CHAIN_NO_GATE   an item of a chain one of the repo's open issues belongs to (spec 017,
+                  github-issue-triage's chains.py show, run once over the open issues but the
+                  ones read as UNTRUSTED) that is ready, linked to another item, and in a repo
+                  whose .github/shipmill.toml has no [agents] table, or that has none: nothing
+                  takes it up, so the chain stalls there. One row per item, naming it and its
+                  repo; an action for a person (a gate there, or the item done by hand), never
+                  an agent's
 
 --bot-login and --trusted-only go through to triage_state.py: the login shipmill's
 sessions write as (whose comment is the question, and whose issue is trusted), and the
@@ -178,9 +185,10 @@ after its row, unless the row's detail already ends with it.
 Holds and incidents lead the report. Exit 0 when nothing needs action, 1 when any
 BOT_FAILED, BOT_STALLED, BOT_PLAN_FAILED, WORK_BRANCH_STALE, NOT_PUBLISHED, UNANNOUNCED,
 ISSUES, OPERATE_FAILED, UNHEALTHY, PROMOTION_DUE, INCIDENT_OPEN, POSTMORTEM_DUE,
-NEEDS_DECISION, BRANCH_DELETE_OFF, SHIPMILL_OUTDATED, GATE_NO_APP, SKILL_SHADOWED, or
-UPGRADE_PENDING row is present, 2 on bad input or a git, gh, or uvx failure (a failing `shipmill worktrees`; a
-`shipmill plan` failing with its own `shipmill: ` error is the BOT_PLAN_FAILED row instead).
+NEEDS_DECISION, BRANCH_DELETE_OFF, SHIPMILL_OUTDATED, GATE_NO_APP, SKILL_SHADOWED,
+UPGRADE_PENDING, or CHAIN_NO_GATE row is present, 2 on bad input or a git, gh, or uvx
+failure (a failing `shipmill worktrees` or `chains.py show`; a `shipmill plan` failing
+with its own `shipmill: ` error is the BOT_PLAN_FAILED row instead).
 Needs git, an authenticated gh, and uvx (for a shipmill bot's plan and worktrees; `shipmill
 worktrees` needs claude on PATH too, to see the live sessions). Python 3.10+,
 standard library only.
@@ -216,6 +224,7 @@ except ModuleNotFoundError:  # Python 3.10: the config is read with regexes inst
 SKILLS = Path(__file__).resolve().parents[2]
 SHIPPED = SKILLS / "github-pr-triage" / "scripts" / "shipped.py"
 TRIAGE_STATE = SKILLS / "github-issue-triage" / "scripts" / "triage_state.py"
+CHAINS = SKILLS / "github-issue-triage" / "scripts" / "chains.py"
 # triage_state.py's ACTION: the issue states that make it exit 1
 TRIAGE_ACTION = {
     "NEW",
@@ -282,6 +291,7 @@ ACTION = {
     "GATE_NO_APP",
     "SKILL_SHADOWED",
     "UPGRADE_PENDING",
+    "CHAIN_NO_GATE",
 }
 # the states whose row needs an agent: --json marks each row's "agent" from this, and
 # shipmill gate starts a session on those rows (SKILL.md's repair table says what it does)
@@ -1592,13 +1602,8 @@ def lands_prs(table: dict[str, str] | None) -> bool:
     return table is not None and table.get("prs") == "true"
 
 
-def intake_rows(
-    repo: str,
-    bot_login: str | None = None,
-    trusted_only: bool = False,
-    lands: bool = False,
-    upgrades: Upgrades | None = None,
-) -> list[Row]:
+def triage_run(repo: str, bot_login: str | None = None, trusted_only: bool = False) -> tuple[int, str]:
+    """triage_state.py's exit code (0 or 1) and its --json lines"""
     cmd = [sys.executable, str(TRIAGE_STATE), repo, "--json"]
     cmd += ["--bot-login", bot_login] if bot_login is not None else []
     cmd += ["--trusted-only"] if trusted_only else []
@@ -1606,13 +1611,85 @@ def intake_rows(
     if proc.returncode not in (0, 1):
         sys.stderr.write(f"error: triage_state.py: {proc.stderr.strip()}\n")
         raise SystemExit(2)
+    return proc.returncode, proc.stdout
+
+
+def intake_rows(
+    repo: str,
+    code: int,
+    triage: str,
+    bot_login: str | None = None,
+    trusted_only: bool = False,
+    lands: bool = False,
+    upgrades: Upgrades | None = None,
+) -> list[Row]:
+    """The intake rows from triage_run's exit code and lines, and the open pull requests"""
     fields = "number,isDraft,isCrossRepository,labels"
     prs = json.loads(run(["gh", "pr", "list", "-R", repo, "--json", fields, "-L", "100"]))
 
     def comments_of(number: int) -> Comments:
         return pr_comments(repo, number)
 
-    return intake(repo, proc.returncode, proc.stdout, prs, comments_of, bot_login, trusted_only, lands, upgrades)
+    return intake(repo, code, triage, prs, comments_of, bot_login, trusted_only, lands, upgrades)
+
+
+# triage_state.py's states of an issue that isn't open (SUSPECT_CLOSE), or that no
+# unattended pass reads the links of (UNTRUSTED, D-16): no chain starts from either
+NOT_CHAIN_STARTS = frozenset({"SUSPECT_CLOSE", "UNTRUSTED"})
+CHAIN_REF = re.compile(r"^(?P<repo>[\w.-]+/[\w.-]+)#[1-9]\d*$")
+
+
+def chain_starts(repo: str, triage: str) -> list[str]:
+    """The repo's open issues, as owner/repo#N, from triage_state.py's --json lines; none it
+    reads as UNTRUSTED, whose "Depends on" lines an outsider wrote"""
+    numbers = set()
+    for line in triage.splitlines():
+        row = json.loads(line)
+        if row["state"] not in NOT_CHAIN_STARTS:
+            numbers.add(int(row["number"]))
+    return [f"{repo}#{n}" for n in sorted(numbers)]
+
+
+def chain_no_gate_rows(shown: object) -> list[Row]:
+    """CHAIN_NO_GATE, one row per item `chains.py show --json` marks NO_GATE that is linked to
+    another item: one that waits on nothing and that nothing waits on is in no chain. The
+    reference is GitHub's own spelling of the item (chains.py reads it from the forge), checked
+    here, so the fix names a repo and a number, never an issue's text (D-16)"""
+    if not isinstance(shown, dict) or not isinstance(shown.get("rows"), list):
+        raise Refused('error: chains.py show --json printed no {"rows": [...]} object')
+    rows = []
+    for item in shown["rows"]:
+        if not isinstance(item, dict) or item.get("gate") != "NO_GATE":
+            continue
+        if not (item.get("waits_on") or item.get("waited_on_by")):
+            continue
+        ref = str(item.get("ref"))
+        found = CHAIN_REF.match(ref)
+        if found is None:
+            raise Refused(f"error: chains.py show --json printed a malformed reference {ref!r}")
+        where = found.group("repo")
+        detail = f"ready in {where}, whose {POLICY} has no [agents] table: no gate takes it up, so its chain stalls"
+        fix = f"set up a gate on {where} ({skill_fix('shipmill-setup', where)}), or do {ref} by hand"
+        rows.append(Row("CHAIN_NO_GATE", ref, detail, fix))
+    return rows
+
+
+def chain_rows(
+    repo: str, triage: str, execute: Callable[[list[str]], subprocess.CompletedProcess[str]] = capture
+) -> list[Row]:
+    """The CHAIN_NO_GATE rows of the chains the repo's open issues belong to: one chains.py
+    show over all of them, which reads each item once and each repo's config once"""
+    starts = chain_starts(repo, triage)
+    if not starts:
+        return []
+    proc = execute([sys.executable, str(CHAINS), "show", "--json", *starts])
+    if proc.returncode not in (0, 1):
+        raise Refused(f"error: chains.py show: {proc.stderr.strip() or f'exited {proc.returncode}'}")
+    try:
+        shown = json.loads(proc.stdout)
+    except json.JSONDecodeError as exc:
+        raise Refused(f"error: chains.py show --json printed no JSON: {exc}") from None
+    return chain_no_gate_rows(shown)
 
 
 # -- agents --------------------------------------------------------------------------------
@@ -2076,7 +2153,9 @@ def main() -> int:
             args.bot_login,
         )  # its rows come with the intake's, which knows which issues triage_state.py trusts
 
-    rows += intake_rows(args.repo, args.bot_login, args.trusted_only, lands_prs(table), upgrades)
+    code, triage = triage_run(args.repo, args.bot_login, args.trusted_only)
+    rows += intake_rows(args.repo, code, triage, args.bot_login, args.trusted_only, lands_prs(table), upgrades)
+    rows += chain_rows(args.repo, triage)
     rows += active_rows(fetch_active(args.repo), now)
     rows += agent_rows(args.repo, repo_dir, now)
     rows += shipmill_rows(args.repo, repo_dir)

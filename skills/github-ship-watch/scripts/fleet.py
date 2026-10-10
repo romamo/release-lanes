@@ -94,6 +94,7 @@ ACTION = frozenset(
         "GATE_NO_APP",
         "SKILL_SHADOWED",
         "UPGRADE_PENDING",
+        "CHAIN_NO_GATE",
     }
 )
 REPO_ERROR = "REPO_ERROR"

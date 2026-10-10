@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Write the links of a chain of work across issues and repos (spec 017).
+"""Write and show the links of a chain of work across issues and repos (spec 017).
 
 Usage:
   chains.py link <owner/repo#N> --blocked-by <owner/repo#M>
   chains.py link <owner/repo#P> --child <owner/repo#C>
+  chains.py show <owner/repo#N>... [--json]
 
 link  writes a link in both forms triage_state.py reads:
       --blocked-by  GitHub's native relation (GraphQL addBlockedBy: N is blocked by M)
@@ -22,32 +23,68 @@ link  writes a link in both forms triage_state.py reads:
       holds the issue by itself. A refusal is a schema without the field or mutation, or
       an UNPROCESSABLE or FORBIDDEN error; any other error fails the run.
 
-Exit 0 when the link is in place (or text only), 2 on a malformed reference, an issue
-that doesn't exist or is a pull request, an issue linked to itself (each named, before
-any write), or any other gh failure, including a rate limit, a timeout, or an internal
-error. In a gate session gh already
-writes as the App (D-14). Needs the gh CLI, authenticated. Python 3.10+, standard library
-only.
+      Exit 0 when the link is in place (or text only), 2 on a malformed reference, an
+      issue that doesn't exist or is a pull request, an issue linked to itself (each
+      named, before any write), or any other gh failure, including a rate limit, a
+      timeout, or an internal error. In a gate session gh already writes as the App (D-14).
+
+show prints the chain an issue belongs to, one row per item, each once (by owner/repo#N,
+      whatever case it is spelled in), so a cycle ends where it closes:
+      - every issue it waits on, recursively: a "Depends on" line of its body (as
+        triage_state.py reads one), an issue GitHub records it blocked by (blockedBy), and
+        its sub-issues
+      - every issue that waits on it, recursively: one GitHub records it blocking, and its
+        parent
+      Each row: the reference, the title, the executor ("agent", or "person: @login,..."
+      for an issue labelled human, "person: none" with no assignee; "pull request" for a
+      pull request a "Depends on" line names), and the state: CLOSED (an issue closed in
+      any way, a pull request merged or closed), BLOCKED with the holds still open, READY
+      (an open issue nothing open holds), or OPEN (a pull request still open). A hold that
+      can't be read counts as open. A READY issue whose repo has no [agents] table in
+      .github/shipmill.toml on its default branch, or no such file (404), ends in NO_GATE:
+      nothing will take it up. The config is read once per repo, only for a repo with a
+      READY issue. An item that can't be read (no access, no such issue) is one row,
+      owner/repo#N UNREADABLE, and the chain goes on past what could be read. Several
+      references print the union of their chains, each item once, the GitHub reads shared.
+      --json prints the rows as one JSON object, {"rows": [...]}, each row with ref, title,
+      executor, state, holds (the open ones), waits_on and waited_on_by (every item it is
+      linked to, open or closed), and gate ("NO_GATE" or null).
+
+      Exit 1 when any row is NO_GATE, else 0; 2 on a malformed reference, a starting
+      reference that can't be read or is a pull request, an issue with more than 100
+      labels, assignees, or relations of one kind (not paged), a config that can't be
+      parsed, or any gh failure other than an unreadable item or a missing config.
+
+Needs the gh CLI, authenticated. Python 3.10+, standard library only.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import importlib.util
 import json
 import re
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
+from types import ModuleType
 from typing import Any, NoReturn
 
-# What a "Depends on" line is, and the issues it names, as triage_state.py reads them
-from triage_state import DEPENDENCY, DEPENDS
+# What a "Depends on" line is and the issues it names, and the holds GitHub records, as
+# triage_state.py reads them
+from triage_state import DEPENDENCY, DEPENDS, dependency_refs, native_holds, ref_state
 
 Variables = dict[str, str | int]
 # Runs one GraphQL query with its variables and returns the parsed response, errors and
 # all; a failure with no GraphQL response (auth, network) exits 2
 Runner = Callable[[str, Variables], dict[str, Any]]
+# Reads a repo's .github/shipmill.toml on its default branch: its text, or None when there
+# is no such file; any other failure exits 2
+Contents = Callable[[str], str | None]
+Execute = Callable[[list[str]], subprocess.CompletedProcess[str]]
 
 REFERENCE = re.compile(r"^(?P<owner>[\w.-]+)/(?P<name>[\w.-]+)#(?P<num>[1-9]\d*)$")
 # GraphQL errors that are no refusal of the relation: the run fails instead
@@ -95,6 +132,41 @@ mutation($id: ID!, $body: String!) {
 }
 """
 
+# -- show: the items of a chain, read CHUNK at a time in one query, each under an alias
+CHUNK = 20
+LINKS = 100  # a connection's one page; an issue with more fails rather than read short
+HUMAN_LABEL = "human"  # a person's item: its assignees do it (spec 017)
+CONFIG = ".github/shipmill.toml"
+UNREADABLE_TYPES = frozenset({"NOT_FOUND", "FORBIDDEN"})  # no such repo or issue, or no access
+HELD = "pageInfo { hasNextPage } nodes { number state stateReason repository { nameWithOwner } }"
+LINKED = "pageInfo { hasNextPage } nodes { number repository { nameWithOwner } }"
+ITEM = f"""
+      __typename
+      ... on Issue {{
+        number title state stateReason body
+        repository {{ nameWithOwner }}
+        labels(first: {LINKS}) {{ pageInfo {{ hasNextPage }} nodes {{ name }} }}
+        assignees(first: {LINKS}) {{ pageInfo {{ hasNextPage }} nodes {{ login }} }}
+        blockedBy(first: {LINKS}) {{ {HELD} }}
+        subIssues(first: {LINKS}) {{ {HELD} }}
+        blocking(first: {LINKS}) {{ {LINKED} }}
+        parent {{ number repository {{ nameWithOwner }} }}
+      }}
+      ... on PullRequest {{ number title state repository {{ nameWithOwner }} }}
+"""
+WATCH_STATE = Path(__file__).resolve().parents[2] / "github-ship-watch" / "scripts" / "watch_state.py"
+
+
+def items_query(count: int) -> str:
+    """One query reading count items, the i-th under alias i<i> with variables $o<i>,
+    $n<i>, $k<i>"""
+    params = ", ".join(f"$o{i}: String!, $n{i}: String!, $k{i}: Int!" for i in range(count))
+    aliases = "\n".join(
+        f"  i{i}: repository(owner: $o{i}, name: $n{i}) {{ issueOrPullRequest(number: $k{i}) {{{ITEM}  }} }}"
+        for i in range(count)
+    )
+    return f"query({params}) {{\n{aliases}\n}}\n"
+
 
 @dataclass(frozen=True)
 class Ref:
@@ -112,6 +184,15 @@ class Ref:
 
     def same(self, other: Ref) -> bool:
         return self.same_repo(other.owner, other.name) and self.number == other.number
+
+    @property
+    def repo(self) -> str:
+        return f"{self.owner}/{self.name}"
+
+    @property
+    def key(self) -> tuple[str, str, int]:
+        """One issue however its owner and repo are cased"""
+        return (self.owner.lower(), self.name.lower(), self.number)
 
 
 @dataclass(frozen=True)
@@ -295,7 +376,272 @@ def link(run: Runner, target: Ref, other: Ref, child: bool) -> int:
     return 0
 
 
-def main(argv: Sequence[str] | None = None, run: Runner = gh_graphql) -> int:
+# -- show ----------------------------------------------------------------------------------
+
+Key = tuple[str, str, int]
+UNREADABLE = "UNREADABLE"
+OPEN_HOLDS = frozenset({"OPEN", UNREADABLE})  # a hold that can't be read may still be open
+
+
+@dataclass(frozen=True)
+class Item:
+    """An item of a chain as GitHub reads it. kind is Issue, PullRequest, or UNREADABLE (ref
+    then as asked, the rest empty); state is ref_state's; holds are the items it waits on,
+    each with the state GitHub gave along (a native relation) or None (a "Depends on" line);
+    waited_on_by, the issues it blocks and its parent"""
+
+    ref: Ref
+    kind: str
+    title: str = ""
+    state: str = ""
+    executor: str = ""
+    holds: tuple[tuple[Ref, str | None], ...] = ()
+    waited_on_by: tuple[Ref, ...] = ()
+
+
+def ref_of(node: dict[str, Any]) -> Ref:
+    owner, _, name = str(node["repository"]["nameWithOwner"]).partition("/")
+    return Ref(owner, name, int(node["number"]))
+
+
+def connection(node: dict[str, Any], field: str, ref: Ref) -> list[dict[str, Any]]:
+    """A connection's nodes; one with more than a page fails rather than read short"""
+    found = node[field]
+    if found["pageInfo"]["hasNextPage"]:
+        fail(f"{ref} has more than {LINKS} {field}, which chains.py does not page")
+    nodes: list[dict[str, Any]] = found["nodes"]
+    return nodes
+
+
+def parse_item(node: dict[str, Any]) -> Item:
+    ref = ref_of(node)
+    title = str(node["title"])
+    if node["__typename"] == "PullRequest":
+        return Item(ref, "PullRequest", title, ref_state(node), "pull request")
+    labels = {n["name"] for n in connection(node, "labels", ref)}
+    logins = [str(n["login"]) for n in connection(node, "assignees", ref)]
+    executor = "agent"
+    if HUMAN_LABEL in labels:
+        executor = "person: " + (",".join(f"@{login}" for login in logins) or "none")
+    holds: dict[Key, tuple[Ref, str | None]] = {}
+    for owner, name, number in dependency_refs(node, (ref.owner, ref.name)):
+        hold = Ref(owner, name, number)
+        holds.setdefault(hold.key, (hold, None))
+    for field in ("blockedBy", "subIssues"):
+        connection(node, field, ref)  # fails past a page; native_holds reads them
+    for (owner, name, number), (_, state) in native_holds(node).items():
+        hold = Ref(owner, name, number)
+        holds[hold.key] = (holds.get(hold.key, (hold, None))[0], state)  # the text's spelling, GitHub's state
+    holds.pop(ref.key, None)
+    waiting = [ref_of(n) for n in connection(node, "blocking", ref)]
+    if node.get("parent"):
+        waiting.append(ref_of(node["parent"]))
+    downstream = {r.key: r for r in waiting if r.key != ref.key}
+    return Item(ref, "Issue", title, ref_state(node), executor, tuple(holds.values()), tuple(downstream.values()))
+
+
+def unreadable_alias(error: object, count: int) -> int | None:
+    """The alias index an error says can't be read (no such repo or issue, or no access to
+    it); None for any other error, which fails the run. An error deeper in an item (one of
+    its relations) is no unreadable item"""
+    if not isinstance(error, dict) or error.get("type") not in UNREADABLE_TYPES:
+        return None
+    path = error.get("path")
+    if not isinstance(path, list) or not 1 <= len(path) <= 2 or not isinstance(path[0], str):
+        return None
+    alias = re.fullmatch(r"i(\d+)", path[0])
+    index = int(alias.group(1)) if alias else count
+    return index if index < count else None
+
+
+def read_items(run: Runner, refs: list[Ref]) -> dict[Key, Item]:
+    """The items refs name, CHUNK per query, each under the key it was asked by"""
+    found: dict[Key, Item] = {}
+    for start in range(0, len(refs), CHUNK):
+        chunk = refs[start : start + CHUNK]
+        variables: Variables = {}
+        for i, ref in enumerate(chunk):
+            variables.update({f"o{i}": ref.owner, f"n{i}": ref.name, f"k{i}": ref.number})
+        response = run(items_query(len(chunk)), variables)
+        unreadable: set[int] = set()
+        for error in errors_of(response):
+            index = unreadable_alias(error, len(chunk))
+            if index is None:
+                fail(f"gh: {first_line([error])}")
+            unreadable.add(index)
+        data = response.get("data") or {}
+        for i, ref in enumerate(chunk):
+            node = (data.get(f"i{i}") or {}).get("issueOrPullRequest")
+            if i in unreadable:
+                found[ref.key] = Item(ref, UNREADABLE)
+            elif node is None:
+                fail(f"gh: no item {ref} in the response and no error naming it")
+            else:
+                found[ref.key] = parse_item(node)
+    return found
+
+
+def walk(run: Runner, starts: list[Ref]) -> tuple[list[Item], dict[Key, Item]]:
+    """The chain of starts, each item once in the order found, and every item read (by the
+    key it was asked by and by its own): the chain's, and the holds of the issues that wait
+    on a start, read for their states only"""
+    items: dict[Key, Item] = {}
+
+    def read(refs: list[Ref]) -> None:
+        missing = {r.key: r for r in refs if r.key not in items}
+        for key, item in read_items(run, list(missing.values())).items():
+            items[key] = item
+            items.setdefault(item.ref.key, item)  # a renamed repo answers under its new name
+
+    read(starts)
+    for ref in starts:
+        if items[ref.key].kind == UNREADABLE:
+            fail(f"can't read {ref}: no such issue, or no access to it")
+        if items[ref.key].kind != "Issue":
+            fail(f"{ref} is a pull request, not an issue")
+    chain: dict[Key, Item] = {}
+    up, down = list(starts), list(starts)
+    seen_up: set[Key] = set()
+    seen_down: set[Key] = set()
+    while up or down:
+        read(up + down)
+        later_up: list[Ref] = []
+        later_down: list[Ref] = []
+        for refs, seen, later, upstream in ((up, seen_up, later_up, True), (down, seen_down, later_down, False)):
+            for ref in refs:
+                item = items[ref.key]
+                if item.ref.key in seen:
+                    continue
+                seen.add(item.ref.key)
+                chain.setdefault(item.ref.key, item)
+                later += [hold for hold, _ in item.holds] if upstream else list(item.waited_on_by)
+        up, down = later_up, later_down
+    read([hold for item in chain.values() for hold, state in item.holds if state is None])
+    return list(chain.values()), items
+
+
+def capture(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
+def gh_contents(repo: str, execute: Execute = capture) -> str | None:
+    """The repo's shipmill config on its default branch, through the contents API; None when
+    GitHub answers 404 (no such file), exit 2 on any other failure"""
+    proc = execute(["gh", "api", f"repos/{repo}/contents/{CONFIG}"])
+    if proc.returncode != 0:
+        if re.search(r"\bHTTP 404\b", proc.stderr):
+            return None
+        fail(f"reading {CONFIG} of {repo}: {proc.stderr.strip() or f'gh api exited {proc.returncode}'}")
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError:
+        fail(f"reading {CONFIG} of {repo}: gh api printed no JSON")
+    if not isinstance(data, dict) or data.get("encoding") != "base64" or not isinstance(data.get("content"), str):
+        fail(f"reading {CONFIG} of {repo}: not a base64 file in the contents API's answer")
+    try:
+        return base64.b64decode(data["content"]).decode("utf-8")
+    except ValueError as exc:
+        fail(f"reading {CONFIG} of {repo}: {exc}")
+
+
+_watch: list[ModuleType] = []
+
+
+def watch_module() -> ModuleType:
+    """github-ship-watch's watch_state.py, for its reading of [agents]: tomllib on 3.11+,
+    its regex fallback on 3.10, one reading for the watch and the chain"""
+    if not _watch:
+        spec = importlib.util.spec_from_file_location("shipmill_watch_state", WATCH_STATE)
+        if spec is None or spec.loader is None:
+            fail(f"can't load {WATCH_STATE}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module  # its dataclasses look their module up by name
+        spec.loader.exec_module(module)
+        _watch.append(module)
+    return _watch[0]
+
+
+def has_gate(text: str, repo: str) -> bool:
+    """Whether a config has an [agents] table: a gate takes up the repo's ready items. A
+    config the reader refuses exits 2 rather than reading as no gate"""
+    ws = watch_module()
+    try:
+        return bool(ws.agents_table(text, Path(f"{repo}:{CONFIG}")) is not None)
+    except ws.Refused as refused:
+        sys.stderr.write(f"{refused}\n")
+        raise SystemExit(2) from None
+
+
+def show_rows(chain: list[Item], items: dict[Key, Item], contents: Contents) -> list[dict[str, Any]]:
+    """One row per item of the chain; a READY issue's repo config is read once per repo"""
+
+    def named(ref: Ref) -> Ref:
+        item = items.get(ref.key)
+        return item.ref if item is not None and item.kind != UNREADABLE else ref
+
+    def state_of(ref: Ref, given: str | None) -> str:
+        if given is not None:
+            return given
+        item = items[ref.key]
+        return UNREADABLE if item.kind == UNREADABLE else item.state
+
+    # what waits on an item: what GitHub records it blocking or as its parent, and every
+    # item of the chain that names it as a hold (a "Depends on" line has no reverse)
+    waiting: dict[Key, dict[Key, Ref]] = {}
+    for item in chain:
+        waiting.setdefault(item.ref.key, {}).update((named(r).key, named(r)) for r in item.waited_on_by)
+        for hold, _ in item.holds:
+            waiting.setdefault(named(hold).key, {})[item.ref.key] = item.ref
+    gates: dict[str, bool] = {}
+    rows: list[dict[str, Any]] = []
+    for item in chain:
+        readable = item.kind != UNREADABLE
+        row: dict[str, Any] = {
+            "ref": str(item.ref),
+            "title": item.title if readable else None,
+            "executor": item.executor if readable else None,
+            "holds": [],
+            "waits_on": [str(named(hold)) for hold, _ in item.holds],
+            "waited_on_by": [str(ref) for ref in waiting.get(item.ref.key, {}).values()],
+            "gate": None,
+        }
+        if not readable:
+            row["state"] = UNREADABLE
+        elif item.kind == "PullRequest":
+            row["state"] = "OPEN" if item.state == "OPEN" else "CLOSED"
+        elif item.state != "OPEN":
+            row["state"] = "CLOSED"
+        else:
+            row["holds"] = [str(named(hold)) for hold, state in item.holds if state_of(hold, state) in OPEN_HOLDS]
+            row["state"] = "BLOCKED" if row["holds"] else "READY"
+        if row["state"] == "READY":
+            repo = item.ref.repo.lower()
+            if repo not in gates:
+                text = contents(item.ref.repo)
+                gates[repo] = text is not None and has_gate(text, item.ref.repo)
+            row["gate"] = None if gates[repo] else "NO_GATE"
+        rows.append(row)
+    return rows
+
+
+def show_line(row: dict[str, Any]) -> str:
+    if row["state"] == UNREADABLE:
+        return f"{row['ref']} {UNREADABLE}"
+    state = row["state"] + (f" ({' '.join(row['holds'])})" if row["holds"] else "")
+    return "  ".join([row["ref"], row["title"], row["executor"], state, *([row["gate"]] if row["gate"] else [])])
+
+
+def show(run: Runner, contents: Contents, starts: list[Ref], as_json: bool) -> int:
+    chain, items = walk(run, starts)
+    rows = show_rows(chain, items, contents)
+    if as_json:
+        print(json.dumps({"rows": rows}, sort_keys=True))
+    else:
+        print("\n".join(show_line(row) for row in rows))
+    return 1 if any(row["gate"] == "NO_GATE" for row in rows) else 0
+
+
+def main(argv: Sequence[str] | None = None, run: Runner = gh_graphql, contents: Contents = gh_contents) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
     link_parser = commands.add_parser("link", help="write a link as a native relation and a Depends on line")
@@ -303,7 +649,12 @@ def main(argv: Sequence[str] | None = None, run: Runner = gh_graphql) -> int:
     how = link_parser.add_mutually_exclusive_group(required=True)
     how.add_argument("--blocked-by", metavar="OWNER/REPO#M", help="the issue it waits on")
     how.add_argument("--child", metavar="OWNER/REPO#C", help="the issue to put under it as a sub-issue")
+    show_parser = commands.add_parser("show", help="print the chain an issue belongs to")
+    show_parser.add_argument("issues", nargs="+", metavar="OWNER/REPO#N", help="the issue (or issues) to start from")
+    show_parser.add_argument("--json", action="store_true", help="the rows as one JSON object")
     args = parser.parse_args(argv)
+    if args.command == "show":
+        return show(run, contents, [parse_ref(issue) for issue in args.issues], args.json)
     target = parse_ref(args.issue)
     other = parse_ref(args.child if args.child is not None else args.blocked_by)
     return link(run, target, other, child=args.child is not None)
