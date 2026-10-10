@@ -1,7 +1,9 @@
 # Design: the product layer
 
 Status: map and direction, 2026-10-10 (shipmill 0.45.0). Nothing here is new behaviour; specs
-carve the gaps below into buildable pieces, the first being shipmill/shipmill#334.
+carve the gaps below into buildable pieces, the first being shipmill/shipmill#334, specified
+in [spec 017](../specs/017-work-chains.md). Where this note and a merged spec differ, the
+spec wins.
 
 shipmill's product layer is the part of the factory that decides **what** gets built and
 **when** it ships: feedback, opportunities, specs, the task graph, milestones and releases.
@@ -96,7 +98,7 @@ on it. Forge-specific work waits for the code host port (#322), which has priori
 | 1 | **Human items have no lifecycle.** UNBLOCKED always means "dispatch an implementer"; an item only a person can do is never announced when it unblocks, never verified, and its close starts nothing | Seen in two repos in two days; every chain with a deploy, a credential or a decision in it stops here | #334 |
 | 2 | **A milestone's loop doesn't close.** Nothing closes a milestone once its version ships, opens the next one, or moves leftover issues; the roadmap plans only accepted opportunities, so fixes and maintainer-filed features reach a milestone only by hand | Both repos that use `milestone = true` show it; small: one milestone write on the port beside the read it has | #336 |
 | 3 | **No single queue for the maintainer.** Decisions, human items, opportunities awaiting a call, milestone proposals and spec PRs to merge are spread across repos; `fleet.py report` lists watch rows, and `shipmill status` covers one repo | Every approval in the layer is the maintainer's, so the layer moves only as fast as they are found | #337 |
-| 4 | **Native relations aren't read.** Forge dependencies and sub-issues hold nothing; sub-issues are written by `specs.py split` and never read back | Links set in the forge's UI silently do nothing; behind the port, so after spec 016 | #334 |
+| 4 | **Native relations aren't read.** Forge dependencies and sub-issues hold nothing; sub-issues are written by `specs.py split` and never read back | Links set in the forge's UI silently do nothing; GitHub first in spec 017, other forges behind the port (spec 016) | #334 |
 | 5 | **No epic outside the spec gate.** A parent whose children are fixes, human items or items in other repos has no state, progress or close | Comes almost free once gaps 1 and 4 land | #334 |
 | 6 | **Planning stops at the repo.** A chain, a milestone or a roadmap for a product that spans repos has no home; the gate and triage see one repo | Real (one product spans three repos) but rare among users so far; it needs gaps 1 to 4 first | Chains: #334; a plan across repos: #338 |
 | 7 | **The layer is configured nowhere.** Setup never offers `[roadmap]`, the `opportunity` and `planned` labels, or `milestone = true` with a first milestone | Not a missing feature; until it is fixed, gaps 2 and 3 have no users | #336, under Success |
@@ -105,14 +107,13 @@ on it. Forge-specific work waits for the code host port (#322), which has priori
 
 These are the shapes the specs should start from, not the specs.
 
-**1. Human items.** An item is a person's when it is assigned to someone other than the App
-(the alternative, a label like `owner-action`, needs no assignee and works on forges without
-assignment). Its body carries a `## Check` section: what proves it done. On unblock, the
-next triage pass mentions the assignee with what to do, once. "Done" is the person closing
-it or commenting `done`; an agent then runs the check where it can (a URL, a command, a file
-on the default branch) and either confirms on the item or reopens it with what failed. Its
-close unblocks the next item like any other. The gate's remind machinery (spec 003) repeats
-the mention while it waits, at the same `remind_hours`.
+**1. Human items.** Settled in spec 017: an issue labelled `human` is a person's item, done
+by its assignees. Its body may carry a `## Check` section: what proves it done. On unblock,
+a triage session mentions the assignees once with what to do. "Done" is the person
+commenting `done` or closing it; a session then runs the check where it can and either
+closes or confirms the item, or hands it back with what failed. Its close unblocks the next
+item like any other. There are no reminders yet; a repeat mention can come later behind its
+own option.
 
 **2. Closing the milestone loop.** When a lane with `milestone = true` releases version X,
 the same run closes milestone X and moves any issue left in it (there should be none) to the
@@ -126,16 +127,15 @@ fleet file) lists only what waits on a person, across repos, oldest first: NEEDS
 items, human items assigned to the reader, OPPORTUNITY_OPEN, PROPOSAL_OPEN, open spec PRs,
 and NO_REASON declines. It reads the state scripts that already exist and adds no state.
 
-**4. Native relations.** The code host port gains `relations` as a capability: on GitHub,
-issue dependencies (`blocked_by`, `blocking`) and sub-issues; on GitLab, linked issues
-(`blocks`, `is_blocked_by`) and epics. A hold read from a native relation is the same hold as
-a `Depends on` line; both count, and the item waits until every one is closed. When triage
-writes a `Depends on` line on a forge with relations, it sets the relation too.
+**4. Native relations.** Settled in spec 017 for GitHub: `triage_state.py` reads issue
+dependencies and sub-issues as holds, the same as a `Depends on` line; both count, and the
+item waits until every one is closed. `chains.py link` writes the relation and the text line
+together. GitLab's linked issues (`blocks`, `is_blocked_by`) and epics come through the code
+host port (#322) later, behind the same reading.
 
-**5. Epics.** Generalise the feature issue: any issue whose body has `Depends on` lines or
-whose forge lists sub-issues is a parent; `triage_state.py` reports its progress (closed of
-total children) and reads it UNBLOCKED, to close, when the last child closes. The spec gate's
-feature issue is then one kind of parent, not a special case.
+**5. Epics.** Settled in spec 017: an issue with sub-issues is a parent; `triage_state.py`
+reports its progress (`children K/N closed`) and reads it UNBLOCKED, to close, when the last
+child closes. The spec gate's feature issue is then one kind of parent, not a special case.
 
 **6. Across repos.** Chains first: each repo's triage already parses `owner/repo#N` holds,
 so a cross-repo chain advances as long as every repo in it runs a gate, and D-16 applies in
@@ -144,7 +144,6 @@ later question, and depends on the queue (gap 3) to be visible at all.
 
 ## Questions for the maintainer
 
-- Whether a human item is marked by assignee or by a label (gap 1)
 - Whether a release may close its milestone by itself, or proposes the close (gap 2)
 - Whether fixes belong in the roadmap plan, or milestones stay for features only (gap 2)
 - Whether a plan across repos is wanted in shipmill at all, or stays a view over per-repo
