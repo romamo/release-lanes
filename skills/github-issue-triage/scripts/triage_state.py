@@ -90,7 +90,9 @@ REVISIT, or POSTPONED as any issue would, else, with every hold closed, one of:
 For the N most recently closed issues (default 20):
   SUSPECT_CLOSE    closed by a commit whose message names "#N" after a closing
                    keyword only mid-line (a quote, a test string), not as a
-                   trailer, or closed as COMPLETED with no closer at all, unless it
+                   trailer, and no same-repo merged PR closes it (by GitHub's
+                   link or a closing keyword in its title or body), or closed as
+                   COMPLETED with no closer at all, unless it
                    carries --hold-label (a release hold is meant to close by hand).
                    An issue with --incident-label closed as COMPLETED with no closer
                    isn't one either: an incident closes by hand once the environment
@@ -150,8 +152,8 @@ OPEN_TIMELINE = """
 CLOSED_REFS = """
           nodes {
             ... on CrossReferencedEvent {
-              isCrossRepository
-              source { ... on PullRequest { number state } }
+              willCloseTarget isCrossRepository
+              source { ... on PullRequest { number state title body } }
             }
           }
 """
@@ -728,6 +730,18 @@ def merged_mentions(issue: dict[str, Any]) -> list[int]:
     )
 
 
+def merged_closers(issue: dict[str, Any]) -> list[int]:
+    """Same-repo merged PRs that close the issue: GitHub's willCloseTarget, or a closing
+    keyword naming it in the PR's title or body, the link DONE_NOT_CLOSED reads too"""
+    return sorted(
+        n["source"]["number"]
+        for n in issue["refs"]["nodes"]
+        if not n.get("isCrossRepository")
+        and n.get("source", {}).get("state") == "MERGED"
+        and (n.get("willCloseTarget") or closes(n["source"], issue["number"]))
+    )
+
+
 def upstream_refs(issue: dict[str, Any], repo: tuple[str, str]) -> list[tuple[str, str, int]]:
     """Issues and pull requests that a hold comment says this one waits on"""
     return sorted(hold_refs(issue, repo))
@@ -1113,7 +1127,8 @@ def classify_closed(
         return None if closer["merged"] else ("SUSPECT_CLOSE", f"closer PR #{closer['number']} is not merged")
     message: str = closer.get("message", "")
     trailer = re.compile(rf"^\s*(?:[-*]\s*)?{KEYWORDS}:?\s+#{number}\b", re.IGNORECASE | re.MULTILINE)
-    if trailer.search(message):
+    # a commit of a merged PR that closes the issue may name it mid-line: the PR is the closer (#363)
+    if trailer.search(message) or merged_closers(issue):
         return None
     return "SUSPECT_CLOSE", f"commit {closer.get('abbreviatedOid')} names #{number} only mid-line"
 

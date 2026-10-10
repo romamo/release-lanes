@@ -340,6 +340,44 @@ def test_the_incident_label_comes_from_the_flag(ts: ModuleType) -> None:
     assert ts.classify_closed(hand_closed("incident"), "release-blocker", "outage")[0] == "SUSPECT_CLOSE"
 
 
+def commit_closed(*refs: dict[str, Any]) -> dict[str, Any]:
+    """#424 closed by a commit naming it mid-line, like romamo/treaty#424's b3e999f (#363)"""
+    closer = {"__typename": "Commit", "abbreviatedOid": "b3e999f", "message": "Recorded as D-14. Closes #424."}
+    return {
+        "number": 424,
+        "title": "A confirmation",
+        "stateReason": "COMPLETED",
+        "labels": {"pageInfo": {"hasNextPage": False}, "nodes": []},
+        "refs": forward(list(refs)),
+        "timelineItems": {"nodes": [{"closer": closer}]},
+    }
+
+
+def pr_ref(state: str, body: str, will_close: bool = False, cross: bool = False) -> dict[str, Any]:
+    return {
+        "willCloseTarget": will_close,
+        "isCrossRepository": cross,
+        "source": {"number": 425, "state": state, "title": "Record D-14", "body": body},
+    }
+
+
+def test_a_merged_pr_closing_the_issue_clears_a_mid_line_commit_closer(ts: ModuleType) -> None:
+    assert ts.classify_closed(commit_closed(pr_ref("MERGED", "Why.\n\nCloses #424")), "release-blocker") is None
+    assert ts.classify_closed(commit_closed(pr_ref("MERGED", "", will_close=True)), "release-blocker") is None
+
+
+def test_a_mid_line_commit_closer_without_a_merged_closing_pr_stays_suspect(ts: ModuleType) -> None:
+    suspect = ("SUSPECT_CLOSE", "commit b3e999f names #424 only mid-line")
+    for refs in (
+        (),
+        (pr_ref("MERGED", "Touches the same code, see #424"),),  # mentions, doesn't close
+        (pr_ref("OPEN", "Closes #424"),),  # not merged
+        (pr_ref("CLOSED", "Closes #424", will_close=True),),  # closed unmerged
+        (pr_ref("MERGED", "Closes #424", cross=True),),  # another repo's #424
+    ):
+        assert ts.classify_closed(commit_closed(*refs), "release-blocker") == suspect, refs
+
+
 def test_more_than_100_labels_is_bad_input(ts: ModuleType, capsys: pytest.CaptureFixture[str]) -> None:
     gh = FakeGitHub(ts, {("QUERY", None, None): first_page([open_issue(7, more_labels=True)])})
     with pytest.raises(SystemExit) as exc:
