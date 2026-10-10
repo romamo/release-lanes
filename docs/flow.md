@@ -76,6 +76,30 @@ The bump, registry, and install commands per ecosystem (Python, Node, Rust, Go, 
 | POSTPONED | Labelled `postponed` | Skip it |
 | REVISIT | Postponed before the newest stable release | Decide again |
 | TRIAGED | Triaged, with nothing pending: a request handed to product intake (`opportunity`) reads this too | Nothing; intake groups the handed-over requests |
+| NO_ASSIGNEE | A person's item (labelled `human`) nobody is assigned to | The session asks you who does it |
+| HANDOFF_DUE | A person's item whose holds all closed, not yet handed off | The session mentions its assignees with what to do |
+| WITH_PERSON | A person's item handed off, no done report yet | Nothing: it waits on the person |
+| VERIFY_DUE | A person's item whose assignee replied `done` | The session runs its `## Check` and closes it, or hands it back |
+| VERIFY_CLOSED | A person's item closed by hand, its `## Check` not yet run | The session runs the check, and reopens it if it fails |
+
+## A chain across repos and people
+
+Work that spans repos and people is a chain of issues, each waiting on the one before it through a `Depends on owner/repo#N` line or GitHub's own relations (blocked by, sub-issues); `chains.py link` writes both. Each repo's gate advances its own part, and a person's part is an issue labelled `human`. Building a page that a server change unhides, with a link to it from another site:
+
+| # | Item | Repo | Done by | Waits on |
+|---|---|---|---|---|
+| 1 | Build the page | `acme/app` | an agent | nothing |
+| 2 | Remove the rule that hides it | `acme/srv` | an agent | 1 |
+| 3 | Reload the web server | `acme/app` | a person (`human`, assigned) | 2 |
+| 4 | Link to the new page | `acme/site` | an agent | 3 |
+
+1. Item 1's PR merges and closes it: item 2 reads UNBLOCKED in `acme/srv`, and that repo's gate takes it up
+2. Item 2 closes: item 3 reads HANDOFF_DUE, and the session posts the hand-off, mentioning the assignee with the issue's steps and its `## Check`. GitHub's mention is the notification
+3. Item 3 reads WITH_PERSON, which needs no session, however long the person takes
+4. The person does it and replies `done`: item 3 reads VERIFY_DUE, and a session runs the `## Check`. It holds: the session closes item 3. It fails: a new hand-off says what came back
+5. Item 3 closes: item 4 reads UNBLOCKED in `acme/site`, and that gate takes it up
+
+The person acts once, on item 3. `chains.py show acme/app#3` prints the whole chain with each item's executor and state, and NO_GATE on a ready item in a repo with no gate; `github-ship-watch` reports that as CHAIN_NO_GATE, since nothing would take it up.
 
 ## Keeping it running
 
@@ -109,7 +133,7 @@ tmp/shipmill/skills/github-ship-watch/SKILL.md for <owner/repo> — watch and tr
 - A change to a flag, format, default, public API, or stored state is designed in its issue first and checked against the repo's decisions log (`DECISIONS.md` or `docs/decisions.md`); what you settle is recorded there, so it isn't asked again
 - A user's request for a new capability goes to product intake first: triage comments `Triage: **opportunity**` and intake groups it with the requests for the same outcome into one opportunity issue. Nothing is specified until you accept the opportunity (the `planned` label); declining it closes it with your reason, and later requests for the same outcome are recorded against that decline. Bugs, contract tweaks, and small additive features skip intake
 - A feature (new behaviour beyond a bug fix or a contract tweak: an accepted opportunity, a request one covers, or an issue you filed) gets a spec first: a file `docs/specs/NNN-<slug>.md` with numbered acceptance criteria, merged through its own PR before any implementer starts. Merging the spec is your approval, and the issue reads BLOCKED until then. Each criterion is proven by a test that names it (`test_sNNN_k_...` or a `proves: S-NNN-k` comment), and `specs.py coverage` fails CI when a built spec has a criterion without one
-- A merged spec splits into build issues, one PR each (`specs.py split`), linked as sub-issues of the feature issue, with `Depends on #N` lines that hold each one until its dependency closes. Every criterion belongs to exactly one build issue, which `specs.py check` verifies in CI, and a `[roadmap] wip` limit, once the config has it (#70), caps how many are in progress at once
+- A merged spec splits into build issues, one PR each (`specs.py split`), linked as sub-issues of the feature issue with `chains.py link`, with `Depends on #N` lines that hold each one until its dependency closes. Every criterion belongs to exactly one build issue, which `specs.py check` verifies in CI, and a `[roadmap] wip` limit, once the config has it (#70), caps how many are in progress at once
 - Scope is read narrowly: "triage" never merges, and "merge" never tags, unless you say so
 - A change that departs from a spec, breaks existing users, or belongs to a held PR stops and asks you, whatever the scope
 - When another session works the same repo, the skills message it first, and your word in the current session wins

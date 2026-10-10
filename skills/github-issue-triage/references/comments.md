@@ -112,6 +112,85 @@ On hold: {why, e.g. #PR goes below the spec's default of 5 rotated files}, decid
 
 Put the same line on the held PR.
 
+## A person's item
+
+An issue labelled `human` gets no triage verdict: its assignees do it ([triage-rubric.md](triage-rubric.md), A person's item). Each comment below starts with its marker as the first line where it has one, since `triage_state.py` reads the marker only there and only from the `--bot-login` or a trusted author.
+
+**HANDOFF_DUE**, the hand-off: a mention of every assignee, which holds closed, the issue's steps quoted (never rewritten), its `## Check` when it has one, and how to report. Post it once per unblock; nothing mentions the person again while the item reads WITH_PERSON.
+
+```markdown
+<!-- shipmill:handoff -->
+@{assignee} @{assignee}, it's your turn: {owner/repo#N} closed{, and owner/repo#M}.
+
+What to do, from this issue:
+
+> {the issue's steps, quoted line by line}
+
+{When the issue has one:} When it's done, this must hold:
+
+> {its ## Check, quoted}
+
+Reply `done` here when it's finished, or close the issue.
+```
+
+**VERIFY_DUE**, the check holds: say what was checked and what came back, then close the issue as completed (`gh issue close <n> --reason completed`), which unblocks whatever it held. With no `## Check`, say "Closed on @{login}'s report: this issue has no ## Check" instead.
+
+```markdown
+Checked: `{the check}` returned {what came back}, as the ## Check asks. Closing as done.
+```
+
+**VERIFY_DUE**, the check fails: a new hand-off, so the item reads WITH_PERSON again.
+
+```markdown
+<!-- shipmill:handoff -->
+@{assignee}, the check didn't pass yet: `{the check}` returned {what came back}, and it must return {what the ## Check asks}.
+
+Reply `done` here when it's fixed, or close the issue.
+```
+
+**VERIFY_CLOSED**, the check holds: the verified comment, which ends the state.
+
+```markdown
+<!-- shipmill:verified -->
+Checked after @{login} closed this: `{the check}` returned {what came back}.
+```
+
+**VERIFY_CLOSED**, the check fails: reopen it (`gh issue reopen <n>`), then post a hand-off through `--body-file`; the open issue holds everything it blocks again.
+
+```markdown
+<!-- shipmill:handoff -->
+@{assignee}, I reopened this: `{the check}` returned {what came back}, and it must return {what the ## Check asks}. What waits on this issue waits again.
+
+Reply `done` here when it's fixed, or close the issue.
+```
+
+**NO_ASSIGNEE**, and a check the session can't run: a question through the [needs-decision protocol](needs-decision.md), in its format, with its marker and the `needs-decision` label. For NO_ASSIGNEE, ask who does the item. For a check, say what the report claims and why the check can't run here, and give two options, the one the evidence supports first:
+
+```markdown
+<!-- shipmill:needs-decision -->
+@{maintainer} Decision needed: @{login} reported this done, and I can't run its check here (`{the check}`: {why, such as "the host isn't reachable from this machine"}).
+
+1. Close it on the report: what waits on it starts
+2. It isn't done: I hand it back to @{assignee}
+
+Reply here with a number or your own answer; shipmill takes this up on the tick after your reply.
+```
+
+## A parent's close
+
+A parent held only by its children reads UNBLOCKED once the last closes. Close it with:
+
+```markdown
+Every sub-issue is closed:
+
+- {owner/repo#N}: {completed | not planned}
+- {owner/repo#M}: {completed | not planned}
+
+Closing this as done.
+```
+
+A child closed as not planned doesn't stop the close; say so in its line. A feature issue first gets its spec verified ([spec-gate.md](spec-gate.md), Verify the whole spec).
+
 ## Follow-ups
 
 - A PR was replaced: "Update: #{old} was replaced by #{new}, {rebased with review fixes}. This issue closes when #{new} merges."

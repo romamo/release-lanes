@@ -1,6 +1,6 @@
 # S-017: Chains of work across items, repos and people
 
-status: approved
+status: built
 
 ## Problem
 
@@ -233,5 +233,29 @@ an action row, CHAIN_NO_GATE, naming the item and the repo.
 
 ## Verification
 
-Filled in when the spec reaches `built`: one line per criterion id, saying how it was
-checked against the default branch (beyond its tests) and the result.
+Checked on main at ef6cd76 plus #345's PR: each criterion's code read against its text, and
+the tests `specs.py coverage --spec 017` lists for it run there and passing.
+
+- S-017-1: `native_holds` and `classify_open` in `triage_state.py` read `blockedBy` as a hold with no text; tests/test_triage_native.py's S-017-1 tests pass
+- S-017-2: `classify_open` counts sub-issues as `(child)` holds and starts the note with `children K/N closed`; test_s017_2_* pass
+- S-017-3: holds are keyed case-folded, so text and native merge; the note marks `(native)`, `(child)`, `:not_planned`; test_s017_3_* pass, and the S-017-23 chain's notes show `acme/srv#2:closed` once
+- S-017-4: `held` is false for an untriaged non-human issue, so `native_holds` isn't read; test_s017_4 passes
+- S-017-5: `fetch` retries on `TEXT_QUERY` after `NativeUnavailable` with one stderr note, and `chains.py show` likewise; the S-017-5 tests in test_triage_native.py and test_chains_show.py pass
+- S-017-6: `chains.py link` writes each missing half and prints `already linked` when both exist; test_s017_6_* pass, and the S-017-23 chain links acme/site#4 twice, the second printing `already linked`
+- S-017-7: `link --child` runs `addSubIssue` and appends the line; test_s017_7 passes
+- S-017-8: a refusal (undefinedField, UNPROCESSABLE, FORBIDDEN) still writes the line and prints `text only:`; test_s017_8_* pass
+- S-017-9: `parse_ref`, `resolve`, and the self-link check exit 2 naming the reference before any write; test_s017_9 passes
+- S-017-10: a `human` issue counts as triaged and reads HANDOFF_DUE once every hold closed, BLOCKED before; test_s017_10_* pass, and the S-017-23 chain's acme/app#3 reads BLOCKED, then HANDOFF_DUE when acme/srv#2 closes
+- S-017-11: `person_state` dates hand-offs against the newest hold's close and reads WITH_PERSON, not in `ACTION`; test_s017_11_* pass, and the S-017-23 chain stays WITH_PERSON with every repo exiting 0 over three ticks
+- S-017-12: `done_report` accepts an assignee or a trusted author only; test_s017_12_* pass, and the S-017-23 chain's done report by a non-collaborator assignee reads VERIFY_DUE
+- S-017-13: `by_trusted` gates both markers; test_s017_13_* pass
+- S-017-14: NO_ASSIGNEE is read before any hold; test_s017_14 passes
+- S-017-15: `classify_closed` sends a `human` close to `verify_closed`, never SUSPECT_CLOSE; test_s017_15_* pass, and the S-017-23 chain's session close reads neither
+- S-017-16: `ACTION` holds the four action states and `wip_room` skips `human` issues; test_s017_16_* pass
+- S-017-17: `watch_state.py`'s `TRIAGE_ACTION` holds the four and ISSUES_OPEN lists WITH_PERSON with its assignees; test_s017_17_* pass
+- S-017-18: `walk` follows holds up and `blocking`/`parent` down, each once; test_s017_18_* pass, and the S-017-23 chain shows all four items from its first and from its third
+- S-017-19: `show_rows` reads each READY item's repo config once and marks NO_GATE, exit 1; test_s017_19_* pass
+- S-017-20: `watch_state.py`'s `chain_rows` runs `chains.py show --trusted-only` and reports CHAIN_NO_GATE; the S-017-20 tests pass
+- S-017-21: `setup_state.py` wants `human` wherever it wants `needs-decision`, and shipmill-setup's SKILL.md creates both; test_s017_21 passes
+- S-017-22: github-issue-triage's SKILL.md has a Chains section; triage-rubric.md has Links between issues and A person's item with each state and its action; comments.md has the hand-off, verification, needs-decision, and parent's-close comments; spec-gate.md links build issues with `chains.py link`; docs/flow.md has A chain across repos and people; test_s017_22 passes
+- S-017-23: the real `triage_state.py` (through a stand-in gh) and `chains.py` (through its runner) over one scripted forge of three repos drive the four-item chain to its end, the person posting one comment; test_s017_23 passes
