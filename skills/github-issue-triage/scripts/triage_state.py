@@ -26,8 +26,14 @@ For each open issue:
                    paragraph doesn't hold on a link in another (#309). Or,
                    once triaged, its body has a "Depends on owner/repo#N" line (or
                    "#N" anywhere on that line, the same repo: a build issue split
-                   from a spec) naming an issue still open; an untriaged issue
-                   reads NEW whatever its body depends on
+                   from a spec) naming an issue still open. Or, once triaged, GitHub
+                   records an open issue it is blocked by (blockedBy) or an open
+                   sub-issue, in any repo: these and the text holds are one set,
+                   so an issue named both ways is listed once. The note marks one
+                   only GitHub records with (native) and a sub-issue with (child),
+                   such as o/r#12:open(child), and a parent's note starts with
+                   "children K/N closed". An untriaged issue reads NEW whatever its
+                   body depends on and whatever GitHub records holds it
   UNFILLED         a "Depends on" line of its body still names a placeholder such
                    as #{B1} from specs.py split: put in the dependency's number
   SPEC_REFUSED     a pull request it waits on (such as its spec PR) closed without
@@ -81,10 +87,14 @@ ready to start (NEEDS_PR or UNBLOCKED), oldest first; with --json, as one JSON o
 Exit 0 when nothing needs action, 1 when any issue is NEW, NEEDS_PR, UNBLOCKED, UNFILLED,
 SPEC_REFUSED, REVISIT, DONE_NOT_CLOSED, DECIDED, or SUSPECT_CLOSE (never for NEEDS_DECISION
 or UNTRUSTED), 2 on bad input (an issue with more than 100
-labels) or a gh failure. It pages past 100 open issues and an issue's 50 comments or 50
-cross-references, and back through tags to the newest stable one, with one query when
-nothing is capped. A page GitHub rejects for its resource limits is asked again at half
-the size, down to 10 items; one rejected at 10 fails with one error line. Needs the gh
+labels) or a gh failure. It pages past 100 open issues and an issue's 50 comments, 50
+cross-references, 50 blocking issues, or 50 sub-issues, and back through tags to the
+newest stable one, with one query when nothing is capped. A page GitHub rejects for its
+resource limits is asked again at half the size, down to 10 items; one rejected at 10
+fails with one error line. When GitHub refuses blockedBy or subIssues (an error naming
+one, such as a GitHub Enterprise Server without issue dependencies), it classifies on
+the text holds alone and prints one "note: native relations unavailable: <first error
+line>" line to stderr; any other gh error still exits 2. Needs the gh
 CLI, authenticated. Python 3.10+, standard library only.
 """
 
@@ -120,33 +130,87 @@ CLOSED_REFS = """
 AUTHOR = "author { __typename login } authorAssociation"
 COMMENT = "body createdAt " + AUTHOR
 TAG_NODES = "nodes { name target { ... on Tag { tagger { date } } ... on Commit { committedDate } } }"
-OPEN_ISSUE = (
-    """
+# The forge's own holds on an issue (spec 017): the issues it is blocked by, and its
+# sub-issues, each with its repository, so a relation across repos holds as well
+NATIVE_FIELDS = ("blockedBy", "subIssues")
+NATIVE_NODES = "pageInfo { hasNextPage endCursor } nodes { number state stateReason repository { nameWithOwner } }"
+NATIVE = "".join(f"\n        {field}(first: 50) {{ {NATIVE_NODES} }}" for field in NATIVE_FIELDS)
+
+
+def open_issue_fields(native: bool) -> str:
+    """An open issue's fields; without ``native``, the text holds' only, for a forge or
+    token that can't read blockedBy or subIssues"""
+    return (
+        """
       nodes {
         number title body """
-    + AUTHOR
-    + """
+        + AUTHOR
+        + """
         labels(first: 100) { pageInfo { hasNextPage } nodes { name } }
         comments(last: 50) { nodes { """
-    + COMMENT
-    + """ } }
+        + COMMENT
+        + """ } }
         timelineItems(itemTypes: [CROSS_REFERENCED_EVENT, CONNECTED_EVENT], first: 50) {
           pageInfo { hasNextPage endCursor }"""
-    + OPEN_TIMELINE
-    + """
-        }
+        + OPEN_TIMELINE
+        + """
+        }"""
+        + (NATIVE if native else "")
+        + """
       }
 """
-)
+    )
 
-QUERY = (
-    """
+
+def first_query(native: bool) -> str:
+    return (
+        """
 query($owner: String!, $name: String!, $size: Int!, $closed: Int!) {
   repository(owner: $owner, name: $name) {
     open: issues(states: OPEN, first: $size, orderBy: {field: CREATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }"""
-    + OPEN_ISSUE
-    + """
+        + open_issue_fields(native)
+        + CLOSED_AND_TAGS
+    )
+
+
+def open_page(native: bool) -> str:
+    return (
+        """
+query($owner: String!, $name: String!, $size: Int!, $cursor: String!) {
+  repository(owner: $owner, name: $name) {
+    open: issues(states: OPEN, first: $size, after: $cursor, orderBy: {field: CREATED_AT, direction: DESC}) {
+      pageInfo { hasNextPage endCursor }"""
+        + open_issue_fields(native)
+        + """
+    }
+  }
+}
+"""
+    )
+
+
+def native_page(field: str) -> str:
+    """The next page of an issue's blockedBy or subIssues"""
+    return (
+        """
+query($owner: String!, $name: String!, $size: Int!, $number: Int!, $cursor: String!) {
+  repository(owner: $owner, name: $name) {
+    issue(number: $number) {
+      """
+        + field
+        + "(first: $size, after: $cursor) { "
+        + NATIVE_NODES
+        + """ }
+    }
+  }
+}
+"""
+    )
+
+
+CLOSED_AND_TAGS = (
+    """
     }
     tags: refs(refPrefix: "refs/tags/", last: 50, orderBy: {field: TAG_COMMIT_DATE, direction: ASC}) {
       pageInfo { hasPreviousPage startCursor }
@@ -180,23 +244,15 @@ query($owner: String!, $name: String!, $size: Int!, $closed: Int!) {
 }
 """
 )
+QUERY = first_query(native=True)
+TEXT_QUERY = first_query(native=False)  # once the forge refused blockedBy or subIssues
 
 # Follow-up queries, each run only for a connection that an earlier page reports as capped
 # (comments: one that filled its page). Every query takes its page size as $size, which
 # halves when GitHub rejects the page for its resource limits (see SIZES and sized)
-OPEN_PAGE = (
-    """
-query($owner: String!, $name: String!, $size: Int!, $cursor: String!) {
-  repository(owner: $owner, name: $name) {
-    open: issues(states: OPEN, first: $size, after: $cursor, orderBy: {field: CREATED_AT, direction: DESC}) {
-      pageInfo { hasNextPage endCursor }"""
-    + OPEN_ISSUE
-    + """
-    }
-  }
-}
-"""
-)
+OPEN_PAGE = open_page(native=True)
+TEXT_OPEN_PAGE = open_page(native=False)
+NATIVE_PAGES = {field: native_page(field) for field in NATIVE_FIELDS}
 COMMENTS_PAGE = (
     """
 query($owner: String!, $name: String!, $size: Int!, $number: Int!, $cursor: String) {
@@ -260,7 +316,17 @@ COMMENTS_CAP = 50  # comments(last: 50) in OPEN_ISSUE
 # Each query's first page size, and what a page holds, for the error line. Older open
 # issues carry more history: a page of 100 tripped GitHub's resource limits on
 # astral-sh/uv, so later open-issue pages start at 50
-SIZES = {QUERY: 100, OPEN_PAGE: 50, COMMENTS_PAGE: 100, TIMELINE_PAGE: 100, REFS_PAGE: 100, TAGS_PAGE: 100}
+SIZES = {
+    QUERY: 100,
+    TEXT_QUERY: 100,
+    OPEN_PAGE: 50,
+    TEXT_OPEN_PAGE: 50,
+    COMMENTS_PAGE: 100,
+    TIMELINE_PAGE: 100,
+    REFS_PAGE: 100,
+    TAGS_PAGE: 100,
+    **{query: 100 for query in NATIVE_PAGES.values()},
+}
 # A rejected page halves down to this floor; one that fails at the floor ends the run.
 # At 10 open issues a page asks for a tenth of the first query, so a page still rejected
 # there holds an issue too heavy for any size, and pypa/pip's 957 issues would already
@@ -282,6 +348,38 @@ def resource_limited(response: dict[str, Any]) -> bool:
     smaller page may succeed; any other error is real"""
     errors = response.get("errors")
     return bool(errors) and all(isinstance(e, dict) and e.get("type") == RESOURCE_LIMITS for e in errors)
+
+
+class NativeUnavailable(Exception):
+    """The forge or token can't read blockedBy or subIssues: classify on text holds alone"""
+
+
+NATIVE_NAME = re.compile(r"\b(?:" + "|".join(NATIVE_FIELDS) + r")\b")
+
+
+def names_native(error: object) -> bool:
+    """Whether a GraphQL error is about blockedBy or subIssues: its field, its path, or its
+    message names one ("Field 'blockedBy' doesn't exist on type 'Issue'")"""
+    if not isinstance(error, dict):
+        return False
+    extensions = error.get("extensions")
+    if isinstance(extensions, dict) and extensions.get("fieldName") in NATIVE_FIELDS:
+        return True
+    path = error.get("path")
+    if isinstance(path, list) and any(part in NATIVE_FIELDS for part in path):
+        return True
+    return NATIVE_NAME.search(str(error.get("message", ""))) is not None
+
+
+def native_refused(response: dict[str, Any]) -> str | None:
+    """The first error's first line when every error names blockedBy or subIssues (a
+    GitHub Enterprise Server without issue dependencies, a token that can't read them);
+    None for any other response, whose errors are real"""
+    errors = response.get("errors")
+    if not errors or not isinstance(errors, list) or not all(names_native(e) for e in errors):
+        return None
+    lines = str(errors[0].get("message", "")).strip().splitlines()
+    return lines[0] if lines else json.dumps(errors[0])
 
 
 INCIDENT_LABEL = "incident"  # the default of [operate] incident_label
@@ -337,12 +435,14 @@ def gh_graphql(query: str, variables: Variables) -> dict[str, Any]:
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         # gh exits 1 on a resource limit, with the response on stdout and its message once
-        # per rejected node on stderr: hand the response back to be retried smaller
+        # per rejected node on stderr: hand the response back to be retried smaller. It
+        # exits 1 too on a schema without blockedBy or subIssues: hand that back to be
+        # asked again without them
         try:
             rejected = json.loads(proc.stdout)
         except ValueError:
             rejected = None
-        if isinstance(rejected, dict) and resource_limited(rejected):
+        if isinstance(rejected, dict) and (resource_limited(rejected) or native_refused(rejected) is not None):
             return rejected
         sys.stderr.write(proc.stderr)
         raise SystemExit(2)
@@ -359,6 +459,9 @@ def repository(run: Runner, query: str, variables: Variables) -> dict[str, Any]:
     response = run(query, variables)
     if resource_limited(response):
         raise ResourceLimitsExceeded
+    refused = native_refused(response)
+    if refused is not None:
+        raise NativeUnavailable(refused)
     if response.get("errors"):
         fail(f"GitHub GraphQL errors: {json.dumps(response['errors'])}")
     data = (response.get("data") or {}).get("repository")
@@ -400,7 +503,13 @@ def issue_page(
     variables: Variables = {**base, "number": number}
     if cursor is not None:
         variables["cursor"] = cursor
-    what = {"comments": "comments", "timelineItems": "cross-references", "refs": "cross-references"}[field]
+    what = {
+        "comments": "comments",
+        "timelineItems": "cross-references",
+        "refs": "cross-references",
+        "blockedBy": "blocking issues",
+        "subIssues": "sub-issues",
+    }[field]
     issue = sized(run, query, variables, sizes, f"the {what} of #{number}").get("issue")
     if issue is None:
         fail(f"issue #{number} vanished while paging its {field}")
@@ -430,39 +539,55 @@ def complete_comments(run: Runner, base: Variables, sizes: Sizes, issue: dict[st
 
 
 def complete_refs(run: Runner, query: str, base: Variables, sizes: Sizes, issue: dict[str, Any], field: str) -> None:
-    """Page an issue's cross-references forwards, oldest first"""
+    """Page an issue's cross-references (or blockedBy, or subIssues) forwards, oldest first"""
     items = issue[field]
     seen: set[str] = set()
     while items["pageInfo"]["hasNextPage"]:
-        cursor = advance(items["pageInfo"]["endCursor"], seen, f"cross-references on #{issue['number']}")
+        what = field if field in NATIVE_FIELDS else "cross-references"
+        cursor = advance(items["pageInfo"]["endCursor"], seen, f"{what} on #{issue['number']}")
         page = issue_page(run, query, base, sizes, issue["number"], field, cursor)
         items["nodes"] = items["nodes"] + page["nodes"]
         items["pageInfo"] = page["pageInfo"]
 
 
 def fetch(repo: str, closed: int, stable_pattern: re.Pattern[str] = STABLE, run: Runner = gh_graphql) -> dict[str, Any]:
-    """One query, plus follow-up pages only for the connections it reports as capped"""
+    """One query, plus follow-up pages only for the connections it reports as capped. When
+    the forge refuses blockedBy or subIssues, one stderr note, then the text holds alone"""
     owner, _, name = repo.partition("/")
     if not owner or not name or "/" in name:
         fail(f"repo must be owner/name, got {repo!r}")
+    try:
+        return fetch_pages(owner, name, closed, stable_pattern, run, native=True)
+    except NativeUnavailable as refused:
+        sys.stderr.write(f"note: native relations unavailable: {refused}\n")
+    return fetch_pages(owner, name, closed, stable_pattern, run, native=False)
+
+
+def fetch_pages(
+    owner: str, name: str, closed: int, stable_pattern: re.Pattern[str], run: Runner, native: bool
+) -> dict[str, Any]:
     base: Variables = {"owner": owner, "name": name}
     sizes = dict(SIZES)
-    data = sized(run, QUERY, {**base, "closed": closed}, sizes, "the first query (open issues, tags, recent closes)")
+    first, later = (QUERY, OPEN_PAGE) if native else (TEXT_QUERY, TEXT_OPEN_PAGE)
+    data = sized(run, first, {**base, "closed": closed}, sizes, "the first query (open issues, tags, recent closes)")
 
     issues = data["open"]
     # A first query that had to shrink says how heavy this repo's issues are
-    sizes[OPEN_PAGE] = min(sizes[OPEN_PAGE], sizes[QUERY])
+    sizes[later] = min(sizes[later], sizes[first])
     seen: set[str] = set()
     while issues["pageInfo"]["hasNextPage"]:
         cursor = advance(issues["pageInfo"]["endCursor"], seen, "open issues")
         what = f"the open issues after the first {len(issues['nodes'])}"
-        page = sized(run, OPEN_PAGE, {**base, "cursor": cursor}, sizes, what)["open"]
+        page = sized(run, later, {**base, "cursor": cursor}, sizes, what)["open"]
         issues["nodes"] = issues["nodes"] + page["nodes"]
         issues["pageInfo"] = page["pageInfo"]
     for issue in issues["nodes"]:
         check_labels(issue)
         complete_comments(run, base, sizes, issue)
         complete_refs(run, TIMELINE_PAGE, base, sizes, issue, "timelineItems")
+        for field, query in NATIVE_PAGES.items():
+            if issue.get(field) is not None:  # absent when the query didn't ask for it
+                complete_refs(run, query, base, sizes, issue, field)
     for issue in data["closed"]["nodes"]:
         check_labels(issue)
         complete_refs(run, REFS_PAGE, base, sizes, issue, "refs")
@@ -585,6 +710,28 @@ def ref_state(node: dict[str, Any]) -> str:
     return state
 
 
+Ref = tuple[str, str, int]
+
+
+def native_holds(issue: dict[str, Any]) -> dict[Ref, tuple[str, str]]:
+    """The issues the forge says hold this one, each with its kind ("native" for one it
+    is blocked by, "child" for a sub-issue, which wins when it is both) and its state as
+    ref_state reads it. An issue fetched without them (the forge refused them) has none"""
+    holds: dict[Ref, tuple[str, str]] = {}
+    for field, kind in (("blockedBy", "native"), ("subIssues", "child")):
+        for node in (issue.get(field) or {}).get("nodes", []):
+            owner, _, name = node["repository"]["nameWithOwner"].partition("/")
+            ref = (owner, name, int(node["number"]))
+            if kind == "child" or ref not in holds:
+                holds[ref] = (kind, ref_state({**node, "__typename": "Issue"}))
+    return holds
+
+
+def fold(ref: Ref) -> Ref:
+    """GitHub owner and repo names ignore case: O/R#3 and o/r#3 are one issue"""
+    return (ref[0].lower(), ref[1].lower(), ref[2])
+
+
 def timestamp(text: str) -> dt.datetime:
     """A GitHub ISO 8601 time; tagger dates carry an offset, comment dates a "Z", which
     fromisoformat rejects before Python 3.11"""
@@ -628,14 +775,36 @@ def classify_open(
     if merged:
         return "DONE_NOT_CLOSED", note
     # The body's dependencies are older than every comment; a comment naming one too is newer.
-    # They hold a triaged issue only: an untriaged one with "Depends on #48" still reads NEW
-    body = dependency_refs(issue, repo) if triage else []
+    # They hold a triaged issue only, as the forge's own relations do (spec 017): an
+    # untriaged one with "Depends on #48", a blockedBy issue, or a sub-issue still reads NEW
+    held = bool(triage)
+    body = dependency_refs(issue, repo) if held else []
     named = {**dict.fromkeys(body, -1), **hold_refs(issue, repo)}
+    # The forge's relations join the text holds as one set: an issue named both ways counts
+    # once, under the text's spelling. The note marks one only the forge records (native)
+    # and a sub-issue (child), and a parent's starts with how many of its children closed
+    texts = {fold(r): r for r in named}
+    native = native_holds(issue) if held else {}
+    states = {**states}
+    marks: dict[Ref, str] = {}
+    children: list[str] = []
+    for ref, (kind, state) in native.items():
+        key = texts.get(fold(ref), ref)
+        named.setdefault(key, -1)
+        states[key] = state
+        if kind == "child":
+            marks[key] = "(child)"
+            children.append(state)
+        elif fold(ref) not in texts:
+            marks[key] = "(native)"
     comments = issue["comments"]["nodes"]
     verdict = max((i for i, c in enumerate(comments) if c["body"].lstrip().startswith(marker)), default=-1)
     # A refused PR named before the newest triage comment was decided again: it holds nothing
     waits = sorted(r for r, i in named.items() if states.get(r) != "CLOSED_UNMERGED" or i >= verdict)
-    shown = " ".join(f"{o}/{n}#{k}:{states.get((o, n, k), '?').lower()}" for o, n, k in waits)
+    shown = " ".join(f"{o}/{n}#{k}:{states.get((o, n, k), '?').lower()}{marks.get((o, n, k), '')}" for o, n, k in waits)
+    if children:
+        closed = sum(1 for s in children if s in ("CLOSED", "NOT_PLANNED"))
+        shown = f"children {closed}/{len(children)} closed {shown}"
     unfilled = unfilled_dependencies(issue)
     if unfilled:
         # Which issue it waits on is unknown, so neither BLOCKED nor ready: someone fills it in
@@ -816,7 +985,9 @@ def main() -> int:
     rows: list[dict[str, Any]] = []
     refs = {r for issue in data["open"]["nodes"] for r in upstream_refs(issue, (owner, name))}
     refs |= {r for issue in data["open"]["nodes"] for r in dependency_refs(issue, (owner, name))}
-    states = upstream_states(refs)
+    # The forge's relations came with their states: ask only for the others
+    native = {r: s for issue in data["open"]["nodes"] for r, (_, s) in native_holds(issue).items()}
+    states = {**upstream_states(refs - set(native)), **native}
     stable = latest_stable(data["tags"]["nodes"], stable_pattern)
     for issue in data["open"]["nodes"]:
         state, note = gated(issue, args.bot_login, args.trusted_only) or classify_open(
