@@ -147,7 +147,8 @@ passes the extra `--allowedTools` list after its own, before the `--` that ends 
 **Trust (D-16).** An unattended session reads issue text with the whole workspace in
 reach, so a headless gate calls `watch_state.py` with `--trusted-only`. It works only on
 issues opened by an OWNER, MEMBER, or COLLABORATOR, or by the App's bot (`--bot-login`),
-and on pull requests whose head branch is in the repo, not a fork. Every other open item
+on the config upgrade issues the release workflow opens as `github-actions[bot]` (both
+the `shipmill-upgrade` label and its first-line marker, D-30), and on pull requests whose head branch is in the repo, not a fork. Every other open item
 goes to an `UNTRUSTED` row, `#N` only and `agent: false`: it starts no session and stays
 for an interactive one, and github-ship-watch reports it. An outsider's comment on a
 trusted issue still reaches the session, as data under the prompt's untrusted-text line.

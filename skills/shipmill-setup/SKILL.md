@@ -559,8 +559,9 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
      `--allow-dangerously-skip-permissions`, `--bg`, `--background`, or `--session-id`
      with exit 2
    - **The trust filter** (D-16): headless works only on issues opened by an OWNER,
-     MEMBER, or COLLABORATOR or by the App's bot, and on pull requests whose branch is in
-     the repo. The rest read UNTRUSTED (`watch_state.py --trusted-only`), start no session,
+     MEMBER, or COLLABORATOR or by the App's bot, on the release workflow's config upgrade
+     issues (`github-actions[bot]` with the `shipmill-upgrade` label and its first-line
+     marker, D-30), and on pull requests whose branch is in the repo. The rest read UNTRUSTED (`watch_state.py --trusted-only`), start no session,
      and wait for an interactive one; github-ship-watch reports them
    - **The label:** `setup_state.py --fix` creates `needs-decision` whenever the config
      has an `[agents]` section, interactive or headless (D-21), and `human` with it (a

@@ -58,10 +58,11 @@ with the `<!-- shipmill-upgrade: <id> <version> -->` marker on its first line):
                   issue labelled shipmill-upgrade-later ("not now") or with an open pull request
                   closing it. One labelled needs-decision whose question has no trusted reply
                   is in NEEDS_DECISION instead. Upgrade issues are never in ISSUES or
-                  ISSUES_OPEN; with --trusted-only, one triage_state.py reads as UNTRUSTED
-                  (opened by neither an OWNER, MEMBER, or COLLABORATOR nor the --bot-login,
-                  such as by the release workflow's github-actions[bot]) stays in UNTRUSTED
-                  and nothing else (D-16)
+                  ISSUES_OPEN. With --trusted-only, one the release workflow opened as the
+                  Bot github-actions[bot], with both the label and the marker, reads as above
+                  (D-30); one triage_state.py reads as UNTRUSTED (opened by neither an OWNER,
+                  MEMBER, or COLLABORATOR, the --bot-login, nor so by the release workflow)
+                  stays in UNTRUSTED and nothing else (D-16)
 
 Operations (only when the config declares environments; read from the
 deployments and issues shipmill operate writes):
@@ -364,10 +365,10 @@ GH_CLIENT_ERROR = re.compile(r"\bHTTP 4\d\d\b")  # auth, not found, a bad query:
 GH_FIELDS = ("-f", "-F", "--field", "--raw-field", "--input")  # make gh api POST unless -X says otherwise
 GH_PAUSE = 5.0  # seconds before the one rerun
 GH_RERUN = "transient GitHub API error: rerun"  # ends the error line when the rerun failed too
-UPGRADE_LABEL = "shipmill-upgrade"  # shipmill's github.UPGRADE_LABEL: a config upgrade's issue (spec 014)
+# a config upgrade's issue (spec 014): triage_state.py's label and first-line marker, one
+# definition for the watch and for the trust filter that lets the release workflow's in (D-30)
+UPGRADE_LABEL: str = TRIAGE.UPGRADE_LABEL
 UPGRADE_LATER_LABEL = "shipmill-upgrade-later"  # shipmill's github.UPGRADE_LATER_LABEL: answered "not now"
-# an upgrade issue's first line, shipmill's upgrades.marker: the upgrade's id and its version
-UPGRADE_MARKER = re.compile(r"^<!-- shipmill-upgrade: ([a-z][a-z0-9]*(?:-[a-z0-9]+)*) (\S+) -->\s*$")
 UPGRADE_BRANCH = "shipmill/upgrade-"  # an upgrade pull request's head: this and the upgrade's id
 OPERATE_USES = re.compile(
     r"^\s*(?:-\s*)?uses:\s*[\"']?(?:[\w.-]+/[\w.-]+/\.github/workflows/operate\.ya?ml@|\./\.github/workflows/operate\.ya?ml)",
@@ -1475,8 +1476,8 @@ class Upgrades:
 
 def upgrade_id(issue: Issue) -> str | None:
     """The upgrade an issue proposes, from the marker on its body's first line; None without one"""
-    found = UPGRADE_MARKER.match(issue.body.replace("\r\n", "\n").split("\n", 1)[0])
-    return found.group(1) if found else None
+    name: str | None = TRIAGE.upgrade_id(issue.body)
+    return name
 
 
 def upgrade_rows(
@@ -1560,8 +1561,9 @@ def intake(
     are the shipmill-upgrade issues: their UPGRADE_PENDING rows come first, none is in the
     issue rows, and the ones waiting on a reply join NEEDS_DECISION. One triage_state.py
     reads as UNTRUSTED (with trusted_only, an author who is neither trusted nor the
-    --bot-login, such as the release workflow's github-actions[bot]) stays UNTRUSTED and
-    nothing else: an unattended session never starts for it (D-16)"""
+    --bot-login; the release workflow's github-actions[bot] upgrade issue, label and marker
+    both, is trusted, D-30) stays UNTRUSTED and nothing else: an unattended session never
+    starts for it (D-16)"""
     owned = upgrades.owned if upgrades is not None else frozenset()
     counts: dict[str, list[int]] = {}
     waits_on: dict[int, list[str]] = {}  # a WITH_PERSON issue's assignees (spec 017)

@@ -237,6 +237,73 @@ def test_s005_10_a_deleted_author_is_untrusted(ts: ModuleType) -> None:
     assert state(ts, item, trusted_only=True) == "UNTRUSTED"
 
 
+# -- #314, D-30: the release workflow's config upgrade issue is trusted
+
+UPGRADE_LINE = "<!-- shipmill-upgrade: changelog-fragments 0.37.0 -->"
+WORKFLOW = "github-actions[bot]"
+
+
+def upgrade(
+    body: str = f"{UPGRADE_LINE}\nshipmill 0.37.0 offers ...\n", labels: tuple[str, ...] = ("shipmill-upgrade",)
+) -> dict[str, Any]:
+    """An upgrade issue as the release workflow opens it: GraphQL gives its author as the
+    Bot github-actions, with authorAssociation NONE"""
+    item = issue(labels=labels, by=WORKFLOW, association="NONE")
+    item["body"] = body
+    return item
+
+
+def test_s014_10_d30_the_workflows_upgrade_issue_with_label_and_marker_is_trusted(ts: ModuleType) -> None:
+    item = upgrade()
+    assert item["author"] == {"__typename": "Bot", "login": "github-actions"}
+    assert ts.workflow_upgrade(item)
+    assert state(ts, item, trusted_only=True) == "NEW"
+    assert state(ts, item, bot_login=BOT, trusted_only=True) == "NEW"
+    assert state(ts, upgrade(body=f"{UPGRADE_LINE}\r\nbody"), trusted_only=True) == "NEW"
+    # it still reads the needs-decision rule: the trust filter only lets it in
+    asked = upgrade(labels=("shipmill-upgrade", "needs-decision"))
+    asked["comments"]["nodes"] = [comment(QUESTION, by=BOT, association="NONE")]
+    assert state(ts, asked, bot_login=BOT, trusted_only=True) == "NEEDS_DECISION"
+
+
+@pytest.mark.parametrize(
+    ("body", "labels"),
+    [
+        ("shipmill 0.37.0 offers ...\n", ("shipmill-upgrade",)),  # the label only
+        (f"{UPGRADE_LINE}\n", ()),  # the marker only
+        (f"{UPGRADE_LINE}\n", ("shipmill-upgrade-later",)),  # a look-alike label alone
+        (f"Upgrade\n{UPGRADE_LINE}\n", ("shipmill-upgrade",)),  # the marker on line 2
+        (f"\n{UPGRADE_LINE}\n", ("shipmill-upgrade",)),  # past a blank first line
+        (f"> {UPGRADE_LINE}\n", ("shipmill-upgrade",)),  # quoted
+        ("<!-- shipmill-upgrade: Bad_Id 0.37.0 -->\n", ("shipmill-upgrade",)),  # no valid id
+    ],
+    ids=["label-only", "marker-only", "look-alike-label", "marker-line-2", "blank-first", "quoted", "bad-id"],
+)
+def test_d30_any_other_workflow_issue_stays_untrusted(ts: ModuleType, body: str, labels: tuple[str, ...]) -> None:
+    item = upgrade(body=body, labels=labels)
+    assert not ts.workflow_upgrade(item)
+    assert state(ts, item, trusted_only=True) == "UNTRUSTED"
+    assert ts.gated(item, BOT, True) == ("UNTRUSTED", f"opened by @{WORKFLOW} (none)")
+
+
+@pytest.mark.parametrize(
+    "author",
+    [
+        {"__typename": "User", "login": "github-actions"},  # a User named like the Bot
+        {"__typename": "User", "login": "github-actions[bot]"},
+        {"__typename": "Bot", "login": "github-actions-x"},  # another Bot
+        {"__typename": "Bot", "login": "shipmill-o"},
+        None,  # a deleted author
+    ],
+    ids=["user", "user-bot-suffix", "other-bot", "app-bot", "ghost"],
+)
+def test_d30_only_the_github_actions_bot_counts(ts: ModuleType, author: dict[str, str] | None) -> None:
+    item = upgrade()
+    item["author"] = author
+    assert not ts.workflow_upgrade(item)
+    assert state(ts, item, trusted_only=True) == "UNTRUSTED"
+
+
 # -- watch_state.py's intake rows
 
 
