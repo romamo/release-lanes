@@ -19,11 +19,13 @@ link  writes a link in both forms triage_state.py reads:
       When the forge refuses the native relation (no issue dependencies or sub-issues
       there, a cross-owner link it doesn't allow, a child that has another parent), the
       line is still written and it prints "text only: <the error's first line>": the line
-      holds the issue by itself.
+      holds the issue by itself. A refusal is a schema without the field or mutation, or
+      an UNPROCESSABLE or FORBIDDEN error; any other error fails the run.
 
 Exit 0 when the link is in place (or text only), 2 on a malformed reference, an issue
 that doesn't exist or is a pull request, an issue linked to itself (each named, before
-any write), or any other gh failure, including a rate limit. In a gate session gh already
+any write), or any other gh failure, including a rate limit, a timeout, or an internal
+error. In a gate session gh already
 writes as the App (D-14). Needs the gh CLI, authenticated. Python 3.10+, standard library
 only.
 """
@@ -50,6 +52,12 @@ Runner = Callable[[str, Variables], dict[str, Any]]
 REFERENCE = re.compile(r"^(?P<owner>[\w.-]+)/(?P<name>[\w.-]+)#(?P<num>[1-9]\d*)$")
 # GraphQL errors that are no refusal of the relation: the run fails instead
 TRANSIENT = frozenset({"RATE_LIMITED"})
+# The forge refusing the relation: a schema without the field or mutation (GitHub
+# Enterprise Server without issue dependencies or sub-issues), or the forge declining
+# this link (cross-owner, a child with another parent, a token not allowed to). Any other
+# error (a timeout, an internal error, a node not found) fails the run instead
+REFUSAL_TYPES = frozenset({"UNPROCESSABLE", "FORBIDDEN"})
+UNDEFINED = re.compile(r"doesn't exist on type|isn't a defined input type")
 PAGE = 100
 
 RESOLVE = """
@@ -175,12 +183,25 @@ def resolve(run: Runner, ref: Ref) -> Issue:
     return Issue(ref, str(node["id"]), str(node["body"]))
 
 
+def refusal(error: object) -> bool:
+    """Whether a GraphQL error is the forge refusing the relation (see REFUSAL_TYPES)"""
+    if not isinstance(error, dict):
+        return False
+    extensions = error.get("extensions")
+    if isinstance(extensions, dict) and extensions.get("code") == "undefinedField":
+        return True
+    return error.get("type") in REFUSAL_TYPES or UNDEFINED.search(str(error.get("message", ""))) is not None
+
+
 def native(run: Runner, query: str, variables: Variables) -> dict[str, Any]:
-    """The node a relation query or mutation returns; Refused when the forge refuses it"""
+    """The node a relation query or mutation returns; Refused when the forge refuses it,
+    exit 2 on any other error"""
     response = run(query, variables)
     errors = errors_of(response)
-    if errors:
+    if errors and all(refusal(e) for e in errors):
         raise Refused(first_line(errors))
+    if errors:
+        fail(f"gh: {first_line(errors)}")
     data: dict[str, Any] = response.get("data") or {}
     return data
 

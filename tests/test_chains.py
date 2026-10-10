@@ -42,6 +42,8 @@ class Forge:
         self.refuse_read: str | None = None  # the forge has no relation fields
         self.refuse_write: str | None = None  # the forge refuses the mutation
         self.rate_limited = False
+        # ("read" or "write", the error) any relation query or mutation gets
+        self.relation_error: tuple[str, dict[str, Any]] | None = None
         self.page = 100
         self.calls: list[tuple[str, dict[str, Any]]] = []
 
@@ -79,8 +81,14 @@ class Forge:
             issue = next(i for i in self.issues.values() if i["id"] == variables["id"])
             issue["body"] = variables["body"]
             return {"data": {"updateIssue": {"issue": {"id": variables["id"]}}}}
-        if query in (ch.BLOCKED_BY, ch.PARENT) and self.refuse_read:
-            return {"errors": [error(self.refuse_read)]}
+        reads, writes = (ch.BLOCKED_BY, ch.PARENT), (ch.ADD_BLOCKED_BY, ch.ADD_SUB_ISSUE)
+        if self.relation_error and query in {"read": reads, "write": writes}[self.relation_error[0]]:
+            return {"data": None, "errors": [self.relation_error[1]]}
+        if query in reads and self.refuse_read:
+            # GitHub's shape for a field its schema doesn't have
+            field = "blockedBy" if query == ch.BLOCKED_BY else "parent"
+            undefined = {"code": "undefinedField", "typeName": "Issue", "fieldName": field}
+            return {"errors": [{**error(self.refuse_read), "extensions": undefined}]}
         if query == ch.BLOCKED_BY:
             ids = sorted(b for a, b in self.blocked if a == variables["id"])
             start = int(variables.get("cursor") or 0)
@@ -276,6 +284,40 @@ def test_a_rate_limit_is_a_gh_failure_not_a_refusal(
     assert exit_.value.code == 2
     assert "rate limit" in capsys.readouterr().err
     assert forge.writes() == []
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        error("Something went wrong while executing your query. This may be the result of a timeout"),
+        error("Could not resolve to a node with the global id of 'I_o/r#5'", "NOT_FOUND"),
+        error("Internal server error", "INTERNAL"),
+    ],
+)
+@pytest.mark.parametrize("on", ["read", "write"])
+def test_a_transient_error_on_the_relation_is_a_gh_failure_not_a_refusal(
+    ch: ModuleType, forge: Forge, capsys: pytest.CaptureFixture[str], failure: dict[str, Any], on: str
+) -> None:
+    # Only the forge refusing the relation goes text only; a timeout or an internal error
+    # exits 2 with nothing written, so a rerun adds both halves
+    forge.add("o/r#5", "Body")
+    forge.add("o/r#4")
+    forge.relation_error = (on, failure)
+    with pytest.raises(SystemExit) as exit_:
+        link(ch, forge, "o/r#5", "--blocked-by", "o/r#4")
+    assert exit_.value.code == 2
+    assert failure["message"] in capsys.readouterr().err
+    assert forge.writes() == ([] if on == "read" else ["addBlockedBy"])
+    assert forge.body("o/r#5") == "Body"
+
+
+def test_a_forbidden_relation_is_a_refusal(ch: ModuleType, forge: Forge, capsys: pytest.CaptureFixture[str]) -> None:
+    forge.add("o/r#1")
+    forge.add("someone/else#2")
+    forge.relation_error = ("write", error("Resource not accessible by integration", "FORBIDDEN"))
+    assert link(ch, forge, "o/r#1", "--child", "someone/else#2") == 0
+    assert forge.body("o/r#1") == "Depends on someone/else#2"
+    assert "text only: Resource not accessible by integration" in capsys.readouterr().out
 
 
 def test_the_script_runs_from_its_folder_and_refuses_a_malformed_reference_before_gh(tmp_path: Path) -> None:
