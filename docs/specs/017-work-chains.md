@@ -95,13 +95,11 @@ has one, is how its result is checked: a command or a URL with what it must retu
 |---|---|---|
 | BLOCKED | Some hold is open, as for any issue | No |
 | HANDOFF_DUE | Nothing holds it (or its last hold closed), and no hand-off comment came after its newest hold closed | Yes |
-| WITH_PERSON | The newest hand-off or reminder is newer than `--remind-hours` (default 48), and no done report followed it | No |
-| REMIND_DUE | The newest hand-off or reminder is older than `--remind-hours`, with no done report after it; `--remind-hours 0` never reminds | Yes |
+| WITH_PERSON | A hand-off came after its newest hold closed, and no done report followed it | No |
 | VERIFY_DUE | A done report came after the newest hand-off | Yes |
 | NO_ASSIGNEE | Labelled `human` with no assignee | Yes |
 
-A **hand-off** is a comment whose first line is `<!-- shipmill:handoff -->`, a **reminder**
-one whose first line is `<!-- shipmill:remind -->`, each written by the `--bot-login` or a
+A **hand-off** is a comment whose first line is `<!-- shipmill:handoff -->`, written by the `--bot-login` or a
 trusted author (OWNER, MEMBER, COLLABORATOR; D-16): a marker comment by anyone else never
 counts. A **done report** is a comment whose first line starts with `done` (any case) by
 one of the item's assignees or a trusted author. An assignee need not be a collaborator:
@@ -115,8 +113,8 @@ The session that takes up each action (github-issue-triage's SKILL.md, the state
   holds closed (`owner/repo#N`), what to do (the issue's steps, quoted, never rewritten),
   the `## Check` when there is one, and "Reply `done` here when it's finished, or close
   the issue". GitHub's mention is the notification; a mention from the App reaches the
-  maintainer (D-19)
-- **REMIND_DUE:** posts a reminder: the marker, the mentions, and the hand-off's link
+  maintainer (D-19). shipmill never mentions the person again while the item waits on
+  them: WITH_PERSON is report-only, and ship-watch lists it with who it waits on
 - **VERIFY_DUE:** runs the `## Check`. It holds: a comment saying what was checked and what
   came back, then closes the issue as completed, which unblocks whatever it held. It fails:
   a new hand-off saying what failed and what came back, so the item reads WITH_PERSON again.
@@ -135,7 +133,7 @@ the check: it holds, a `<!-- shipmill:verified -->` comment with what came back;
 the session reopens the issue with a hand-off saying what failed, and every item the issue
 holds reads BLOCKED again.
 
-`watch_state.py`'s `TRIAGE_ACTION` gains HANDOFF_DUE, REMIND_DUE, VERIFY_DUE, NO_ASSIGNEE,
+`watch_state.py`'s `TRIAGE_ACTION` gains HANDOFF_DUE, VERIFY_DUE, NO_ASSIGNEE,
 and VERIFY_CLOSED, so the gate starts a session for them; WITH_PERSON is report-only and
 listed in ISSUES_OPEN with the person it waits on. `triage_state.py` exits 1 on the new
 action states, and `--wip N` never counts a person's item as in progress or ready: the
@@ -190,13 +188,13 @@ an action row, CHAIN_NO_GATE, naming the item and the repo.
 - S-017-8: when the forge refuses the native relation, `chains.py link` still writes the text line, prints `text only:` with the error's first line, and exits 0
 - S-017-9: `chains.py link` exits 2 naming the reference for a malformed reference, a missing issue, a pull request, and an issue linked to itself
 - S-017-10: an open `human` issue with an assignee, no triage comment, and no open hold reads HANDOFF_DUE, and BLOCKED while a `Depends on` line or a native relation names an open issue
-- S-017-11: a `human` issue whose newest hand-off is newer than `--remind-hours` with no done report after it reads WITH_PERSON, which is not an action; older than `--remind-hours` it reads REMIND_DUE, and with `--remind-hours 0` it stays WITH_PERSON
+- S-017-11: a `human` issue with a hand-off after its newest hold closed and no done report after the hand-off reads WITH_PERSON, which is not an action, however old the hand-off is
 - S-017-12: a comment starting `done` by an assignee or a trusted author after the newest hand-off makes a `human` issue read VERIFY_DUE; one by anyone else changes nothing
-- S-017-13: a hand-off, reminder, or verified marker comment by an author who is neither trusted nor the `--bot-login` is ignored
+- S-017-13: a hand-off or verified marker comment by an author who is neither trusted nor the `--bot-login` is ignored
 - S-017-14: a `human` issue with no assignee reads NO_ASSIGNEE
 - S-017-15: a `human` issue closed as completed by someone other than the `--bot-login`, with a `## Check` section and no verified comment after its close, reads VERIFY_CLOSED, never SUSPECT_CLOSE; with a verified comment after the close it reads neither
-- S-017-16: `triage_state.py` exits 1 when an issue reads HANDOFF_DUE, REMIND_DUE, VERIFY_DUE, NO_ASSIGNEE, or VERIFY_CLOSED, and `--wip N` counts no `human` issue as in progress or ready
-- S-017-17: `watch_state.py` counts HANDOFF_DUE, REMIND_DUE, VERIFY_DUE, NO_ASSIGNEE, and VERIFY_CLOSED as triage actions and lists WITH_PERSON among the open issues with the assignees it waits on
+- S-017-16: `triage_state.py` exits 1 when an issue reads HANDOFF_DUE, VERIFY_DUE, NO_ASSIGNEE, or VERIFY_CLOSED, and `--wip N` counts no `human` issue as in progress or ready
+- S-017-17: `watch_state.py` counts HANDOFF_DUE, VERIFY_DUE, NO_ASSIGNEE, and VERIFY_CLOSED as triage actions and lists WITH_PERSON among the open issues with the assignees it waits on
 - S-017-18: `chains.py show X` lists every item X waits on and every item that waits on X natively or as its parent, recursively and each once, with its executor and its state
 - S-017-19: `chains.py show` marks a READY item NO_GATE when its repo's `.github/shipmill.toml` has no `[agents]` table or doesn't exist, and exits 1 then; `--json` prints the same rows as one JSON object
 - S-017-20: github-ship-watch reports a CHAIN_NO_GATE action row naming the item and its repo for a NO_GATE item in a chain one of its repo's open items belongs to
@@ -210,6 +208,7 @@ an action row, CHAIN_NO_GATE, naming the item and the repo.
 - Milestones tied to releases and human items counting toward a milestone: #70 and the product-layer work
 - A fleet pass that drives repos without a gate: `chains.py show` and CHAIN_NO_GATE say where a chain stalls; installing a gate there is the fix (shipmill-setup)
 - Copying a UI-set relation into text, or text into a relation outside `chains.py link`: both forms are read, so neither needs the other
+- Reminders: the maintainer chose one hand-off mention per unblock (#335); a repeat mention can come later behind its own option
 - Desktop notifications for a person's item: GitHub's mention notifies; the gate's desktop notice stays for a waiting session (spec 003)
 - Payment, credential, or other secret-bearing steps done by an agent: a `human` item keeps them with the person
 
