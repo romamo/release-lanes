@@ -67,6 +67,24 @@ For each open issue:
                    MEMBER, or COLLABORATOR nor the --bot-login, whatever it would read
                    otherwise: an unattended session leaves it to an interactive one (D-16)
 
+An open issue labelled human is a person's item (spec 017): its assignees do it, no PR
+state (IN_PROGRESS, DONE_NOT_CLOSED) applies, and it counts as triaged from the start, so
+its "Depends on" lines and GitHub's holds apply with no triage comment. After UNTRUSTED,
+NEEDS_DECISION, and DECIDED, it reads NO_ASSIGNEE, else UNFILLED, SPEC_REFUSED, BLOCKED,
+REVISIT, or POSTPONED as any issue would, else, with every hold closed, one of:
+  NO_ASSIGNEE      labelled human with no assignee: ask the maintainer who does it
+  HANDOFF_DUE      no hand-off came after its newest hold closed (or ever, with no
+                   hold): tell its assignees it is their turn. A hand-off is a comment
+                   whose first line is <!-- shipmill:handoff -->, by an OWNER, MEMBER, or
+                   COLLABORATOR or the --bot-login; a marker comment by anyone else never
+                   counts
+  WITH_PERSON      a hand-off came after its newest hold closed and no done report
+                   followed it: it waits on the person, however long (not an action)
+  VERIFY_DUE       a done report came after the newest hand-off: run its ## Check. A
+                   done report is a comment whose first line (past leading blank lines)
+                   starts with "done" in any case, by one of its assignees or an OWNER,
+                   MEMBER, or COLLABORATOR or the --bot-login
+
 For the N most recently closed issues (default 20):
   SUSPECT_CLOSE    closed by a commit whose message names "#N" after a closing
                    keyword only mid-line (a quote, a test string), not as a
@@ -76,17 +94,25 @@ For the N most recently closed issues (default 20):
                    isn't one either: an incident closes by hand once the environment
                    is healthy, and ship-watch's POSTMORTEM_DUE follows it up. The
                    script can't read the shipmill config: pass [operate]
-                   incident_label here when it isn't "incident"
+                   incident_label here when it isn't "incident". An issue labelled
+                   human closed as completed never reads SUSPECT_CLOSE: a person
+                   closes their own item by hand
+  VERIFY_CLOSED    labelled human, closed as completed by someone other than the
+                   --bot-login, with a "## Check" section and no comment after its close
+                   whose first line is <!-- shipmill:verified --> by an OWNER, MEMBER, or
+                   COLLABORATOR or the --bot-login: run its check
 
 With --wip N (a work-in-progress limit, such as [roadmap] wip once the config has it), a
 last line says how many issues are IN_PROGRESS, the room left under N, and the issues
 ready to start (NEEDS_PR or UNBLOCKED), oldest first; with --json, as one JSON object.
+An issue labelled human never counts as in progress or ready: the limit is on agents' work.
 
 --bot-login names the login shipmill's sessions write as (an App's <slug>[bot]).
 
 Exit 0 when nothing needs action, 1 when any issue is NEW, NEEDS_PR, UNBLOCKED, UNFILLED,
-SPEC_REFUSED, REVISIT, DONE_NOT_CLOSED, DECIDED, or SUSPECT_CLOSE (never for NEEDS_DECISION
-or UNTRUSTED), 2 on bad input (an issue with more than 100
+SPEC_REFUSED, REVISIT, DONE_NOT_CLOSED, DECIDED, SUSPECT_CLOSE, HANDOFF_DUE, VERIFY_DUE,
+NO_ASSIGNEE, or VERIFY_CLOSED (never for NEEDS_DECISION, UNTRUSTED, or WITH_PERSON),
+2 on bad input (an issue with more than 100
 labels) or a gh failure. It pages past 100 open issues and an issue's 50 comments, 50
 cross-references, 50 blocking issues, or 50 sub-issues, and back through tags to the
 newest stable one, with one query when nothing is capped. A page GitHub rejects for its
@@ -134,7 +160,9 @@ TAG_NODES = "nodes { name target { ... on Tag { tagger { date } } ... on Commit 
 # The forge's own holds on an issue (spec 017): the issues it is blocked by, and its
 # sub-issues, each with its repository, so a relation across repos holds as well
 NATIVE_FIELDS = ("blockedBy", "subIssues")
-NATIVE_NODES = "pageInfo { hasNextPage endCursor } nodes { number state stateReason repository { nameWithOwner } }"
+NATIVE_NODES = (
+    "pageInfo { hasNextPage endCursor } nodes { number state stateReason closedAt repository { nameWithOwner } }"
+)
 NATIVE = "".join(f"\n        {field}(first: 50) {{ {NATIVE_NODES} }}" for field in NATIVE_FIELDS)
 
 
@@ -148,6 +176,7 @@ def open_issue_fields(native: bool) -> str:
         + AUTHOR
         + """
         labels(first: 100) { pageInfo { hasNextPage } nodes { name } }
+        assignees(first: 10) { nodes { login } }
         comments(last: 50) { nodes { """
         + COMMENT
         + """ } }
@@ -221,7 +250,7 @@ CLOSED_AND_TAGS = (
     }
     closed: issues(states: CLOSED, first: $closed, orderBy: {field: UPDATED_AT, direction: DESC}) {
       nodes {
-        number title stateReason
+        number title stateReason body
         labels(first: 100) { pageInfo { hasNextPage } nodes { name } }
         refs: timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], first: 50) {
           pageInfo { hasNextPage endCursor }"""
@@ -231,6 +260,8 @@ CLOSED_AND_TAGS = (
         timelineItems(itemTypes: [CLOSED_EVENT], last: 1) {
           nodes {
             ... on ClosedEvent {
+              createdAt
+              actor { __typename login }
               closer {
                 __typename
                 ... on PullRequest { number merged }
@@ -390,6 +421,12 @@ DECISION_MARKER = "<!-- shipmill:needs-decision -->"  # the first line of a sess
 # The author associations whose comment answers a question, and whose issue an unattended
 # session works on (D-16); CONTRIBUTOR, FIRST_TIMER, NONE, and the rest never count
 TRUSTED = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+# A person's item (spec 017): its assignees do it, a hand-off comment tells them it is
+# their turn, and a verified comment records that a session checked a close by hand
+HUMAN_LABEL = "human"
+HANDOFF_MARKER = "<!-- shipmill:handoff -->"
+VERIFIED_MARKER = "<!-- shipmill:verified -->"
+CHECK = re.compile(r"^[ \t]*##[ \t]+Check[ \t]*$", re.MULTILINE)  # how a person's result is checked
 ACTION = {
     "NEW",
     "NEEDS_PR",
@@ -400,7 +437,12 @@ ACTION = {
     "DONE_NOT_CLOSED",
     "DECIDED",
     "SUSPECT_CLOSE",
+    "HANDOFF_DUE",
+    "VERIFY_DUE",
+    "NO_ASSIGNEE",
+    "VERIFY_CLOSED",
 }
+CLOSED_STATES = ("CLOSED", "NOT_PLANNED", "MERGED")  # a hold in one of these holds nothing
 HOLD = re.compile(r"\b(?:on hold|blocked|waits? on|waiting on|pending|depends on)\b", re.IGNORECASE)
 # Where a sentence of a comment line ends: a hold phrase holds only on the links of its own
 # sentence, so "a command whose run length depends on its input" in one sentence of a
@@ -552,6 +594,45 @@ def complete_refs(run: Runner, query: str, base: Variables, sizes: Sizes, issue:
         items["pageInfo"] = page["pageInfo"]
 
 
+def checkable(issue: dict[str, Any]) -> bool:
+    """A closed person's item whose close a session may owe a check (VERIFY_CLOSED): labelled
+    human, closed as completed, with a ## Check section"""
+    labels = {n["name"] for n in issue["labels"]["nodes"]}
+    return (
+        HUMAN_LABEL in labels
+        and issue["stateReason"] == "COMPLETED"
+        and CHECK.search(issue.get("body") or "") is not None
+    )
+
+
+def closed_at(issue: dict[str, Any]) -> dt.datetime:
+    """When a closed issue last closed; one without a close event can't be checked"""
+    events = issue["timelineItems"]["nodes"]
+    moment = events[0].get("createdAt") if events else None
+    if not moment:
+        fail(f"closed issue #{issue['number']} has no close event to check its close against")
+    return timestamp(moment)
+
+
+def comments_since_close(run: Runner, base: Variables, sizes: Sizes, issue: dict[str, Any]) -> None:
+    """A closed issue's comments, oldest first, back to its close: the first query doesn't
+    ask a closed issue for comments, and only the ones after its close tell whether a
+    session verified it"""
+    since = closed_at(issue)
+    comments = issue_page(run, COMMENTS_PAGE, base, sizes, issue["number"], "comments", None)
+    seen: set[str] = set()
+    while (
+        comments["pageInfo"]["hasPreviousPage"]
+        and comments["nodes"]
+        and timestamp(comments["nodes"][0]["createdAt"]) > since
+    ):
+        cursor = advance(comments["pageInfo"]["startCursor"], seen, f"comments on #{issue['number']}")
+        page = issue_page(run, COMMENTS_PAGE, base, sizes, issue["number"], "comments", cursor)
+        comments["nodes"] = page["nodes"] + comments["nodes"]
+        comments["pageInfo"] = page["pageInfo"]
+    issue["comments"] = comments
+
+
 def fetch(repo: str, closed: int, stable_pattern: re.Pattern[str] = STABLE, run: Runner = gh_graphql) -> dict[str, Any]:
     """One query, plus follow-up pages only for the connections it reports as capped. When
     the forge refuses blockedBy or subIssues, one stderr note, then the text holds alone"""
@@ -593,6 +674,8 @@ def fetch_pages(
     for issue in data["closed"]["nodes"]:
         check_labels(issue)
         complete_refs(run, REFS_PAGE, base, sizes, issue, "refs")
+        if checkable(issue):
+            comments_since_close(run, base, sizes, issue)
 
     # Only the newest stable tag is used: page back until one is in hand, not through every tag
     tags = data["tags"]
@@ -679,13 +762,17 @@ def unfilled_dependencies(issue: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(keys))
 
 
-def upstream_states(refs: set[tuple[str, str, int]]) -> dict[tuple[str, str, int], str]:
+def upstream_states(
+    refs: set[tuple[str, str, int]],
+) -> tuple[dict[tuple[str, str, int], str], dict[tuple[str, str, int], str]]:
+    """Each upstream issue's or pull request's state as ref_state reads it, and, for one
+    that closed, when it closed: a person's hand-off counts only after its newest hold closed"""
     if not refs:
-        return {}
+        return {}, {}
     ordered = sorted(refs)
     parts = [
         f'r{i}: repository(owner: "{o}", name: "{n}") {{ issueOrPullRequest(number: {k}) '
-        "{ __typename ... on Issue { state stateReason } ... on PullRequest { state } } }"
+        "{ __typename ... on Issue { state stateReason closedAt } ... on PullRequest { state closedAt } } }"
         for i, (o, n, k) in enumerate(ordered)
     ]
     proc = subprocess.run(
@@ -693,9 +780,13 @@ def upstream_states(refs: set[tuple[str, str, int]]) -> dict[tuple[str, str, int
     )
     data = json.loads(proc.stdout or "{}").get("data") or {}
     states = {}
+    closes = {}
     for i, ref in enumerate(ordered):
-        states[ref] = ref_state((data.get(f"r{i}") or {}).get("issueOrPullRequest") or {})
-    return states
+        node = (data.get(f"r{i}") or {}).get("issueOrPullRequest") or {}
+        states[ref] = ref_state(node)
+        if node.get("closedAt"):
+            closes[ref] = str(node["closedAt"])
+    return states, closes
 
 
 def ref_state(node: dict[str, Any]) -> str:
@@ -715,17 +806,18 @@ def ref_state(node: dict[str, Any]) -> str:
 Ref = tuple[str, str, int]
 
 
-def native_holds(issue: dict[str, Any]) -> dict[Ref, tuple[str, str]]:
+def native_holds(issue: dict[str, Any]) -> dict[Ref, tuple[str, str, str | None]]:
     """The issues the forge says hold this one, each with its kind ("native" for one it
-    is blocked by, "child" for a sub-issue, which wins when it is both) and its state as
-    ref_state reads it. An issue fetched without them (the forge refused them) has none"""
-    holds: dict[Ref, tuple[str, str]] = {}
+    is blocked by, "child" for a sub-issue, which wins when it is both), its state as
+    ref_state reads it, and when it closed (None while open). An issue fetched without
+    them (the forge refused them) has none"""
+    holds: dict[Ref, tuple[str, str, str | None]] = {}
     for field, kind in (("blockedBy", "native"), ("subIssues", "child")):
         for node in (issue.get(field) or {}).get("nodes", []):
             owner, _, name = node["repository"]["nameWithOwner"].partition("/")
             ref = (owner, name, int(node["number"]))
             if kind == "child" or ref not in holds:
-                holds[ref] = (kind, ref_state({**node, "__typename": "Issue"}))
+                holds[ref] = (kind, ref_state({**node, "__typename": "Issue"}), node.get("closedAt"))
     return holds
 
 
@@ -764,22 +856,32 @@ def classify_open(
     states: dict[tuple[str, str, int], str],
     stable: tuple[dt.datetime, str] | None,
     repo: tuple[str, str],
+    bot_login: str | None = None,
+    closes: dict[tuple[str, str, int], str] | None = None,
 ) -> tuple[str, str]:
+    """An open issue's state once gated found none; ``closes`` says when each closed hold
+    closed, which a person's item (labelled human) reads its hand-off against"""
     labels = {n["name"] for n in issue["labels"]["nodes"]}
+    # A person's item: its assignees do it, never an implementer, so no PR state applies,
+    # and it counts as triaged from the start (spec 017)
+    human = HUMAN_LABEL in labels
     triaged = [c for c in issue["comments"]["nodes"] if c["body"].lstrip().startswith(marker)]
     triage = [c["body"] for c in triaged]
     prs = linked_prs(issue)
     open_prs = [n for n, s, _ in prs if s == "OPEN"]
     merged = [n for n, s, whole in prs if s == "MERGED" and whole]
     note = " ".join(f"#{n}:{s.lower()}" + ("" if whole else "(part)") for n, s, whole in prs)
-    if open_prs:
+    people = assignees(issue) if human else []
+    if human and not people:
+        return "NO_ASSIGNEE", "labelled human, no assignee"
+    if open_prs and not human:
         return "IN_PROGRESS", note
-    if merged:
+    if merged and not human:
         return "DONE_NOT_CLOSED", note
     # The body's dependencies are older than every comment; a comment naming one too is newer.
     # They hold a triaged issue only, as the forge's own relations do (spec 017): an
     # untriaged one with "Depends on #48", a blockedBy issue, or a sub-issue still reads NEW
-    held = bool(triage)
+    held = bool(triage) or human
     body = dependency_refs(issue, repo) if held else []
     named = {**dict.fromkeys(body, -1), **hold_refs(issue, repo)}
     # The forge's relations join the text holds as one set: an issue named both ways counts
@@ -788,12 +890,15 @@ def classify_open(
     texts = {fold(r): r for r in named}
     native = native_holds(issue) if held else {}
     states = {**states}
+    closes = {**(closes or {})}
     marks: dict[Ref, str] = {}
     children: list[str] = []
-    for ref, (kind, state) in native.items():
+    for ref, (kind, state, closed) in native.items():
         key = texts.get(fold(ref), ref)
         named.setdefault(key, -1)
         states[key] = state
+        if closed is not None:
+            closes[key] = closed
         if kind == "child":
             marks[key] = "(child)"
             children.append(state)
@@ -814,15 +919,20 @@ def classify_open(
     if waits or "blocked" in labels:
         if any(states.get(r) == "CLOSED_UNMERGED" for r in waits):
             return "SPEC_REFUSED", shown
-        still = [r for r in waits if states.get(r) not in ("CLOSED", "NOT_PLANNED", "MERGED")]
-        if waits and not still:
+        still = [r for r in waits if states.get(r) not in CLOSED_STATES]
+        if still or not waits:
+            return "BLOCKED", shown or "labelled blocked"
+        if not human:
             return "UNBLOCKED", shown
-        return "BLOCKED", shown or "labelled blocked"
     if postponed in labels:
         # Comments come oldest first: a re-decision after the tag clears REVISIT
         if stable and triaged and timestamp(triaged[-1]["createdAt"]) < stable[0]:
             return "REVISIT", f"postponed before {stable[1]}"
         return "POSTPONED", note
+    if human:
+        # Every hold has closed: the person's turn starts at the newest close
+        ends = [timestamp(closes[r]) for r in waits if r in closes and states.get(r) in CLOSED_STATES]
+        return person_state(issue["comments"]["nodes"], people, bot_login, max(ends, default=None), shown)
     if not triage:
         return "NEW", note
     if re.search(r"\bimplement\b", triage[-1], re.IGNORECASE):
@@ -845,10 +955,15 @@ def same_login(a: str, b: str) -> bool:
     return a.lower() == b.lower()  # GitHub logins ignore case
 
 
-def marked(body: str) -> bool:
-    """Whether a comment's first line is the needs-decision marker; a quote of it further
-    down is no question"""
-    return body.lstrip().split("\n", 1)[0].strip() == DECISION_MARKER
+def first_line(body: str) -> str:
+    """A comment's first line, past any leading blank lines"""
+    return body.lstrip().split("\n", 1)[0].strip()
+
+
+def marked(body: str, marker: str = DECISION_MARKER) -> bool:
+    """Whether a comment's first line is the marker (by default the needs-decision one); a
+    quote of it further down is no question, hand-off, or verification"""
+    return first_line(body) == marker
 
 
 def question(comments: list[tuple[str, str, str]], bot_login: str | None) -> int | None:
@@ -893,6 +1008,49 @@ def trusted(author: str, association: str, bot_login: str | None) -> bool:
     return association in TRUSTED or (bot_login is not None and same_login(author, bot_login))
 
 
+def assignees(issue: dict[str, Any]) -> list[str]:
+    """The logins a person's item is assigned to"""
+    return [str(n["login"]) for n in issue["assignees"]["nodes"]]
+
+
+def by_trusted(comment: dict[str, Any], bot_login: str | None) -> bool:
+    """A comment by an OWNER, MEMBER, or COLLABORATOR, or by the --bot-login (D-16): the
+    only authors whose hand-off or verified marker counts"""
+    return trusted(login(comment.get("author")), str(comment.get("authorAssociation") or "NONE"), bot_login)
+
+
+def done_report(comment: dict[str, Any], people: list[str], bot_login: str | None) -> bool:
+    """A comment whose first line starts with "done" in any case, by one of the item's
+    assignees or a trusted author: the person says their part is finished"""
+    if not first_line(comment["body"]).lower().startswith("done"):
+        return False
+    author = login(comment.get("author"))
+    return any(same_login(author, p) for p in people) or by_trusted(comment, bot_login)
+
+
+def person_state(
+    comments: list[dict[str, Any]], people: list[str], bot_login: str | None, since: dt.datetime | None, shown: str
+) -> tuple[str, str]:
+    """A person's item with nothing holding it: HANDOFF_DUE until a trusted hand-off comes
+    after its newest hold closed (``since``, None when it never had one), then WITH_PERSON
+    until a done report follows the newest such hand-off, then VERIFY_DUE"""
+    who = " ".join(f"@{p}" for p in people)
+    handoffs = [
+        i
+        for i, c in enumerate(comments)
+        if marked(c["body"], HANDOFF_MARKER)
+        and by_trusted(c, bot_login)
+        and (since is None or timestamp(c["createdAt"]) > since)
+    ]
+    if not handoffs:
+        return "HANDOFF_DUE", " ".join(part for part in (f"for {who}", shown) if part)
+    newest = handoffs[-1]
+    for c in reversed(comments[newest + 1 :]):
+        if done_report(c, people, bot_login):
+            return "VERIFY_DUE", f"done reported by @{login(c.get('author'))}"
+    return "WITH_PERSON", f"with {who} since {comments[newest]['createdAt']}"
+
+
 def gated(issue: dict[str, Any], bot_login: str | None, trusted_only: bool) -> tuple[str, str] | None:
     """UNTRUSTED (with trusted_only), then NEEDS_DECISION or DECIDED, each read before any
     other state; None when none holds, and the issue reads as classify_open says. DECIDED
@@ -914,10 +1072,32 @@ def gated(issue: dict[str, Any], bot_login: str | None, trusted_only: bool) -> t
     return None
 
 
-def classify_closed(issue: dict[str, Any], hold: str, incident: str = INCIDENT_LABEL) -> tuple[str, str] | None:
+def verify_closed(issue: dict[str, Any], bot_login: str | None) -> tuple[str, str] | None:
+    """VERIFY_CLOSED for a person's item closed as completed by someone other than the
+    --bot-login, with a ## Check section and no trusted verified comment after its close;
+    None otherwise. Its comments are the ones fetch read back to its close"""
+    if not checkable(issue):
+        return None
+    events = issue["timelineItems"]["nodes"]
+    actor = login(events[0].get("actor") if events else None)
+    if bot_login is not None and same_login(actor, bot_login):
+        return None
+    since = closed_at(issue)
+    for c in issue["comments"]["nodes"]:
+        if timestamp(c["createdAt"]) > since and marked(c["body"], VERIFIED_MARKER) and by_trusted(c, bot_login):
+            return None
+    return "VERIFY_CLOSED", f"closed by @{actor}: run its ## Check"
+
+
+def classify_closed(
+    issue: dict[str, Any], hold: str, incident: str = INCIDENT_LABEL, bot_login: str | None = None
+) -> tuple[str, str] | None:
     labels = {n["name"] for n in issue["labels"]["nodes"]}
     if hold in labels:
         return None
+    if HUMAN_LABEL in labels and issue["stateReason"] == "COMPLETED":
+        # A person closes their own item by hand by design: never SUSPECT_CLOSE (spec 017)
+        return verify_closed(issue, bot_login)
     events = issue["timelineItems"]["nodes"]
     closer = events[0].get("closer") if events else None
     number = issue["number"]
@@ -936,17 +1116,27 @@ def classify_closed(issue: dict[str, Any], hold: str, incident: str = INCIDENT_L
     return "SUSPECT_CLOSE", f"commit {closer.get('abbreviatedOid')} names #{number} only mid-line"
 
 
-def wip_room(rows: list[dict[str, Any]], wip: int) -> dict[str, Any]:
+def wip_room(rows: list[dict[str, Any]], wip: int, people: frozenset[int] = frozenset()) -> dict[str, Any]:
     """How many more issues may start under a WIP limit of ``wip``, counting each issue with
     an open PR as in progress, and the issues ready to start (NEEDS_PR or UNBLOCKED), oldest
-    first: build issues are filed in build order"""
-    in_progress = sum(1 for r in rows if r["state"] == "IN_PROGRESS")
-    ready = sorted(r["number"] for r in rows if r["state"] in ("NEEDS_PR", "UNBLOCKED"))
+    first: build issues are filed in build order. A person's item (one of ``people``) never
+    counts: the limit is on agents' work"""
+    agents = [r for r in rows if r["number"] not in people]
+    in_progress = sum(1 for r in agents if r["state"] == "IN_PROGRESS")
+    ready = sorted(r["number"] for r in agents if r["state"] in ("NEEDS_PR", "UNBLOCKED"))
     return {"wip": wip, "in_progress": in_progress, "room": max(wip - in_progress, 0), "ready": ready}
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(
+        description=__doc__.splitlines()[0],
+        epilog=(
+            "States: NEW NEEDS_PR IN_PROGRESS DONE_NOT_CLOSED BLOCKED UNFILLED SPEC_REFUSED UNBLOCKED "
+            "POSTPONED REVISIT TRIAGED NEEDS_DECISION DECIDED UNTRUSTED; for an issue labelled human "
+            "(a person's item) NO_ASSIGNEE HANDOFF_DUE WITH_PERSON VERIFY_DUE; for a closed issue "
+            "SUSPECT_CLOSE VERIFY_CLOSED. The module docstring defines each."
+        ),
+    )
     parser.add_argument("repo", help="owner/name")
     parser.add_argument("--marker", default="Triage:", help="prefix of a triage comment")
     parser.add_argument("--postponed-label", default="postponed")
@@ -988,23 +1178,34 @@ def main() -> int:
     refs = {r for issue in data["open"]["nodes"] for r in upstream_refs(issue, (owner, name))}
     refs |= {r for issue in data["open"]["nodes"] for r in dependency_refs(issue, (owner, name))}
     # The forge's relations came with their states: ask only for the others
-    native = {r: s for issue in data["open"]["nodes"] for r, (_, s) in native_holds(issue).items()}
-    states = {**upstream_states(refs - set(native)), **native}
+    holds = {r: h for issue in data["open"]["nodes"] for r, h in native_holds(issue).items()}
+    native = {r: s for r, (_, s, _) in holds.items()}
+    upstream, closes = upstream_states(refs - set(native))
+    states = {**upstream, **native}
+    # with each one's close time too: a person's hand-off is dated against it
+    closes = {**closes, **{r: c for r, (_, _, c) in holds.items() if c is not None}}
     stable = latest_stable(data["tags"]["nodes"], stable_pattern)
+    people: set[int] = set()
     for issue in data["open"]["nodes"]:
+        if HUMAN_LABEL in {n["name"] for n in issue["labels"]["nodes"]}:
+            people.add(issue["number"])
         state, note = gated(issue, args.bot_login, args.trusted_only) or classify_open(
-            issue, args.marker, args.postponed_label, states, stable, (owner, name)
+            issue, args.marker, args.postponed_label, states, stable, (owner, name), args.bot_login, closes
         )
         rows.append({"number": issue["number"], "state": state, "title": issue["title"], "note": note})
     for issue in data["closed"]["nodes"][: args.closed]:
-        verdict = classify_closed(issue, args.hold_label, args.incident_label)
+        verdict = classify_closed(issue, args.hold_label, args.incident_label, args.bot_login)
         if verdict is not None:
             rows.append({"number": issue["number"], "state": verdict[0], "title": issue["title"], "note": verdict[1]})
 
     order = [
         "SUSPECT_CLOSE",
+        "VERIFY_CLOSED",
         "DONE_NOT_CLOSED",
         "DECIDED",
+        "VERIFY_DUE",
+        "HANDOFF_DUE",
+        "NO_ASSIGNEE",
         "UNBLOCKED",
         "UNFILLED",
         "SPEC_REFUSED",
@@ -1012,6 +1213,7 @@ def main() -> int:
         "NEW",
         "NEEDS_PR",
         "IN_PROGRESS",
+        "WITH_PERSON",
         "BLOCKED",
         "TRIAGED",
         "POSTPONED",
@@ -1025,7 +1227,7 @@ def main() -> int:
         else:
             print(f"#{r['number']:<5} {r['state']:<16} {r['title'][:70]}" + (f"  [{r['note']}]" if r["note"] else ""))
     if args.wip is not None:
-        room = wip_room(rows, args.wip)
+        room = wip_room(rows, args.wip, frozenset(people))
         if args.json:
             print(json.dumps(room, sort_keys=True))
         else:
