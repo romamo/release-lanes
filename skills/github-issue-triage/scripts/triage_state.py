@@ -1178,9 +1178,12 @@ def main() -> int:
     refs = {r for issue in data["open"]["nodes"] for r in upstream_refs(issue, (owner, name))}
     refs |= {r for issue in data["open"]["nodes"] for r in dependency_refs(issue, (owner, name))}
     # The forge's relations came with their states: ask only for the others
-    native = {r: s for issue in data["open"]["nodes"] for r, (_, s, _) in native_holds(issue).items()}
+    holds = {r: h for issue in data["open"]["nodes"] for r, h in native_holds(issue).items()}
+    native = {r: s for r, (_, s, _) in holds.items()}
     upstream, closes = upstream_states(refs - set(native))
     states = {**upstream, **native}
+    # with each one's close time too: a person's hand-off is dated against it
+    closes = {**closes, **{r: c for r, (_, _, c) in holds.items() if c is not None}}
     stable = latest_stable(data["tags"]["nodes"], stable_pattern)
     people: set[int] = set()
     for issue in data["open"]["nodes"]:

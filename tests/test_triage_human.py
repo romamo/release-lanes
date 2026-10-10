@@ -306,6 +306,18 @@ def test_s017_16_the_script_exits_1_on_each_new_action_state(
     assert [json.loads(line)["state"] for line in proc.stdout.splitlines()] == [state]
 
 
+def test_s017_11_a_text_hold_another_issue_holds_natively_keeps_its_close_time(tmp_path: Path) -> None:
+    # #3 is a text hold of the person's item and a native one of #8, so the script asks the
+    # forge for it only through #8's relations: its close still dates the hand-off
+    item = person([handoff("2026-09-05T10:00:00Z")], body="Depends on #3\n\n" + CHECK)
+    other = open_issue(8)
+    other["blockedBy"] = forward([node("o/r#3", "CLOSED", "2026-09-06T10:00:00Z")])
+    other["subIssues"] = forward([])
+    proc = run_script(tmp_path, first_page([item, other]))
+    rows = {json.loads(line)["number"]: json.loads(line)["state"] for line in proc.stdout.splitlines()}
+    assert rows[7] == "HANDOFF_DUE", proc.stderr
+
+
 def test_s017_16_with_person_is_no_action_and_wip_counts_no_person_item(tmp_path: Path) -> None:
     waiting = person([handoff()])
     # A person's item with an open PR linked would read IN_PROGRESS were it an agent's
