@@ -62,7 +62,8 @@ summary (Each line):
   pull request waits on a decision (`NEEDS_DECISION`), the gate's last decision is
   `WAITING`, a hold is open (`HOLD`: a person stopped the factory on purpose, D-15, so
   it's theirs to lift, not a fault), a promotion waits on approval (`PROMOTION_DUE`), a
-  postmortem is due, an item is `UNTRUSTED`, the plugin or the CLI is older than
+  postmortem is due, an item is `UNTRUSTED`, a chain's item has no gate or the chain walk
+  fails (`CHAIN_NO_GATE`, `CHAIN_UNREADABLE`, spec 017), the plugin or the CLI is older than
   shipmill's latest release, the repo keeps merged branches (`BRANCH_DELETE_OFF`), the
   gate has no App, or `[agents]` is set and this Mac has no launchd job for the repo
   (another host, or a `/loop`, may run the gate; the report reads only this one). Or open
