@@ -3,77 +3,358 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>shipmill: the AI software factory for GitHub</title>
-<meta name="description" content="Open-source AI software factory for GitHub: agents triage issues and land pull requests; release lanes publish, deploy, and roll back by a policy you write.">
+<title>shipmill: issues in, releases out</title>
+<meta name="description" content="Open-source AI software factory: agents triage your issues and land the pull requests; release lanes publish, deploy, and roll back by a policy you write.">
 <meta property="og:title" content="shipmill">
-<meta property="og:description" content="Agents triage your issues and land the pull requests; release lanes publish, deploy, and roll back by a policy you write.">
+<meta property="og:description" content="Issues in. Releases out. Agents triage your issues and land the pull requests; release lanes ship them by a policy you write.">
 <meta property="og:url" content="https://shipmill.dev/">
 <meta property="og:type" content="website">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f6fed'/%3E%3Cpath d='M7 20l9-11 9 11z' fill='white'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2317263a'/%3E%3Cpath d='M7 20l9-11 9 11z' fill='%23ff6a3d'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;700;800&family=Public+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap">
 <style>
-  :root {
-    --bg: #ffffff; --fg: #16181d; --muted: #5b616e; --line: #e3e5ea;
-    --card: #f6f7f9; --accent: #2f6fed; --code: #f0f2f5;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg: #0f1115; --fg: #e8eaee; --muted: #9aa1ad; --line: #262a33;
-            --card: #171a20; --accent: #6d9bff; --code: #1d2129; }
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--fg);
-         font: 17px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  main { max-width: 860px; margin: 0 auto; padding: 56px 16px 72px; }
-  h1 { font-size: clamp(2rem, 6vw, 3rem); line-height: 1.1; margin: 0 0 16px; letter-spacing: -0.02em; }
-  h2 { font-size: 1.35rem; margin: 56px 0 16px; }
-  .lead { font-size: 1.2rem; color: var(--muted); margin: 0 0 28px; }
-  a { color: var(--accent); }
-  .cta { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
-  .btn { display: inline-block; padding: 10px 18px; border-radius: 8px; text-decoration: none;
-         border: 1px solid var(--line); color: var(--fg); font-weight: 600; }
-  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.88em; }
-  pre { background: var(--code); border: 1px solid var(--line); border-radius: 8px;
-        padding: 14px 16px; overflow-x: auto; white-space: pre; }
-  .flow { display: flex; flex-wrap: wrap; gap: 8px; margin: 32px 0 0; padding: 0; list-style: none; }
-  .flow li { background: var(--card); border: 1px solid var(--line); border-radius: 999px;
-             padding: 4px 14px; font-size: 0.92rem; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
-  .card h3 { margin: 0 0 6px; font-size: 1.02rem; }
-  .card p { margin: 0; color: var(--muted); font-size: 0.95rem; }
-  footer { margin-top: 64px; padding-top: 20px; border-top: 1px solid var(--line);
-           color: var(--muted); font-size: 0.9rem; }
+/* Direction A, the mill: blueprint-grid paper, ink outlines, one coral accent; a single light look by choice */
+:root {
+  color-scheme: light;
+  --paper: #f6f9f9; --grid: #dcebea; --ink: #17263a; --dim: #546173;
+  --coral: #ff6a3d; --green: #1f9d63; --wash: #e3efee; --card: #ffffff; --hold: #fff1ec;
+  --display: "Unbounded", "Avenir Next", sans-serif;
+  --body: "Public Sans", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --gut: clamp(16px, 4vw, 40px);
+}
+* { box-sizing: border-box }
+body { margin: 0; color: var(--ink); font: 17px/1.55 var(--body);
+  background-color: var(--paper);
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 28px 28px }
+a { color: inherit }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; border-radius: 4px }
+.wrap { max-width: 1180px; margin: 0 auto; padding-inline: var(--gut) }
+code { font: 500 .84em var(--mono); background: var(--wash); padding: 1px 5px; border-radius: 4px }
+
+nav.top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 24px; padding-block: 18px }
+.brand { font-family: var(--display); font-weight: 700; font-size: 1.1rem; letter-spacing: -.01em; display: flex; align-items: center; gap: 10px; text-decoration: none }
+.links { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: .95rem; color: var(--dim) }
+.links a { text-decoration: none }
+.links a:hover { color: var(--ink) }
+
+.hero { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: clamp(20px, 4vw, 48px); align-items: center; padding-block: clamp(16px, 4vw, 36px) clamp(32px, 5vw, 56px) }
+.hero > *, .two > * { min-width: 0 }
+h1 { font-family: var(--display); font-weight: 800; font-size: clamp(2.2rem, 5.2vw, 4rem); line-height: 1.02; letter-spacing: -.035em; margin: 0 0 20px; text-wrap: balance }
+h1 .out { color: var(--paper); background: var(--ink); padding: 0 .14em; border-radius: .12em; box-decoration-break: clone; -webkit-box-decoration-break: clone; box-shadow: .08em .08em 0 var(--coral) }
+.lede { font-size: 1.13rem; line-height: 1.6; color: var(--dim); max-width: 50ch; margin: 0 }
+.lede strong { color: var(--ink) }
+.cta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px }
+.btn { display: inline-flex; align-items: center; padding: 12px 20px; border-radius: 10px; font-weight: 700; text-decoration: none; border: 2px solid var(--ink); background: var(--paper) }
+.btn.primary { background: var(--coral); color: var(--ink); box-shadow: 4px 4px 0 var(--ink) }
+.btn.primary:hover { transform: translate(-1px, -1px); box-shadow: 5px 5px 0 var(--ink) }
+.try { display: grid; gap: 6px; margin-top: 22px }
+.try-row { display: flex; align-items: flex-start; gap: 8px 12px; flex-wrap: wrap }
+.try code { font: 500 12.5px/1.6 var(--mono); background: var(--paper); border: 1.5px dashed var(--ink); border-radius: 8px; padding: 8px 12px; overflow-wrap: anywhere; flex: 1 1 260px; min-width: 0 }
+.try button { font: 700 13px var(--body); background: transparent; border: 0; color: var(--ink); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; padding: 8px 4px }
+.try small { color: var(--dim); font-size: .88rem }
+.forge { display: inline-flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; font: 500 12px var(--mono) }
+.forge span { border: 1.5px solid var(--ink); border-radius: 999px; padding: 2px 10px; background: var(--card) }
+.forge span.soon { border-style: dashed; color: var(--dim); background: transparent }
+.a-art svg { width: 100%; height: auto; display: block }
+.belt-run { animation: belt 2.4s linear infinite }
+.gear { transform-box: fill-box; transform-origin: center; animation: spin 2.4s linear infinite }
+@keyframes belt { from { transform: translateX(0) } to { transform: translateX(100px) } }
+@keyframes spin { to { transform: rotate(360deg) } }
+
+section.sec { border-top: 2px solid var(--ink); background: var(--paper) }
+section.sec > .wrap { padding-block: clamp(32px, 5vw, 60px); display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px }
+.two { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: clamp(20px, 4vw, 48px); align-items: start }
+.kicker { font: 500 12px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--coral); margin: 0 0 10px }
+h2 { font-family: var(--display); font-weight: 700; font-size: clamp(1.45rem, 2.8vw, 2.1rem); letter-spacing: -.03em; line-height: 1.1; margin: 0 0 12px; text-wrap: balance }
+h3 { font-family: var(--display); font-weight: 700; font-size: 1rem; letter-spacing: -.01em; margin: 0 }
+.sec p { margin: 0; color: var(--dim); max-width: 58ch }
+.sec p + p { margin-top: 10px }
+
+/* the #312 receipt */
+.receipt { background: var(--card); border: 2px solid var(--ink); border-radius: 12px; box-shadow: 6px 6px 0 var(--wash) }
+.receipt-bar { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; padding: 10px 16px; border-bottom: 2px dashed var(--ink); font: 500 12px var(--mono) }
+.receipt-bar span:last-child { color: var(--green) }
+.steps { list-style: none; margin: 0; padding: 12px 16px 16px; display: grid; gap: 10px }
+.steps li { display: grid; grid-template-columns: 5.5ch 8.5ch minmax(0, 1fr); gap: 10px; align-items: baseline; font-size: .97rem; line-height: 1.45 }
+.steps time { font: 500 12px var(--mono); color: var(--dim); font-variant-numeric: tabular-nums }
+.who { font: 700 11px var(--mono); text-transform: uppercase; letter-spacing: .05em; justify-self: start; padding: 2px 7px; border-radius: 999px; border: 1.5px solid var(--ink); background: var(--wash) }
+.who.policy { background: var(--coral) }
+.steps a { text-underline-offset: 3px }
+.steps .done { font-weight: 700; color: var(--green) }
+.total { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 12px 16px; border-top: 2px dashed var(--ink); font-family: var(--display); font-weight: 700 }
+.total big { font-size: 2rem; letter-spacing: -.03em }
+.total span { font: 400 .92rem var(--body); color: var(--dim) }
+
+/* stations: the seven stages */
+.stations { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: 14px }
+.stations li { background: var(--card); border: 2px solid var(--ink); border-radius: 12px; padding: 14px 16px; display: grid; gap: 6px; align-content: start }
+.st-head { display: flex; justify-content: space-between; align-items: center; gap: 8px }
+.by { font: 500 11px var(--mono); padding: 2px 8px; border-radius: 999px; border: 1.5px solid var(--ink); background: var(--wash); white-space: nowrap }
+.by.policy { background: var(--coral) }
+.stations p { font-size: .95rem; line-height: 1.45 }
+
+/* control */
+.dials { display: grid; grid-template-columns: minmax(0, 1fr); border: 2px solid var(--ink); border-radius: 12px; overflow: hidden; background: var(--card) }
+.dials figcaption { padding: 8px 16px; border-bottom: 1.5px solid var(--ink); font: 500 11.5px var(--mono); color: var(--dim) }
+.dial { display: grid; grid-template-columns: minmax(0, 9ch) minmax(0, 1fr); gap: 12px; align-items: center; padding: 11px 16px }
+.dial + .dial { border-top: 1px solid var(--grid) }
+.dial b { font-family: var(--display); font-weight: 700; font-size: .95rem }
+.seg { display: inline-flex; flex-wrap: wrap; border: 1.5px solid var(--ink); border-radius: 999px; overflow: hidden; justify-self: start; font: 500 12px var(--mono) }
+.seg span { padding: 4px 11px; color: var(--dim) }
+.seg span + span { border-left: 1.5px solid var(--ink) }
+.seg .on { background: var(--ink); color: var(--paper) }
+.holdbox { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 14px; align-items: center; border: 2px solid var(--ink); border-radius: 12px; padding: 14px 16px; background: var(--hold) }
+.holdbox p { margin: 2px 0 0 }
+
+/* lanes */
+.lanes { border: 2px solid var(--ink); border-radius: 12px; background: var(--card); overflow: hidden }
+.lane { display: grid; grid-template-columns: 8ch minmax(0, 1.3fr) minmax(0, 1fr); gap: 16px; align-items: center; padding: 12px 16px }
+.lane + .lane { border-top: 1px solid var(--grid) }
+.lane > * { min-width: 0 }
+.lane b { font-family: var(--display); font-weight: 700 }
+.track { position: relative; display: flex; justify-content: space-between; align-items: center; gap: 8px; padding-block: 8px; overflow-x: auto }
+.track::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 6px; transform: translateY(-50%); border-block: 2px solid var(--ink); background: repeating-linear-gradient(90deg, var(--ink) 0 2px, transparent 2px 12px) }
+.track span { position: relative; white-space: nowrap; font: 500 12px var(--mono); background: var(--card); border: 2px solid var(--ink); border-radius: 6px; padding: 2px 8px }
+.track span.hot { background: var(--coral) }
+.lane p { font-size: .93rem; line-height: 1.4 }
+
+/* final */
+.final { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 20px; background: var(--ink); color: var(--paper); border-radius: 16px; padding: clamp(20px, 4vw, 32px) }
+.final > div { min-width: 0; flex: 1 1 360px }
+.final h2 { color: var(--paper) }
+.final p { color: #c6d0dc; max-width: 54ch }
+.final .btn.primary { box-shadow: 4px 4px 0 var(--paper); border-color: var(--paper) }
+.final .btn:not(.primary) { background: transparent; color: var(--paper); border-color: #c6d0dc }
+footer { border-top: 2px solid var(--ink); background: var(--paper) }
+footer .wrap { padding-block: 20px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px 24px; font-size: .9rem; color: var(--dim) }
+footer nav { display: flex; flex-wrap: wrap; gap: 6px 18px }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important } }
+@media (max-width: 880px) {
+  .hero, .two { grid-template-columns: minmax(0, 1fr) }
+  .lane { grid-template-columns: minmax(0, 1fr); gap: 4px }
+}
+@media (max-width: 480px) {
+  .steps li { grid-template-columns: 5.5ch minmax(0, 1fr) }
+  .steps .who { display: none }
+}
 </style>
 </head>
 <body>
-<main>
-  <h1>shipmill</h1>
-  <p class="lead">The open-source AI software factory for GitHub. Agents triage your issues, fix them, and land the pull requests; release lanes publish, deploy, and roll back by a policy you write.</p>
-  <div class="cta">
-    <a class="btn primary" href="https://github.com/shipmill/shipmill#quickstart">Get started</a>
-    <a class="btn" href="https://github.com/shipmill/shipmill">GitHub</a>
-    <a class="btn" href="https://pypi.org/project/shipmill/">PyPI</a>
+<header class="wrap">
+  <nav class="top">
+    <a class="brand" href="#top" id="top">
+      <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><circle cx="14" cy="14" r="5" fill="#ff6a3d" stroke="#17263a" stroke-width="2"/><g stroke="#17263a" stroke-width="2.5" stroke-linecap="round"><path d="M14 2v6M14 20v6M2 14h6M20 14h6M5.5 5.5l4.2 4.2M18.3 18.3l4.2 4.2M5.5 22.5l4.2-4.2M18.3 9.7l4.2-4.2"/></g></svg>
+      shipmill
+    </a>
+    <div class="links"><a href="#how">How it works</a><a href="#control">Control</a><a href="#lanes">Release lanes</a><a href="https://github.com/shipmill/shipmill/blob/main/docs/install.md">Docs</a><a href="https://github.com/shipmill/shipmill">GitHub</a></div>
+  </nav>
+
+  <div class="hero">
+    <div>
+      <h1>Issues in. <span class="out">Releases out.</span></h1>
+      <p class="lede">Coding agents can write a fix. Shipmill does the rest: it triages the issue, lands the pull request on green CI, cuts the release your policy allows and tells the person who reported it. <strong>The agents run on your machine. Every decision stays in your repo.</strong></p>
+      <div class="cta">
+        <a class="btn primary" href="#start">Set up your repo</a>
+        <a class="btn" href="mailto:hello@shipmill.dev">Talk to us</a>
+      </div>
+      <div class="forge" aria-label="Supported forges"><span>GitHub</span><span class="soon">GitLab · soon</span></div>
+    </div>
+        <div class="a-art">
+          <svg viewBox="0 0 520 380" role="img" aria-label="Issue cards drop onto a conveyor belt that carries them through three stations, triage, fix and land, past a raised policy gate, into a crate stamped v0.41.2 that ships to PyPI">
+            <defs><clipPath id="beltclip"><rect x="26" y="230" width="340" height="40"/></clipPath></defs>
+            <!-- annotation: issues in -->
+            <text x="28" y="40" font-family="Unbounded, sans-serif" font-size="15" font-weight="700" fill="#17263a">issues in</text>
+            <path d="M60 50 C62 66 58 78 52 92" fill="none" stroke="#17263a" stroke-width="2" stroke-linecap="round" stroke-dasharray="4 5"/>
+            <!-- falling issue cards -->
+            <g font-family="JetBrains Mono, monospace" font-size="11" font-weight="700" fill="#17263a">
+              <g transform="rotate(-10 52 112)"><rect x="30" y="98" width="46" height="28" rx="5" fill="#ffffff" stroke="#17263a" stroke-width="2.5"/><circle cx="40" cy="112" r="3.5" fill="#ff6a3d"/><text x="47" y="116">#314</text></g>
+              <g transform="rotate(8 62 166)"><rect x="40" y="152" width="46" height="28" rx="5" fill="#ffffff" stroke="#17263a" stroke-width="2.5"/><circle cx="50" cy="166" r="3.5" fill="#ff6a3d"/><text x="57" y="170">#313</text></g>
+            </g>
+            <!-- stations -->
+            <g font-family="JetBrains Mono, monospace" font-size="12" font-weight="500" fill="#17263a" text-anchor="middle">
+              <g><path d="M88 236 V128 M148 236 V128" stroke="#17263a" stroke-width="2.5"/><rect x="80" y="104" width="76" height="26" rx="6" fill="#ffffff" stroke="#17263a" stroke-width="2.5"/><text x="118" y="122">triage</text>
+                <circle cx="114" cy="166" r="12" fill="#e3efee" stroke="#17263a" stroke-width="2.5"/><path d="M123 175 l10 10" stroke="#17263a" stroke-width="4" stroke-linecap="round"/></g>
+              <g><path d="M188 236 V128 M248 236 V128" stroke="#17263a" stroke-width="2.5"/><rect x="180" y="104" width="76" height="26" rx="6" fill="#ffffff" stroke="#17263a" stroke-width="2.5"/><text x="218" y="122">fix</text>
+                <path d="M206 186 L224 164" stroke="#17263a" stroke-width="6" stroke-linecap="round"/><circle cx="228" cy="159" r="9" fill="#ffffff" stroke="#17263a" stroke-width="2.5"/><path d="M228 150 v6" stroke="#f6f9f9" stroke-width="5"/></g>
+              <g><path d="M288 236 V128 M348 236 V128" stroke="#17263a" stroke-width="2.5"/><rect x="280" y="104" width="76" height="26" rx="6" fill="#ffffff" stroke="#17263a" stroke-width="2.5"/><text x="318" y="122">land</text>
+                <circle cx="318" cy="168" r="14" fill="#1f9d63" stroke="#17263a" stroke-width="2.5"/><path d="M311 168 l5 5 l9 -10" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/><text x="318" y="208" font-size="10" fill="#546173">CI green</text></g>
+            </g>
+            <!-- belt cards, moving -->
+            <g clip-path="url(#beltclip)">
+              <g class="belt-run" font-family="JetBrains Mono, monospace" font-size="10" font-weight="700" fill="#17263a">
+                <g transform="translate(-74 0)"><rect x="0" y="238" width="40" height="22" rx="4" fill="#ffffff" stroke="#17263a" stroke-width="2"/><circle cx="9" cy="249" r="3" fill="#ff6a3d"/></g>
+                <g transform="translate(26 0)"><rect x="0" y="238" width="40" height="22" rx="4" fill="#ffffff" stroke="#17263a" stroke-width="2"/><circle cx="9" cy="249" r="3" fill="#ff6a3d"/></g>
+                <g transform="translate(126 0)"><rect x="0" y="238" width="40" height="22" rx="4" fill="#e3efee" stroke="#17263a" stroke-width="2"/><circle cx="9" cy="249" r="3" fill="#17263a"/></g>
+                <g transform="translate(226 0)"><rect x="0" y="238" width="40" height="22" rx="4" fill="#e3efee" stroke="#17263a" stroke-width="2"/><circle cx="9" cy="249" r="3" fill="#1f9d63"/></g>
+                <g transform="translate(326 0)"><rect x="0" y="238" width="40" height="22" rx="4" fill="#e3efee" stroke="#17263a" stroke-width="2"/><circle cx="9" cy="249" r="3" fill="#1f9d63"/></g>
+              </g>
+            </g>
+            <!-- belt -->
+            <rect x="20" y="262" width="360" height="28" rx="14" fill="#ffffff" stroke="#17263a" stroke-width="3"/>
+            <g fill="#e3efee" stroke="#17263a" stroke-width="2">
+              <g class="gear"><circle cx="40" cy="276" r="8"/><path d="M34 276h12" stroke-width="2"/></g>
+              <g class="gear"><circle cx="120" cy="276" r="8"/><path d="M114 276h12" stroke-width="2"/></g>
+              <g class="gear"><circle cx="200" cy="276" r="8"/><path d="M194 276h12" stroke-width="2"/></g>
+              <g class="gear"><circle cx="280" cy="276" r="8"/><path d="M274 276h12" stroke-width="2"/></g>
+              <g class="gear"><circle cx="360" cy="276" r="8"/><path d="M354 276h12" stroke-width="2"/></g>
+            </g>
+            <path d="M60 290 v38 M340 290 v38" stroke="#17263a" stroke-width="3" stroke-linecap="round"/>
+            <path d="M0 330 H520" stroke="#17263a" stroke-width="2.5" stroke-linecap="round"/>
+            <!-- policy gate -->
+            <rect x="384" y="196" width="10" height="134" rx="3" fill="#ffffff" stroke="#17263a" stroke-width="2.5"/>
+            <g transform="rotate(-38 389 204)">
+              <rect x="389" y="198" width="96" height="12" rx="6" fill="#ffffff" stroke="#17263a" stroke-width="2.5"/>
+              <path d="M405 199 l-6 10 M425 199 l-6 10 M445 199 l-6 10 M465 199 l-6 10" stroke="#ff6a3d" stroke-width="5"/>
+            </g>
+            <g transform="rotate(-4 356 180)"><rect x="330" y="62" width="112" height="26" rx="5" fill="#ff6a3d" stroke="#17263a" stroke-width="2.5"/><text x="342" y="80" font-family="JetBrains Mono, monospace" font-size="11.5" font-weight="700" fill="#17263a">shipmill.toml</text></g>
+            <path d="M392 92 C396 130 392 160 389 190" fill="none" stroke="#17263a" stroke-width="2" stroke-dasharray="4 5"/>
+            <!-- crate -->
+            <g transform="translate(404 252)">
+              <rect x="0" y="0" width="104" height="78" rx="6" fill="#ffffff" stroke="#17263a" stroke-width="3"/>
+              <path d="M0 22 H104" stroke="#17263a" stroke-width="2.5"/>
+              <rect x="40" y="0" width="24" height="22" fill="#ff6a3d" stroke="#17263a" stroke-width="2.5"/>
+              <text x="52" y="54" text-anchor="middle" font-family="Unbounded, sans-serif" font-size="15" font-weight="700" fill="#17263a">v0.41.2</text>
+              <text x="52" y="70" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9.5" fill="#546173">stable</text>
+            </g>
+            <!-- shipped -->
+            <path d="M470 244 C480 200 488 170 476 136" fill="none" stroke="#17263a" stroke-width="2.5" stroke-linecap="round"/>
+            <path d="M468 142 l8 -8 l6 10" fill="none" stroke="#17263a" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <text x="508" y="116" text-anchor="end" font-family="Unbounded, sans-serif" font-size="15" font-weight="700" fill="#17263a">releases out</text>
+            <text x="508" y="134" text-anchor="end" font-family="JetBrains Mono, monospace" font-size="10.5" fill="#546173">PyPI · GitHub</text>
+          </svg>
+        </div>
   </div>
-  <ul class="flow" aria-label="Pipeline">
-    <li>Issue</li><li>Triage</li><li>Fix</li><li>Review &amp; land</li><li>Release</li><li>Deploy</li><li>Watch</li>
-  </ul>
+</header>
 
-  <h2>Why shipmill</h2>
-  <div class="grid">
-    <div class="card"><h3>Issue to release</h3><p>Not just a pull request: one pipeline from a new issue to a published, deployed, and announced release</p></div>
-    <div class="card"><h3>Policy decides what ships</h3><p>One file, <code>.github/shipmill.toml</code>, sets the lanes (dev, rc, stable, hotfix), their triggers, and the gates that hold them</p></div>
-    <div class="card"><h3>You stay in control</h3><p>Each stage runs at observe, propose, or act; one <code>shipmill-hold</code> issue stops everything, even from your phone</p></div>
-    <div class="card"><h3>GitHub is the database</h3><p>Issues, labels, pull requests, tags, and deployments hold all state; nothing lives outside your repository</p></div>
-    <div class="card"><h3>Releases you can trust</h3><p>CI runs on the exact release commit before it is tagged, and a stable release ships the code a pre-release already soaked</p></div>
-    <div class="card"><h3>Rollback built in</h3><p>Health checks, bake time, and promotion between environments; a failing deploy rolls back and opens an incident</p></div>
+<section class="sec" id="proof">
+  <div class="wrap">
+    <div class="two">
+      <div>
+        <p class="kicker">Shipmill runs on Shipmill</p>
+        <h2>Issue to release in 23 minutes, with nobody watching</h2>
+        <p>This is one morning on Shipmill's own repository. The agent checked the issue against <code>main</code>, wrote the fix with a test, reviewed it in its own worktree and merged it once CI went green. Then the policy cut the release, published it and told the issue.</p>
+        <p>Every step left a comment, a label or a tag on the issue, so you can audit the whole run from one page.</p>
+      </div>
+      <div class="receipt">
+        <div class="receipt-bar"><span>shipmill/shipmill · 9 Oct 2026 · UTC</span><span>● shipped</span></div>
+        <ol class="steps">
+          <li><time>04:31</time><span class="who">issue</span><span><a href="https://github.com/shipmill/shipmill/issues/312">#312</a> opened: a headless session loses Bash mid-landing</span></li>
+          <li><time>04:41</time><span class="who">triage</span><span>Verdict <strong>implement</strong>, checked against main, the rest postponed with reasons</span></li>
+          <li><time>04:49</time><span class="who">fix</span><span>Pull request <a href="https://github.com/shipmill/shipmill/pull/313">#313</a> opened with the fix</span></li>
+          <li><time>04:51</time><span class="who">land</span><span>Reviewed, CI green, merged</span></li>
+          <li><time>04:53</time><span class="who policy">release</span><span><a href="https://github.com/shipmill/shipmill/releases/tag/v0.41.2">0.41.2</a> cut on the stable lane, published to PyPI</span></li>
+          <li><time>04:54</time><span class="who">watch</span><span class="done">Issue told: “Released in v0.41.2.”</span></li>
+        </ol>
+        <div class="total"><big>23 min</big><span>from issue to a release people can install</span></div>
+      </div>
+    </div>
   </div>
+</section>
 
-  <h2>Quickstart</h2>
-  <p>From the root of a GitHub repository with a <code>CHANGELOG.md</code>, with <code>gh</code>, <code>uv</code>, and Claude Code installed:</p>
-  <pre><code>claude plugin marketplace add shipmill/shipmill &amp;&amp; claude plugin install shipmill@shipmill &amp;&amp; claude "/shipmill:shipmill-setup"</code></pre>
-  <p>The setup skill inspects the repository, asks which lanes to run, and opens a pull request that wires it all, in dry-run mode until you switch releases on. Prefer to set it up by hand? Read the <a href="https://github.com/shipmill/shipmill/blob/main/docs/install.md">install guide</a>.</p>
+<section class="sec" id="how">
+  <div class="wrap">
+    <div>
+      <p class="kicker">How it works</p>
+      <h2>Seven stations from a report to production</h2>
+      <p>Agents do the judgment work; plain CI and the <code>shipmill</code> CLI do the releasing. The release side works without the agents, so you can start there.</p>
+    </div>
+    <ol class="stations">
+      <li><div class="st-head"><h3>Intake</h3><span class="by">agent</span></div><p>Feature requests and discussions grouped into opportunities you accept or decline</p></li>
+      <li><div class="st-head"><h3>Triage</h3><span class="by">agent</span></div><p>A verdict on every issue (implement, feature, postpone, clarify), with a comment and labels</p></li>
+      <li><div class="st-head"><h3>Fix</h3><span class="by">agent</span></div><p>The issue verified against main, fixed with a regression test, opened as a pull request</p></li>
+      <li><div class="st-head"><h3>Land</h3><span class="by">agent</span></div><p>Each pull request reviewed in its own worktree, small problems fixed, merged only on green CI</p></li>
+      <li><div class="st-head"><h3>Release</h3><span class="by policy">policy</span></div><p>Cut on its lane when the policy says one is due, CI run on that exact commit, tagged and published</p></li>
+      <li><div class="st-head"><h3>Deploy</h3><span class="by policy">policy</span></div><p>Health checks, bake time, promotion between environments, rollback that opens an incident</p></li>
+      <li><div class="st-head"><h3>Watch</h3><span class="by">agent</span></div><p>A stalled release, a missing upload, an unannounced fix: reported and finished</p></li>
+    </ol>
+  </div>
+</section>
 
-  <footer>MIT licensed. shipmill releases itself with its own workflows. <a href="https://github.com/shipmill/shipmill/blob/main/CHANGELOG.md">Changelog</a></footer>
-</main>
+<section class="sec" id="control">
+  <div class="wrap">
+    <div class="two">
+      <div>
+        <p class="kicker">You stay in charge</p>
+        <h2>Turn each stage up as you start to trust it</h2>
+        <p>Every stage runs at <code>observe</code>, <code>propose</code> or <code>act</code>. Start with agents that only comment, then let them open pull requests, then let them merge. One file, <code>shipmill.toml</code>, holds the whole policy and goes through review like any other code.</p>
+        <p>Ask <code>shipmill status</code> what needs you. It answers stuck, waits on you, working or idle, with a link to each item.</p>
+      </div>
+      <div style="display:grid;gap:14px">
+        <figure class="dials" style="margin:0" aria-label="Example autonomy settings">
+          <figcaption>example: a team two weeks in</figcaption>
+          <div class="dial"><b>Triage</b><span class="seg"><span>observe</span><span>propose</span><span class="on">act</span></span></div>
+          <div class="dial"><b>Fix</b><span class="seg"><span>observe</span><span class="on">propose</span><span>act</span></span></div>
+          <div class="dial"><b>Land</b><span class="seg"><span>observe</span><span class="on">propose</span><span>act</span></span></div>
+          <div class="dial"><b>Release</b><span class="seg"><span>observe</span><span>propose</span><span class="on">act</span></span></div>
+          <div class="dial"><b>Deploy</b><span class="seg"><span class="on">observe</span><span>propose</span><span>act</span></span></div>
+        </figure>
+        <div class="holdbox">
+          <svg viewBox="0 0 52 52" aria-hidden="true"><path d="M16 2 h20 l14 14 v20 l-14 14 h-20 l-14 -14 v-20 z" fill="#ff6a3d" stroke="#17263a" stroke-width="2.5" stroke-linejoin="round"/><path d="M17 26 h18" stroke="#17263a" stroke-width="4" stroke-linecap="round"/></svg>
+          <div><h3>One issue stops everything</h3><p>Open a <code>shipmill-hold</code> issue, from your phone if you must, and no agent or lane moves until you close it.</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="lanes">
+  <div class="wrap">
+    <div class="two">
+      <div>
+        <p class="kicker">Release lanes</p>
+        <h2>Most users get releases that real users already ran</h2>
+        <p>Each pull request adds its own CHANGELOG entry, and the entries decide the next version. Installers skip <code>dev</code> and <code>rc</code> unless asked, so someone who needs a fix today pins the pre-release while everyone else waits for a stable one that soaked.</p>
+      </div>
+      <div class="lanes">
+        <div class="lane"><b>dev</b><div class="track"><span>1.5.0.dev410</span><span>.dev411</span><span class="hot">.dev412</span></div><p>From main after every batch of merges</p></div>
+        <div class="lane"><b>rc</b><div class="track"><span>1.5.0rc1</span><span class="hot">1.5.0rc2</span></div><p>From main each workday morning</p></div>
+        <div class="lane"><b>stable</b><div class="track"><span>1.4.0</span><span class="hot">1.5.0</span></div><p>An rc that soaked without a blocker</p></div>
+        <div class="lane"><b>hotfix</b><div class="track"><span>release/1.4</span><span class="hot">1.4.1</span></div><p>The pull requests you name, by hand only</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="start">
+  <div class="wrap">
+    <div class="final">
+      <div>
+        <h2>Point it at one repo</h2>
+        <p>Run this in the repo with Claude Code. Setup asks which lanes you want and opens a pull request; releases stay in dry run until you switch them on.</p>
+        <div class="try">
+          <div class="try-row"><code id="cmd" style="color:var(--ink)">claude plugin marketplace add shipmill/shipmill &amp;&amp; claude plugin install shipmill@shipmill &amp;&amp; claude "/shipmill:shipmill-setup"</code><button type="button" data-copy="cmd" style="color:var(--paper)">Copy</button></div>
+        </div>
+      </div>
+      <div class="cta" style="margin-top:0">
+        <a class="btn primary" href="https://github.com/shipmill/shipmill/blob/main/docs/install.md">Read the install guide</a>
+        <a class="btn" href="https://github.com/shipmill/shipmill">Star on GitHub</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>shipmill.dev · MIT · releases itself with its own pipeline</span>
+    <nav><a href="https://github.com/shipmill/shipmill/blob/main/CHANGELOG.md">Changelog</a><a href="https://pypi.org/project/shipmill/">PyPI</a><a href="https://github.com/shipmill/shipmill">GitHub</a></nav>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll("[data-copy]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const el = document.getElementById(btn.dataset.copy);
+    const done = () => { btn.textContent = "Copied"; setTimeout(() => { btn.textContent = "Copy"; }, 1600); };
+    navigator.clipboard.writeText(el.textContent).then(done, () => {
+      const r = document.createRange(); r.selectNodeContents(el);
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    });
+  });
+});
+</script>
 </body>
 </html>
