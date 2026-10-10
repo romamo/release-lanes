@@ -198,6 +198,7 @@ class World:
             "stateReason": "COMPLETED",
             "body": ticket.body,
             "labels": self.labels(ticket),
+            "comments": {"nodes": [c.node() for c in ticket.comments[-5:]]},  # comments(last: 5)
             "refs": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": []},
             "timelineItems": {
                 "nodes": [
