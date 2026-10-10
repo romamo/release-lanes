@@ -68,6 +68,8 @@ class Forge:
         self.refuse_native = False  # a forge without issue relations
         self.queries: list[bool] = []  # whether each query asked for the relations
         self.ran: list[list[str]] = []  # the chains.py command lines watch_state.py ran
+        self.collaborators: set[tuple[str, str]] = set()  # (owner/name, login)
+        self.checked: list[tuple[str, str]] = []  # each collaborator check asked
 
     def issue(self, ref: str, state: str = "OPEN", **fields: Any) -> None:
         repo, _, number = ref.partition("#")
@@ -150,6 +152,10 @@ class Forge:
         self.read.append(repo)
         return self.configs[repo.lower()]
 
+    def standing(self, repo: str, login: str) -> bool:
+        self.checked.append((repo, login))
+        return (repo, login) in self.collaborators
+
 
 @pytest.fixture
 def forge(ch: ModuleType) -> Forge:
@@ -157,7 +163,7 @@ def forge(ch: ModuleType) -> Forge:
 
 
 def show(ch: ModuleType, forge: Forge, *argv: str) -> int:
-    result: int = ch.main(["show", *argv], run=forge, contents=forge.config)
+    result: int = ch.main(["show", *argv], run=forge, contents=forge.config, standing=forge.standing)
     return result
 
 
@@ -384,7 +390,7 @@ def trusted_only(ch: ModuleType, forge: Forge) -> Any:
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             try:
-                code = ch.main(cmd[2:], run=forge, contents=forge.config)
+                code = ch.main(cmd[2:], run=forge, contents=forge.config, standing=forge.standing)
             except SystemExit as exited:
                 code = int(exited.code or 0)
         return proc(code, out.getvalue(), err.getvalue())
@@ -405,6 +411,7 @@ def test_ship_watch_reports_chain_no_gate_from_what_chains_show_prints(
     forge.issue("o/r#5")  # ready, linked to nothing: in no chain
     forge.issue("o/r#12", blocked_by=["o/r#3"])
     forge.configs = {"o/r": None, "x/b": None}
+    forge.collaborators = {("o/r", "alice")}  # x/b#2's author, trusted by o/r
     triage = triage_lines(
         (3, "BLOCKED"), (5, "NEW"), (12, "BLOCKED"), (7, "UNTRUSTED"), (40, "SUSPECT_CLOSE"), (41, "VERIFY_CLOSED")
     )
@@ -419,6 +426,7 @@ def test_ship_watch_reports_chain_no_gate_from_what_chains_show_prints(
     assert "CHAIN_NO_GATE" in ws.ACTION and "CHAIN_NO_GATE" not in ws.AGENT
 
 
+@pytest.mark.parametrize("association", ["NONE", "OWNER", "MEMBER", "COLLABORATOR"])
 @pytest.mark.parametrize(
     "outsider",
     [
@@ -427,16 +435,130 @@ def test_ship_watch_reports_chain_no_gate_from_what_chains_show_prints(
     ],
 )
 def test_s017_20_the_watch_never_reads_or_follows_an_outsiders_issue(
-    ch: ModuleType, ws: ModuleType, forge: Forge, outsider: dict[str, Any]
+    ch: ModuleType, ws: ModuleType, forge: Forge, outsider: dict[str, Any], association: str
 ) -> None:
-    # D-16: an outsider marks their issue blocked by a public one of the repo's
+    # D-16: an outsider marks their issue blocked by a public one of the repo's; in evil/x,
+    # which they own (#355), their issue reads OWNER there, yet o/r doesn't trust them
     forge.issue("o/r#3", blocking=["evil/x#9"])
-    forge.issue("evil/x#9", blocked_by=["o/r#3"], author=("mallory", "NONE"), **outsider)
+    forge.issue("evil/x#9", blocked_by=["o/r#3"], author=("mallory", association), **outsider)
     forge.issue("bad/cfg#1")
     forge.configs = {"o/r": GATED, "bad/cfg": "[agents\n"}
     rows = ws.chain_rows("o/r", triage_lines((3, "NEW")), None, trusted_only(ch, forge))
     assert rows == []
     assert "bad/cfg#1" not in {ref for refs in forge.asked for ref in refs} and forge.read == ["o/r"]
+    assert forge.checked == [("o/r", "mallory")]  # their standing in the repo the walk started from
+
+
+def test_trusted_only_follows_another_repos_issue_by_a_collaborator_of_the_origin(
+    ch: ModuleType, forge: Forge, capsys: pytest.CaptureFixture[str]
+) -> None:
+    forge.issue("o/r#1", body="Depends on x/b#2\nDepends on x/b#3\nDepends on x/b#4\nDepends on x/b#6")
+    forge.issue("x/b#6", author=("ghost", "NONE"), body="Depends on x/b#10")  # a deleted account: no check
+    forge.issue("x/b#2", author=("bob", "NONE"), body="Depends on x/b#7")  # o/r's collaborator
+    forge.issue("x/b#3", author=("bob", "NONE"))  # the same author: no second check
+    forge.issue("x/b#4", author=("O", "NONE"), body="Depends on x/b#8")  # o/r's owner: no check
+    forge.issue("x/b#7", author=("app[bot]", "NONE"), body="Depends on x/b#9\nDepends on o/r#5")  # the bot's
+    forge.issue("x/b#8", author=("other[bot]", "OWNER"), body="Depends on x/b#10")  # another App's: no check
+    forge.issue("x/b#9", state="CLOSED", author=("bob", "NONE"))
+    forge.issue("o/r#5", author=("eve", "NONE"), body="Depends on x/b#10")  # in the origin: its association
+    forge.collaborators = {("o/r", "bob")}
+    forge.configs = {"x/b": GATED}
+    show(ch, forge, "o/r#1", "--json", "--trusted-only", "--bot-login", "app[bot]")
+    rows = json.loads(capsys.readouterr().out)["rows"]
+    assert [(r["ref"], r["state"]) for r in rows] == [
+        ("o/r#1", "BLOCKED"),
+        ("x/b#2", "BLOCKED"),
+        ("x/b#3", "READY"),
+        ("x/b#4", "BLOCKED"),
+        ("x/b#6", "UNTRUSTED"),
+        ("x/b#7", "BLOCKED"),
+        ("x/b#8", "UNTRUSTED"),
+        ("o/r#5", "UNTRUSTED"),
+        ("x/b#9", "CLOSED"),
+    ]
+    assert forge.checked == [("o/r", "bob")]  # one check, for the one login that needs it
+    assert "x/b#10" not in {ref for refs in forge.asked for ref in refs}  # no untrusted issue is followed
+
+
+def test_trusted_only_with_starts_in_several_repos_trusts_whom_any_of_them_trusts(
+    ch: ModuleType, forge: Forge, capsys: pytest.CaptureFixture[str]
+) -> None:
+    forge.issue("o/r#1", body="Depends on z/c#3")
+    forge.issue("p/q#2", body="Depends on z/c#3\nDepends on z/c#4")
+    forge.issue("z/c#3", author=("bob", "NONE"))  # p/q's collaborator, not o/r's
+    forge.issue("z/c#4", author=("carol", "NONE"))  # neither's
+    forge.collaborators = {("P/Q", "bob")}
+    forge.configs = {"z/c": GATED}
+    show(ch, forge, "o/r#1", "P/Q#2", "O/R#1", "--json", "--trusted-only")
+    rows = json.loads(capsys.readouterr().out)["rows"]
+    assert [(r["ref"], r["state"]) for r in rows] == [
+        ("o/r#1", "BLOCKED"),
+        ("p/q#2", "BLOCKED"),
+        ("z/c#3", "READY"),
+        ("z/c#4", "UNTRUSTED"),
+    ]
+    # each origin once, as first spelled; the starts, in their own repos, need no check
+    assert forge.checked == [("o/r", "bob"), ("P/Q", "bob"), ("o/r", "carol"), ("P/Q", "carol")]
+
+
+def test_without_trusted_only_no_standing_is_looked_up(
+    ch: ModuleType, forge: Forge, capsys: pytest.CaptureFixture[str]
+) -> None:
+    forge.issue("o/r#1", body="Depends on evil/x#9")
+    forge.issue("evil/x#9", author=("mallory", "OWNER"))
+    forge.configs = {"evil/x": GATED}
+    code, rows = shown(ch, forge, capsys, "o/r#1")
+    assert [(r["ref"], r["state"]) for r in rows] == [("o/r#1", "BLOCKED"), ("evil/x#9", "READY")]
+    assert code == 0 and forge.checked == []
+
+
+def test_a_malformed_author_login_fails_the_walk(
+    ch: ModuleType, forge: Forge, capsys: pytest.CaptureFixture[str]
+) -> None:
+    forge.issue("o/r#1", body="Depends on x/b#2")
+    forge.issue("x/b#2", author=("../../orgs", "NONE"))
+    with pytest.raises(SystemExit) as failed:
+        show(ch, forge, "o/r#1", "--trusted-only")
+    err = capsys.readouterr().err
+    assert failed.value.code == 2 and forge.checked == []
+    assert err.startswith("error: x/b#2:") and "orgs" not in err
+
+
+def test_an_enterprise_managed_users_login_is_checked_not_refused(
+    ch: ModuleType, forge: Forge, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # an Enterprise Managed User's login is handle_shortcode: an underscore, still one path segment
+    forge.issue("o/r#1", body="Depends on x/b#2")
+    forge.issue("x/b#2", author=("mona_acme", "NONE"))
+    forge.collaborators = {("o/r", "mona_acme")}
+    forge.configs = {"x/b": GATED}
+    show(ch, forge, "o/r#1", "--json", "--trusted-only")
+    rows = json.loads(capsys.readouterr().out)["rows"]
+    assert [(r["ref"], r["state"]) for r in rows] == [("o/r#1", "BLOCKED"), ("x/b#2", "READY")]
+    assert forge.checked == [("o/r", "mona_acme")]
+
+
+def test_the_collaborator_check_is_one_rest_call_and_only_a_404_means_no(ch: ModuleType) -> None:
+    asked: list[list[str]] = []
+
+    def answer(result: subprocess.CompletedProcess[str]) -> Any:
+        def execute(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+            asked.append(cmd)
+            return result
+
+        return execute
+
+    assert ch.gh_collaborator("o/r", "bob", answer(proc(0))) is True  # 204, no body
+    assert asked == [["gh", "api", "repos/o/r/collaborators/bob"]]
+    assert ch.gh_collaborator("o/r", "bob", answer(proc(1, err="gh: Not Found (HTTP 404)"))) is False
+    for failure in (
+        proc(1, err="gh: Must have push access to view repository collaborators. (HTTP 403)"),
+        proc(1, err="gh: API rate limit exceeded (HTTP 429)"),
+        proc(1, err="error connecting to api.github.com"),
+    ):
+        with pytest.raises(SystemExit) as failed:
+            ch.gh_collaborator("o/r", "bob", answer(failure))
+        assert failed.value.code == 2
 
 
 def test_show_with_trusted_only_reads_an_outsiders_issue_for_its_state_alone(
@@ -462,6 +584,7 @@ def test_a_failed_chain_walk_is_one_chain_unreadable_row_and_the_watch_goes_on(
     forge.issue("o/r#3", body="Depends on x/b#2")
     forge.issue("x/b#2", more="labels")  # a trusted issue past a page: the walk exits 2
     forge.configs = {}
+    forge.collaborators = {("o/r", "alice")}
     rows = ws.chain_rows("o/r", triage_lines((3, "NEW")), None, trusted_only(ch, forge))
     assert [(r.state, r.subject, r.detail) for r in rows] == [
         ("CHAIN_UNREADABLE", "x/b#2", "error: x/b#2 has more than 100 labels, which chains.py does not page")

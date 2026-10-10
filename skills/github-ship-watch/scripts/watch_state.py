@@ -100,7 +100,8 @@ Intake (github-issue-triage's triage_state.py):
                   github-issue-triage's chains.py show --trusted-only, run once over the open
                   issues but the ones read as UNTRUSTED or closed, and never reading or
                   following an issue whose author is neither an OWNER, MEMBER, or COLLABORATOR
-                  nor the --bot-login, D-16) that is ready, linked to another item, and in a
+                  of this repo (in another repo: its owner or collaborator) nor the
+                  --bot-login, D-16) that is ready, linked to another item, and in a
                   repo whose .github/shipmill.toml has no [agents] table, or that has none:
                   nothing takes it up, so the chain stalls there. One row per item, naming it
                   and its repo; an action for a person (a gate there, or the item done by
