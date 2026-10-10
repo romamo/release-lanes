@@ -1770,8 +1770,9 @@ def test_s014_10_needs_decision_joins_its_row_and_upgrade_issues_leave_the_issue
 
 
 def test_s014_10_d16_an_untrusted_upgrade_issue_stays_untrusted_for_an_unattended_gate(ws: ModuleType) -> None:
-    # the release workflow opens the issue as github-actions[bot]: neither trusted nor the gate's
-    # App, so with --trusted-only triage_state.py reads it UNTRUSTED, and no session starts for it
+    # an upgrade issue by an outsider (neither trusted, the gate's App, nor the release
+    # workflow's own, D-30): with --trusted-only triage_state.py reads it UNTRUSTED, and no
+    # session starts for it
     issues = [upgrade_issue(ws, 12, labels=("needs-decision",)), upgrade_issue(ws, 13)]
     upgrades = Upgrades(ws, issues, comments={12: []})
     lines = [triage_line(12, "UNTRUSTED"), triage_line(13, "UNTRUSTED")]
@@ -1781,6 +1782,45 @@ def test_s014_10_d16_an_untrusted_upgrade_issue_stays_untrusted_for_an_unattende
     lines = [triage_line(12, "NEEDS_DECISION"), triage_line(13, "NEW")]
     rows = ws.intake("o/r", 1, "\n".join(lines), [], lambda n: [], BOT, True, False, upgrades.found)
     assert [(r.state, r.subject) for r in rows] == [("UPGRADE_PENDING", "#13"), ("NEEDS_DECISION", "o/r")]
+
+
+def workflow_issue_line(ws: ModuleType, number: int, body: str, labels: tuple[str, ...]) -> str:
+    """triage_state.py's --trusted-only line for an issue github-actions[bot] opened, as
+    GraphQL gives it (the Bot's login without "[bot]")"""
+    node = {
+        "number": number,
+        "title": "t",
+        "body": body,
+        "author": {"__typename": "Bot", "login": "github-actions"},
+        "authorAssociation": "NONE",
+        "labels": {"nodes": [{"name": n} for n in labels]},
+        "comments": {"nodes": []},
+        "timelineItems": {"nodes": []},
+    }
+    found = ws.TRIAGE.gated(node, BOT, True) or ws.TRIAGE.classify_open(
+        node, "Triage:", "postponed", {}, None, ("o", "r")
+    )
+    return triage_line(number, found[0])
+
+
+def test_s014_10_d30_the_release_workflows_upgrade_issue_is_pending_for_an_unattended_gate(ws: ModuleType) -> None:
+    # #314: the release workflow opens the issue as github-actions[bot] with the label and the
+    # marker as its first line, so --trusted-only reads it as usual and the gate asks (D-30)
+    marker = "<!-- shipmill-upgrade: changelog-fragments 0.37.0 -->"
+    body = f"{marker}\nshipmill 0.37.0 offers ...\n"
+    upgrades = Upgrades(ws, [upgrade_issue(ws, 12, author="github-actions[bot]")])
+    line = workflow_issue_line(ws, 12, body, ("shipmill-upgrade",))
+    rows = ws.intake("o/r", 1, line, [], lambda n: [], BOT, True, False, upgrades.found)
+    want = ("UPGRADE_PENDING", "#12", "changelog-fragments: ask the maintainer (upgrade = propose)")
+    assert [(r.state, r.subject, r.detail) for r in rows] == [want]
+    # any other workflow issue stays UNTRUSTED: label only, marker only, or marker on line 2
+    others = [
+        workflow_issue_line(ws, 20, "shipmill 0.37.0 offers ...\n", ("shipmill-upgrade",)),
+        workflow_issue_line(ws, 21, body, ()),
+        workflow_issue_line(ws, 22, f"Upgrade\n{marker}\n", ("shipmill-upgrade",)),
+    ]
+    rows = ws.intake("o/r", 0, "\n".join(others), [], lambda n: [], BOT, True, False, Upgrades(ws, []).found)
+    assert [(r.state, r.detail) for r in rows] == [("UNTRUSTED", "#20 #21 #22")]
 
 
 def test_s014_10_without_upgrade_issues_the_intake_rows_are_unchanged(ws: ModuleType) -> None:

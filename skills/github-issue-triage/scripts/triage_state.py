@@ -65,7 +65,12 @@ For each open issue:
                    open issue doesn't read BLOCKED (#309)
   UNTRUSTED        with --trusted-only, an issue whose author is neither an OWNER,
                    MEMBER, or COLLABORATOR nor the --bot-login, whatever it would read
-                   otherwise: an unattended session leaves it to an interactive one (D-16)
+                   otherwise: an unattended session leaves it to an interactive one (D-16).
+                   One exception (D-30): a config upgrade's issue the release workflow
+                   opened, authored by the Bot github-actions[bot], labelled
+                   shipmill-upgrade, and with <!-- shipmill-upgrade: <id> <version> --> as
+                   its body's first line, reads as usual; any other github-actions[bot]
+                   issue, or one with only the label or only the marker, is UNTRUSTED
 
 An open issue labelled human is a person's item (spec 017): its assignees do it, no PR
 state (IN_PROGRESS, DONE_NOT_CLOSED) applies, and it counts as triaged from the start, so
@@ -433,6 +438,11 @@ DECISION_MARKER = "<!-- shipmill:needs-decision -->"  # the first line of a sess
 # The author associations whose comment answers a question, and whose issue an unattended
 # session works on (D-16); CONTRIBUTOR, FIRST_TIMER, NONE, and the rest never count
 TRUSTED = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+# A config upgrade's issue (spec 014), as the release workflow opens it: shipmill's
+# github.UPGRADE_LABEL, and its first line, shipmill's upgrades.marker (the id and version)
+UPGRADE_LABEL = "shipmill-upgrade"
+UPGRADE_MARKER = re.compile(r"^<!-- shipmill-upgrade: ([a-z][a-z0-9]*(?:-[a-z0-9]+)*) (\S+) -->\s*$")
+WORKFLOW_BOT = "github-actions[bot]"  # who the release workflow writes as
 # A person's item (spec 017): its assignees do it, a hand-off comment tells them it is
 # their turn, and a verified comment records that a session checked a close by hand
 HUMAN_LABEL = "human"
@@ -1051,6 +1061,25 @@ def trusted(author: str, association: str, bot_login: str | None) -> bool:
     return association in TRUSTED or (bot_login is not None and same_login(author, bot_login))
 
 
+def upgrade_id(body: str) -> str | None:
+    """The config upgrade an issue proposes, from the marker on its body's first line (not
+    past leading blank lines); None without one"""
+    found = UPGRADE_MARKER.match(body.replace("\r\n", "\n").split("\n", 1)[0])
+    return found.group(1) if found else None
+
+
+def workflow_upgrade(issue: dict[str, Any]) -> bool:
+    """D-30: an issue the release workflow opened for a config upgrade, which an unattended
+    session takes up too: authored by the Bot github-actions[bot] (a User of a like name
+    never counts), labelled shipmill-upgrade, with the upgrade marker as its body's first
+    line. Any other github-actions[bot] issue stays untrusted"""
+    author = issue.get("author")
+    if not author or author.get("__typename") != "Bot" or not same_login(login(author), WORKFLOW_BOT):
+        return False
+    labels = {n["name"] for n in issue["labels"]["nodes"]}
+    return UPGRADE_LABEL in labels and upgrade_id(issue["body"]) is not None
+
+
 def assignees(issue: dict[str, Any]) -> list[str]:
     """The logins a person's item is assigned to"""
     return [str(n["login"]) for n in issue["assignees"]["nodes"]]
@@ -1099,7 +1128,7 @@ def gated(issue: dict[str, Any], bot_login: str | None, trusted_only: bool) -> t
     other state; None when none holds, and the issue reads as classify_open says. DECIDED
     comes first so the reply is acted on, whatever its text links (#309)"""
     author, association = login(issue.get("author")), str(issue.get("authorAssociation") or "NONE")
-    if trusted_only and not trusted(author, association, bot_login):
+    if trusted_only and not trusted(author, association, bot_login) and not workflow_upgrade(issue):
         return "UNTRUSTED", f"opened by @{author} ({association.lower()})"
     if DECISION_LABEL in {n["name"] for n in issue["labels"]["nodes"]}:
         comments = [
