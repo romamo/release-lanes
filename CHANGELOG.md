@@ -7,6 +7,18 @@ bot.
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-10-10
+
+### Added
+
+- `docs/design/product-layer.md` maps the product layer (feedback, opportunities, specs, build items, decisions, milestones, releases), who moves each object, and the gaps ranked, starting with #334, #336, #337 and #338
+- Triage: a GitHub issue dependency (blocked by) or a sub-issue holds a triaged issue as a "Depends on" line does, in any repo, listed once with its text holds and marked `(native)` or `(child)`; a parent's note starts with `children K/N closed`, and a forge that can't read the relations falls back to the text holds with one note (#340)
+- Triage: `chains.py link <owner/repo#N> --blocked-by <owner/repo#M>` and `--child <owner/repo#C>` write a dependency both as GitHub's native relation (blocked by, or sub-issue) and as a `Depends on` line in the issue's body, adding only the half that is missing; when the forge refuses the relation it writes the line alone and says `text only:` (#341)
+
+### Changed
+
+- shipmill.dev: a new landing page with the run of #312 to 0.41.2 as its proof, the seven stages, per-stage control, release lanes, and a contact address, `hello@shipmill.dev` (#346)
+
 ## [0.45.0] - 2026-10-09
 
 ### Changed
@@ -1411,7 +1423,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.45.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.46.0...HEAD
+[0.46.0]: https://github.com/shipmill/shipmill/compare/v0.45.0...v0.46.0
 [0.45.0]: https://github.com/shipmill/shipmill/compare/v0.44.0...v0.45.0
 [0.44.0]: https://github.com/shipmill/shipmill/compare/v0.43.0...v0.44.0
 [0.43.0]: https://github.com/shipmill/shipmill/compare/v0.42.0...v0.43.0
