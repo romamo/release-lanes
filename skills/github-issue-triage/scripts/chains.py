@@ -102,7 +102,8 @@ Standing = Callable[[str, str], bool]
 Execute = Callable[[list[str]], subprocess.CompletedProcess[str]]
 
 REFERENCE = re.compile(r"^(?P<owner>[\w.-]+)/(?P<name>[\w.-]+)#(?P<num>[1-9]\d*)$")
-LOGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}")  # a user's login, as a URL path segment
+# a user's login, as a URL path segment; an Enterprise Managed User's is handle_shortcode
+LOGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,38}")
 # GraphQL errors that are no refusal of the relation: the run fails instead
 TRANSIENT = frozenset({"RATE_LIMITED"})
 # The forge refusing the relation: a schema without the field or mutation (GitHub

@@ -524,6 +524,20 @@ def test_a_malformed_author_login_fails_the_walk(
     assert err.startswith("error: x/b#2:") and "orgs" not in err
 
 
+def test_an_enterprise_managed_users_login_is_checked_not_refused(
+    ch: ModuleType, forge: Forge, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # an Enterprise Managed User's login is handle_shortcode: an underscore, still one path segment
+    forge.issue("o/r#1", body="Depends on x/b#2")
+    forge.issue("x/b#2", author=("mona_acme", "NONE"))
+    forge.collaborators = {("o/r", "mona_acme")}
+    forge.configs = {"x/b": GATED}
+    show(ch, forge, "o/r#1", "--json", "--trusted-only")
+    rows = json.loads(capsys.readouterr().out)["rows"]
+    assert [(r["ref"], r["state"]) for r in rows] == [("o/r#1", "BLOCKED"), ("x/b#2", "READY")]
+    assert forge.checked == [("o/r", "mona_acme")]
+
+
 def test_the_collaborator_check_is_one_rest_call_and_only_a_404_means_no(ch: ModuleType) -> None:
     asked: list[list[str]] = []
 
