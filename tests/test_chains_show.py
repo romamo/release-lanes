@@ -2,7 +2,9 @@
 stalls for want of a gate; and github-ship-watch's CHAIN_NO_GATE row from it (spec 017)"""
 
 import base64
+import contextlib
 import importlib.util
+import io
 import json
 import subprocess
 import sys
@@ -63,6 +65,9 @@ class Forge:
         self.asked: list[list[str]] = []  # the references of each query
         self.read: list[str] = []  # the repos whose config was read
         self.errors: list[dict[str, Any]] = []  # added to every response
+        self.refuse_native = False  # a forge without issue relations
+        self.queries: list[bool] = []  # whether each query asked for the relations
+        self.ran: list[list[str]] = []  # the chains.py command lines watch_state.py ran
 
     def issue(self, ref: str, state: str = "OPEN", **fields: Any) -> None:
         repo, _, number = ref.partition("#")
@@ -82,7 +87,7 @@ class Forge:
     def connection(self, refs: list[str], states: bool = True, more: bool = False) -> dict[str, Any]:
         return {"pageInfo": {"hasNextPage": more}, "nodes": [self.related(r, states) for r in refs]}
 
-    def node(self, item: dict[str, Any]) -> dict[str, Any]:
+    def node(self, item: dict[str, Any], native: bool) -> dict[str, Any]:
         base = {
             "__typename": item["type"],
             "number": item["number"],
@@ -93,9 +98,12 @@ class Forge:
         if item["type"] == "PullRequest":
             return base
         more = item.get("more", "")
-        return base | {
+        author, association = item.get("author", ("alice", "OWNER"))
+        fields = base | {
             "stateReason": item.get("reason"),
             "body": item.get("body", ""),
+            "author": {"__typename": "User", "login": author},
+            "authorAssociation": association,
             "labels": {
                 "pageInfo": {"hasNextPage": more == "labels"},
                 "nodes": [{"name": n} for n in item.get("labels", ())],
@@ -104,6 +112,10 @@ class Forge:
                 "pageInfo": {"hasNextPage": False},
                 "nodes": [{"login": n} for n in item.get("assignees", ())],
             },
+        }
+        if not native:
+            return fields
+        return fields | {
             "blockedBy": self.connection(item.get("blocked_by", []), more=more == "blockedBy"),
             "subIssues": self.connection(item.get("children", [])),
             "blocking": self.connection(item.get("blocking", []), states=False),
@@ -114,7 +126,13 @@ class Forge:
         count = 0
         while f"o{count}" in variables:
             count += 1
-        assert query == self.ch.items_query(count)
+        native = query == self.ch.items_query(count)
+        assert native or query == self.ch.items_query(count, native=False)
+        self.queries.append(native)
+        if native and self.refuse_native:
+            undefined = {"code": "undefinedField", "typeName": "Issue", "fieldName": "blockedBy"}
+            message = "Field 'blockedBy' doesn't exist on type 'Issue'"
+            return {"errors": [{"message": message, "extensions": undefined}]}
         refs = [f"{variables[f'o{i}']}/{variables[f'n{i}']}#{variables[f'k{i}']}" for i in range(count)]
         self.asked.append(refs)
         data: dict[str, Any] = {}
@@ -125,7 +143,7 @@ class Forge:
                 data[f"i{i}"] = None
                 errors.append({"type": "NOT_FOUND", "path": [f"i{i}"], "message": "Could not resolve to a Repository"})
             else:
-                data[f"i{i}"] = {"issueOrPullRequest": self.node(item)}
+                data[f"i{i}"] = {"issueOrPullRequest": self.node(item, native)}
         return {"data": data, **({"errors": errors} if errors else {})}
 
     def config(self, repo: str) -> str | None:
@@ -338,29 +356,62 @@ def test_several_starts_share_their_reads_a_query_holding_twenty(
     assert forge.read == ["x/b"]
 
 
+# proves: S-017-5
+def test_a_forge_without_relations_walks_on_text_holds_with_one_note(
+    ch: ModuleType, forge: Forge, capsys: pytest.CaptureFixture[str]
+) -> None:
+    forge.refuse_native = True
+    forge.issue("o/r#1", body="Depends on o/r#2", blocked_by=["o/r#9"])
+    forge.issue("o/r#2", body="Depends on o/r#3")
+    forge.issue("o/r#3", state="CLOSED")
+    forge.issue("o/r#9")
+    forge.configs = {"o/r": GATED}
+    code = show(ch, forge, "o/r#1", "--json")
+    out, err = capsys.readouterr()
+    rows = json.loads(out)["rows"]
+    assert [(r["ref"], r["state"]) for r in rows] == [("o/r#1", "BLOCKED"), ("o/r#2", "READY"), ("o/r#3", "CLOSED")]
+    assert code == 0
+    assert err == "note: native relations unavailable: Field 'blockedBy' doesn't exist on type 'Issue'\n"
+    assert forge.queries == [True, False, False, False]  # asked once with them, never again
+
+
+def trusted_only(ch: ModuleType, forge: Forge) -> Any:
+    """watch_state.py's runner for chains.py: the script's main on the fake forge, its exit 2
+    as a failed process"""
+
+    def execute(cmd: list[str]) -> subprocess.CompletedProcess[str]:
+        forge.ran.append(cmd)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            try:
+                code = ch.main(cmd[2:], run=forge, contents=forge.config)
+            except SystemExit as exited:
+                code = int(exited.code or 0)
+        return proc(code, out.getvalue(), err.getvalue())
+
+    return execute
+
+
+def triage_lines(*rows: tuple[int, str]) -> str:
+    return "\n".join(json.dumps({"number": n, "state": s, "title": "t", "note": ""}) for n, s in rows)
+
+
 # proves: S-017-20
 def test_ship_watch_reports_chain_no_gate_from_what_chains_show_prints(
-    ch: ModuleType, ws: ModuleType, forge: Forge, capsys: pytest.CaptureFixture[str]
+    ch: ModuleType, ws: ModuleType, forge: Forge
 ) -> None:
     forge.issue("o/r#3", body="Depends on x/b#2")
     forge.issue("x/b#2")
     forge.issue("o/r#5")  # ready, linked to nothing: in no chain
     forge.issue("o/r#12", blocked_by=["o/r#3"])
     forge.configs = {"o/r": None, "x/b": None}
-    triage = "\n".join(
-        json.dumps({"number": n, "state": s, "title": "t", "note": ""})
-        for n, s in [(3, "BLOCKED"), (5, "NEW"), (12, "BLOCKED"), (7, "UNTRUSTED"), (40, "SUSPECT_CLOSE")]
+    triage = triage_lines(
+        (3, "BLOCKED"), (5, "NEW"), (12, "BLOCKED"), (7, "UNTRUSTED"), (40, "SUSPECT_CLOSE"), (41, "VERIFY_CLOSED")
     )
-    ran: list[list[str]] = []
-
-    def execute(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-        ran.append(cmd)
-        code = ch.main(cmd[2:], run=forge, contents=forge.config)
-        return proc(code, capsys.readouterr().out)
-
-    rows = ws.chain_rows("o/r", triage, execute)
-    # every open issue but the UNTRUSTED one starts a chain, in one run
-    assert ran == [[sys.executable, str(ws.CHAINS), "show", "--json", "o/r#3", "o/r#5", "o/r#12"]]
+    rows = ws.chain_rows("o/r", triage, "app[bot]", trusted_only(ch, forge))
+    # every open issue but the UNTRUSTED one starts a chain, in one run that follows no outsider
+    cmd = [sys.executable, str(ws.CHAINS), "show", "--json", "--trusted-only", "--bot-login", "app[bot]"]
+    assert forge.ran == [[*cmd, "o/r#3", "o/r#5", "o/r#12"]]
     assert [(r.state, r.subject) for r in rows] == [("CHAIN_NO_GATE", "x/b#2")]
     assert "x/b" in rows[0].detail
     assert rows[0].fix == "set up a gate on x/b (/shipmill:shipmill-setup x/b), or do x/b#2 by hand"
@@ -368,16 +419,86 @@ def test_ship_watch_reports_chain_no_gate_from_what_chains_show_prints(
     assert "CHAIN_NO_GATE" in ws.ACTION and "CHAIN_NO_GATE" not in ws.AGENT
 
 
-def test_s017_20_chain_no_gate_rows_fail_fast_and_skip_with_no_open_issue(ws: ModuleType) -> None:
+@pytest.mark.parametrize(
+    "outsider",
+    [
+        {"more": "labels"},  # past a page of labels: a trusted issue's would fail the walk
+        {"body": "Depends on bad/cfg#1"},  # names a ready item in a repo whose config can't be parsed
+    ],
+)
+def test_s017_20_the_watch_never_reads_or_follows_an_outsiders_issue(
+    ch: ModuleType, ws: ModuleType, forge: Forge, outsider: dict[str, Any]
+) -> None:
+    # D-16: an outsider marks their issue blocked by a public one of the repo's
+    forge.issue("o/r#3", blocking=["evil/x#9"])
+    forge.issue("evil/x#9", blocked_by=["o/r#3"], author=("mallory", "NONE"), **outsider)
+    forge.issue("bad/cfg#1")
+    forge.configs = {"o/r": GATED, "bad/cfg": "[agents\n"}
+    rows = ws.chain_rows("o/r", triage_lines((3, "NEW")), None, trusted_only(ch, forge))
+    assert rows == []
+    assert "bad/cfg#1" not in {ref for refs in forge.asked for ref in refs} and forge.read == ["o/r"]
+
+
+def test_show_with_trusted_only_reads_an_outsiders_issue_for_its_state_alone(
+    ch: ModuleType, forge: Forge, capsys: pytest.CaptureFixture[str]
+) -> None:
+    forge.issue("o/r#1", body="Depends on evil/x#9")
+    forge.issue("evil/x#9", author=("mallory", "NONE"), body="Depends on o/r#7", more="labels")
+    forge.issue("o/r#7")
+    forge.issue("o/r#8", author=("shipmill-app", "NONE"), body="Depends on o/r#1")  # the bot's own is trusted
+    code = show(ch, forge, "o/r#1", "o/r#8", "--json", "--trusted-only", "--bot-login", "shipmill-app")
+    rows = json.loads(capsys.readouterr().out)["rows"]
+    assert [(r["ref"], r["state"], r["title"]) for r in rows] == [
+        ("o/r#1", "BLOCKED", "title of o/r#1"),  # its open state still holds
+        ("o/r#8", "BLOCKED", "title of o/r#8"),
+        ("evil/x#9", "UNTRUSTED", None),
+    ]
+    assert code == 0 and ch.show_line(rows[2]) == "evil/x#9 UNTRUSTED"
+
+
+def test_a_failed_chain_walk_is_one_chain_unreadable_row_and_the_watch_goes_on(
+    ch: ModuleType, ws: ModuleType, forge: Forge
+) -> None:
+    forge.issue("o/r#3", body="Depends on x/b#2")
+    forge.issue("x/b#2", more="labels")  # a trusted issue past a page: the walk exits 2
+    forge.configs = {}
+    rows = ws.chain_rows("o/r", triage_lines((3, "NEW")), None, trusted_only(ch, forge))
+    assert [(r.state, r.subject, r.detail) for r in rows] == [
+        ("CHAIN_UNREADABLE", "x/b#2", "error: x/b#2 has more than 100 labels, which chains.py does not page")
+    ]
+    assert rows[0].fix == f"see why: uv run --no-project python {ws.CHAINS} show --trusted-only x/b#2"
+    assert rows[0].json()["agent"] is False
+    assert "CHAIN_UNREADABLE" in ws.ACTION and "CHAIN_UNREADABLE" not in ws.AGENT
+    # an error naming no item names the repo, and the fix reruns the walk on its open issues
+    failed = ws.chain_rows("o/r", triage_lines((3, "NEW")), None, lambda cmd: proc(2, err="error: gh: boom\n"))
+    assert [(r.state, r.subject, r.detail) for r in failed] == [("CHAIN_UNREADABLE", "o/r", "error: gh: boom")]
+    assert failed[0].fix.endswith("show --trusted-only o/r#3")
+    garbled = ws.chain_rows("o/r", triage_lines((3, "NEW")), None, lambda cmd: proc(0, "not json"))
+    assert [r.state for r in garbled] == ["CHAIN_UNREADABLE"]
+
+
+def test_s017_20_no_open_issue_runs_no_walk_and_a_malformed_reference_is_refused(ws: ModuleType) -> None:
     def never(cmd: list[str]) -> subprocess.CompletedProcess[str]:
         raise AssertionError("chains.py ran with no open issue")
 
-    closed = json.dumps({"number": 4, "state": "SUSPECT_CLOSE", "title": "t", "note": ""})
-    assert ws.chain_rows("o/r", closed, never) == []
-    with pytest.raises(ws.Refused, match="chains.py show: error: gh: boom"):
-        ws.chain_rows("o/r", '{"number": 1, "state": "NEW"}', lambda cmd: proc(2, err="error: gh: boom\n"))
+    assert ws.chain_rows("o/r", triage_lines((4, "SUSPECT_CLOSE"), (5, "VERIFY_CLOSED")), None, never) == []
     bad = {"rows": [{"ref": "x/b#2 or; rm -rf", "gate": "NO_GATE", "waits_on": ["o/r#1"], "waited_on_by": []}]}
     with pytest.raises(ws.Refused, match="malformed reference"):
         ws.chain_no_gate_rows(bad)
     with pytest.raises(ws.Refused):
         ws.chain_no_gate_rows([])
+    rows = ws.chain_rows("o/r", triage_lines((3, "NEW")), None, lambda cmd: proc(0, json.dumps(bad)))
+    # only the checked owner/repo#N part of what it printed is named, never the rest
+    assert [(r.state, r.subject) for r in rows] == [("CHAIN_UNREADABLE", "x/b#2")]
+    assert rows[0].fix is not None and "rm -rf" not in rows[0].fix
+
+
+def test_the_310_reader_refuses_a_malformed_agents_header_as_tomllib_does(ws: ModuleType) -> None:
+    policy = Path("o/r:.github/shipmill.toml")
+    for broken in ("[agents\n", "[changelog]\nfragments = true\n[ agents \nprompt = 'x'\n"):
+        with pytest.raises(ws.Refused, match=r"o/r:\.github/shipmill\.toml: can't read \[agents\] on Python 3\.10"):
+            ws.agents_table_310(broken, policy)
+        with pytest.raises(ws.Refused):
+            ws.agents_table(broken, policy)  # tomllib, on this Python
+    assert ws.agents_table_310("[agents]\nprompt = 'x'\n", policy) == {"prompt": '"x"'}
+    assert ws.agents_table_310("[agentsmith]\nx = 1\n", policy) is None

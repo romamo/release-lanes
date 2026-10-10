@@ -96,12 +96,19 @@ Intake (github-issue-triage's triage_state.py):
                   the pull requests whose head is in a fork, as #N only (reported, never an
                   action: an interactive session takes them up, D-16)
   CHAIN_NO_GATE   an item of a chain one of the repo's open issues belongs to (spec 017,
-                  github-issue-triage's chains.py show, run once over the open issues but the
-                  ones read as UNTRUSTED) that is ready, linked to another item, and in a repo
-                  whose .github/shipmill.toml has no [agents] table, or that has none: nothing
-                  takes it up, so the chain stalls there. One row per item, naming it and its
-                  repo; an action for a person (a gate there, or the item done by hand), never
-                  an agent's
+                  github-issue-triage's chains.py show --trusted-only, run once over the open
+                  issues but the ones read as UNTRUSTED or closed, and never reading or
+                  following an issue whose author is neither an OWNER, MEMBER, or COLLABORATOR
+                  nor the --bot-login, D-16) that is ready, linked to another item, and in a
+                  repo whose .github/shipmill.toml has no [agents] table, or that has none:
+                  nothing takes it up, so the chain stalls there. One row per item, naming it
+                  and its repo; an action for a person (a gate there, or the item done by
+                  hand), never an agent's
+  CHAIN_UNREADABLE  the chain walk failed (a gh error, an issue past a page of labels or
+                  relations, a config it can't parse): one row naming the item the error
+                  names (else the repo) and the error's first line, in place of the
+                  CHAIN_NO_GATE rows, while the rest of the watch stands; an action for a
+                  person, never an agent's
 
 --bot-login and --trusted-only go through to triage_state.py: the login shipmill's
 sessions write as (whose comment is the question, and whose issue is trusted), and the
@@ -186,8 +193,8 @@ Holds and incidents lead the report. Exit 0 when nothing needs action, 1 when an
 BOT_FAILED, BOT_STALLED, BOT_PLAN_FAILED, WORK_BRANCH_STALE, NOT_PUBLISHED, UNANNOUNCED,
 ISSUES, OPERATE_FAILED, UNHEALTHY, PROMOTION_DUE, INCIDENT_OPEN, POSTMORTEM_DUE,
 NEEDS_DECISION, BRANCH_DELETE_OFF, SHIPMILL_OUTDATED, GATE_NO_APP, SKILL_SHADOWED,
-UPGRADE_PENDING, or CHAIN_NO_GATE row is present, 2 on bad input or a git, gh, or uvx
-failure (a failing `shipmill worktrees` or `chains.py show`; a `shipmill plan` failing
+UPGRADE_PENDING, CHAIN_NO_GATE, or CHAIN_UNREADABLE row is present, 2 on bad input or a
+git, gh, or uvx failure (a failing `shipmill worktrees`; a `shipmill plan` failing
 with its own `shipmill: ` error is the BOT_PLAN_FAILED row instead).
 Needs git, an authenticated gh, and uvx (for a shipmill bot's plan and worktrees; `shipmill
 worktrees` needs claude on PATH too, to see the live sessions). Python 3.10+,
@@ -292,6 +299,7 @@ ACTION = {
     "SKILL_SHADOWED",
     "UPGRADE_PENDING",
     "CHAIN_NO_GATE",
+    "CHAIN_UNREADABLE",
 }
 # the states whose row needs an agent: --json marks each row's "agent" from this, and
 # shipmill gate starts a session on those rows (SKILL.md's repair table says what it does)
@@ -1020,6 +1028,10 @@ def incident_label_toml(raw: dict[str, object], policy: Path) -> str:
 # other form is refused rather than misread
 
 
+TOML_HEADER = re.compile(r"^\s*(\[\[?)\s*([^\[\]]+?)\s*\]\]?\s*(?:#.*)?$")  # a [table] or [[array]] header
+AGENTS_HEADER = re.compile(r"^\s*\[+\s*[\"']?agents\b")  # a line that opens an [agents] header, well formed or not
+
+
 def toml_tables(text: str) -> dict[str, str]:
     """Each [table] header of a TOML file, its dotted parts unquoted, mapped to its body; the
     keys before the first header are under "". Arrays of tables ([[x]]) are skipped"""
@@ -1027,7 +1039,7 @@ def toml_tables(text: str) -> dict[str, str]:
     name: str | None = ""
     body: list[str] = []
     for line in [*text.splitlines(), "[[end]]"]:
-        header = re.match(r"^\s*(\[\[?)\s*([^\[\]]+?)\s*\]\]?\s*(?:#.*)?$", line)
+        header = TOML_HEADER.match(line)
         if header is None:
             body.append(line)
             continue
@@ -1633,10 +1645,11 @@ def intake_rows(
     return intake(repo, code, triage, prs, comments_of, bot_login, trusted_only, lands, upgrades)
 
 
-# triage_state.py's states of an issue that isn't open (SUSPECT_CLOSE), or that no
-# unattended pass reads the links of (UNTRUSTED, D-16): no chain starts from either
-NOT_CHAIN_STARTS = frozenset({"SUSPECT_CLOSE", "UNTRUSTED"})
+# triage_state.py's states of an issue that isn't open (SUSPECT_CLOSE, VERIFY_CLOSED), or
+# that no unattended pass reads the links of (UNTRUSTED, D-16): no chain starts from one
+NOT_CHAIN_STARTS = frozenset({"SUSPECT_CLOSE", "VERIFY_CLOSED", "UNTRUSTED"})
 CHAIN_REF = re.compile(r"^(?P<repo>[\w.-]+/[\w.-]+)#[1-9]\d*$")
+NAMED_REF = re.compile(r"(?<![\w.-])[\w.-]+/[\w.-]+#[1-9]\d*\b")  # the item a chains.py error names
 
 
 def chain_starts(repo: str, triage: str) -> list[str]:
@@ -1674,22 +1687,45 @@ def chain_no_gate_rows(shown: object) -> list[Row]:
     return rows
 
 
+def chain_unreadable_row(repo: str, starts: list[str], error: str) -> Row:
+    """CHAIN_UNREADABLE: the chain walk failed (a gh error, an issue past a page of labels or
+    relations, a config it can't parse), so the chains weren't checked; the rest of the
+    watch stands. The subject is the item the error's first line names, checked as
+    owner/repo#N, else the repo; the fix reruns the walk on it (else on the starts, the
+    repo's own open issues) to see the error, from those checked values alone"""
+    lines = [line.strip() for line in error.splitlines() if line.strip()]
+    first = next((line for line in lines if line.startswith("error:")), lines[0] if lines else "no error output")
+    named = NAMED_REF.search(first)
+    subject = named.group(0) if named is not None else repo
+    again = subject if named is not None else " ".join(starts)
+    fix = f"see why: uv run --no-project python {CHAINS} show --trusted-only {again}"
+    return Row("CHAIN_UNREADABLE", subject, first, fix)
+
+
 def chain_rows(
-    repo: str, triage: str, execute: Callable[[list[str]], subprocess.CompletedProcess[str]] = capture
+    repo: str,
+    triage: str,
+    bot_login: str | None = None,
+    execute: Callable[[list[str]], subprocess.CompletedProcess[str]] = capture,
 ) -> list[Row]:
     """The CHAIN_NO_GATE rows of the chains the repo's open issues belong to: one chains.py
-    show over all of them, which reads each item once and each repo's config once"""
+    show over all of them, which reads each item once and each repo's config once, and never
+    reads or follows an untrusted author's issue (--trusted-only, D-16). A walk that fails is
+    one CHAIN_UNREADABLE row instead, never the watch's exit 2"""
     starts = chain_starts(repo, triage)
     if not starts:
         return []
-    proc = execute([sys.executable, str(CHAINS), "show", "--json", *starts])
+    cmd = [sys.executable, str(CHAINS), "show", "--json", "--trusted-only"]
+    cmd += ["--bot-login", bot_login] if bot_login is not None else []
+    proc = execute([*cmd, *starts])
     if proc.returncode not in (0, 1):
-        raise Refused(f"error: chains.py show: {proc.stderr.strip() or f'exited {proc.returncode}'}")
+        return [chain_unreadable_row(repo, starts, proc.stderr or f"error: chains.py show exited {proc.returncode}")]
     try:
-        shown = json.loads(proc.stdout)
+        return chain_no_gate_rows(json.loads(proc.stdout))
     except json.JSONDecodeError as exc:
-        raise Refused(f"error: chains.py show --json printed no JSON: {exc}") from None
-    return chain_no_gate_rows(shown)
+        return [chain_unreadable_row(repo, starts, f"error: chains.py show --json printed no JSON: {exc}")]
+    except Refused as refused:
+        return [chain_unreadable_row(repo, starts, str(refused))]
 
 
 # -- agents --------------------------------------------------------------------------------
@@ -1734,7 +1770,11 @@ def agents_table_toml(raw: dict[str, object], policy: Path) -> dict[str, str] | 
 
 
 def agents_table_310(text: str, policy: Path) -> dict[str, str] | None:
-    """[agents] as a plain table of one-line keys; any other form is refused"""
+    """[agents] as a plain table of one-line keys; any other form is refused, a broken
+    header such as "[agents" too, which tomllib refuses and the table reader would skip"""
+    for line in text.splitlines():
+        if AGENTS_HEADER.match(line) and TOML_HEADER.match(line) is None:
+            raise Refused(f"error: {policy}: can't read [agents] on Python 3.10: a malformed header {line.strip()!r}")
     tables = toml_tables(text)
     if "agents" not in tables:
         return None
@@ -2155,7 +2195,7 @@ def main() -> int:
 
     code, triage = triage_run(args.repo, args.bot_login, args.trusted_only)
     rows += intake_rows(args.repo, code, triage, args.bot_login, args.trusted_only, lands_prs(table), upgrades)
-    rows += chain_rows(args.repo, triage)
+    rows += chain_rows(args.repo, triage, args.bot_login)
     rows += active_rows(fetch_active(args.repo), now)
     rows += agent_rows(args.repo, repo_dir, now)
     rows += shipmill_rows(args.repo, repo_dir)

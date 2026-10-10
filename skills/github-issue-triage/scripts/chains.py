@@ -4,7 +4,7 @@
 Usage:
   chains.py link <owner/repo#N> --blocked-by <owner/repo#M>
   chains.py link <owner/repo#P> --child <owner/repo#C>
-  chains.py show <owner/repo#N>... [--json]
+  chains.py show <owner/repo#N>... [--json] [--trusted-only] [--bot-login LOGIN]
 
 link  writes a link in both forms triage_state.py reads:
       --blocked-by  GitHub's native relation (GraphQL addBlockedBy: N is blocked by M)
@@ -46,6 +46,12 @@ show prints the chain an issue belongs to, one row per item, each once (by owner
       READY issue. An item that can't be read (no access, no such issue) is one row,
       owner/repo#N UNREADABLE, and the chain goes on past what could be read. Several
       references print the union of their chains, each item once, the GitHub reads shared.
+      With --trusted-only, an issue whose author is neither an OWNER, MEMBER, or
+      COLLABORATOR nor the --bot-login is one row, owner/repo#N UNTRUSTED: its state
+      still holds what waits on it, but nothing it says is read or followed (D-16). When
+      the forge refuses the relation fields (a GitHub Enterprise Server without issue
+      dependencies or sub-issues), the walk reads "Depends on" lines alone and prints one
+      "note: native relations unavailable: <first error line>" line to stderr.
       --json prints the rows as one JSON object, {"rows": [...]}, each row with ref, title,
       executor, state, holds (the open ones), waits_on and waited_on_by (every item it is
       linked to, open or closed), and gate ("NO_GATE" or null).
@@ -75,7 +81,7 @@ from typing import Any, NoReturn
 
 # What a "Depends on" line is and the issues it names, and the holds GitHub records, as
 # triage_state.py reads them
-from triage_state import DEPENDENCY, DEPENDS, dependency_refs, native_holds, ref_state
+from triage_state import DEPENDENCY, DEPENDS, dependency_refs, login, native_holds, ref_state, trusted
 
 Variables = dict[str, str | int]
 # Runs one GraphQL query with its variables and returns the parsed response, errors and
@@ -140,29 +146,40 @@ CONFIG = ".github/shipmill.toml"
 UNREADABLE_TYPES = frozenset({"NOT_FOUND", "FORBIDDEN"})  # no such repo or issue, or no access
 HELD = "pageInfo { hasNextPage } nodes { number state stateReason repository { nameWithOwner } }"
 LINKED = "pageInfo { hasNextPage } nodes { number repository { nameWithOwner } }"
-ITEM = f"""
-      __typename
-      ... on Issue {{
-        number title state stateReason body
-        repository {{ nameWithOwner }}
-        labels(first: {LINKS}) {{ pageInfo {{ hasNextPage }} nodes {{ name }} }}
-        assignees(first: {LINKS}) {{ pageInfo {{ hasNextPage }} nodes {{ login }} }}
+# The forge's relations, asked for until it refuses them (a GitHub Enterprise Server
+# without issue dependencies or sub-issues): then the walk reads text holds alone
+NATIVE_SHOW = ("blockedBy", "subIssues", "blocking", "parent")
+NATIVE_ITEM = f"""
         blockedBy(first: {LINKS}) {{ {HELD} }}
         subIssues(first: {LINKS}) {{ {HELD} }}
         blocking(first: {LINKS}) {{ {LINKED} }}
-        parent {{ number repository {{ nameWithOwner }} }}
-      }}
-      ... on PullRequest {{ number title state repository {{ nameWithOwner }} }}
-"""
+        parent {{ number repository {{ nameWithOwner }} }}"""
+NATIVE_NAMED = re.compile(r"\b(?:" + "|".join(NATIVE_SHOW) + r")\b")
 WATCH_STATE = Path(__file__).resolve().parents[2] / "github-ship-watch" / "scripts" / "watch_state.py"
 
 
-def items_query(count: int) -> str:
+def item_fields(native: bool) -> str:
+    """An item's fields; without native, a forge's that has no issue relations"""
+    return f"""
+      __typename
+      ... on Issue {{
+        number title state stateReason body
+        author {{ __typename login }} authorAssociation
+        repository {{ nameWithOwner }}
+        labels(first: {LINKS}) {{ pageInfo {{ hasNextPage }} nodes {{ name }} }}
+        assignees(first: {LINKS}) {{ pageInfo {{ hasNextPage }} nodes {{ login }} }}{NATIVE_ITEM if native else ""}
+      }}
+      ... on PullRequest {{ number title state repository {{ nameWithOwner }} }}
+"""
+
+
+def items_query(count: int, native: bool = True) -> str:
     """One query reading count items, the i-th under alias i<i> with variables $o<i>,
     $n<i>, $k<i>"""
+    fields = item_fields(native)
     params = ", ".join(f"$o{i}: String!, $n{i}: String!, $k{i}: Int!" for i in range(count))
     aliases = "\n".join(
-        f"  i{i}: repository(owner: $o{i}, name: $n{i}) {{ issueOrPullRequest(number: $k{i}) {{{ITEM}  }} }}"
+        f"  i{i}: repository(owner: $o{i}, name: $n{i}) {{ issueOrPullRequest(number: $k{i}) {{{fields}  }} }}"
         for i in range(count)
     )
     return f"query({params}) {{\n{aliases}\n}}\n"
@@ -380,15 +397,30 @@ def link(run: Runner, target: Ref, other: Ref, child: bool) -> int:
 
 Key = tuple[str, str, int]
 UNREADABLE = "UNREADABLE"
+UNTRUSTED = "UNTRUSTED"
 OPEN_HOLDS = frozenset({"OPEN", UNREADABLE})  # a hold that can't be read may still be open
+
+
+@dataclass
+class Reader:
+    """How the walk reads items: the runner; with trusted_only, an issue whose author is
+    neither an OWNER, MEMBER, or COLLABORATOR nor the bot_login is read for its state alone
+    and never followed (D-16); native turns False, for the rest of the run, once the forge
+    refuses the relation fields"""
+
+    run: Runner
+    trusted_only: bool = False
+    bot_login: str | None = None
+    native: bool = True
 
 
 @dataclass(frozen=True)
 class Item:
-    """An item of a chain as GitHub reads it. kind is Issue, PullRequest, or UNREADABLE (ref
-    then as asked, the rest empty); state is ref_state's; holds are the items it waits on,
-    each with the state GitHub gave along (a native relation) or None (a "Depends on" line);
-    waited_on_by, the issues it blocks and its parent"""
+    """An item of a chain as GitHub reads it. kind is Issue, PullRequest, UNTRUSTED (an issue
+    by an untrusted author: its state alone), or UNREADABLE (ref then as asked, the rest
+    empty); state is ref_state's; holds are the items it waits on, each with the state GitHub
+    gave along (a native relation) or None (a "Depends on" line); waited_on_by, the issues it
+    blocks and its parent"""
 
     ref: Ref
     kind: str
@@ -413,11 +445,14 @@ def connection(node: dict[str, Any], field: str, ref: Ref) -> list[dict[str, Any
     return nodes
 
 
-def parse_item(node: dict[str, Any]) -> Item:
+def parse_item(node: dict[str, Any], reader: Reader) -> Item:
     ref = ref_of(node)
     title = str(node["title"])
     if node["__typename"] == "PullRequest":
         return Item(ref, "PullRequest", title, ref_state(node), "pull request")
+    association = str(node.get("authorAssociation") or "NONE")
+    if reader.trusted_only and not trusted(login(node.get("author")), association, reader.bot_login):
+        return Item(ref, UNTRUSTED, state=ref_state(node))  # nothing it says is read or followed
     labels = {n["name"] for n in connection(node, "labels", ref)}
     logins = [str(n["login"]) for n in connection(node, "assignees", ref)]
     executor = "agent"
@@ -428,12 +463,13 @@ def parse_item(node: dict[str, Any]) -> Item:
         hold = Ref(owner, name, number)
         holds.setdefault(hold.key, (hold, None))
     for field in ("blockedBy", "subIssues"):
-        connection(node, field, ref)  # fails past a page; native_holds reads them
-    for (owner, name, number), (_, state) in native_holds(node).items():
+        if field in node:  # absent when the forge refused the relations
+            connection(node, field, ref)  # fails past a page; native_holds reads them
+    for (owner, name, number), (_, state, _) in native_holds(node).items():
         hold = Ref(owner, name, number)
         holds[hold.key] = (holds.get(hold.key, (hold, None))[0], state)  # the text's spelling, GitHub's state
     holds.pop(ref.key, None)
-    waiting = [ref_of(n) for n in connection(node, "blocking", ref)]
+    waiting = [ref_of(n) for n in connection(node, "blocking", ref)] if "blocking" in node else []
     if node.get("parent"):
         waiting.append(ref_of(node["parent"]))
     downstream = {r.key: r for r in waiting if r.key != ref.key}
@@ -454,7 +490,32 @@ def unreadable_alias(error: object, count: int) -> int | None:
     return index if index < count else None
 
 
-def read_items(run: Runner, refs: list[Ref]) -> dict[Key, Item]:
+def native_refusal(error: object) -> bool:
+    """Whether a GraphQL error is the schema refusing one of the relation fields: an
+    undefinedField naming one, or a message saying one "doesn't exist on type", as
+    triage_state.py's names_native reads it for blockedBy and subIssues"""
+    if not isinstance(error, dict):
+        return False
+    extensions = error.get("extensions")
+    message = str(error.get("message", ""))
+    if isinstance(extensions, dict) and extensions.get("code") == "undefinedField":
+        return extensions.get("fieldName") in NATIVE_SHOW or NATIVE_NAMED.search(message) is not None
+    return UNDEFINED.search(message) is not None and NATIVE_NAMED.search(message) is not None
+
+
+def answer(reader: Reader, count: int, variables: Variables) -> dict[str, Any]:
+    """One query's response; when the forge refuses the relation fields, one stderr note,
+    then this query and every later one without them (spec 017's text holds alone)"""
+    response = reader.run(items_query(count, reader.native), variables)
+    errors = response.get("errors") or []
+    if reader.native and errors and all(native_refusal(e) for e in errors):
+        sys.stderr.write(f"note: native relations unavailable: {first_line(errors)}\n")
+        reader.native = False
+        response = reader.run(items_query(count, reader.native), variables)
+    return response
+
+
+def read_items(reader: Reader, refs: list[Ref]) -> dict[Key, Item]:
     """The items refs name, CHUNK per query, each under the key it was asked by"""
     found: dict[Key, Item] = {}
     for start in range(0, len(refs), CHUNK):
@@ -462,7 +523,7 @@ def read_items(run: Runner, refs: list[Ref]) -> dict[Key, Item]:
         variables: Variables = {}
         for i, ref in enumerate(chunk):
             variables.update({f"o{i}": ref.owner, f"n{i}": ref.name, f"k{i}": ref.number})
-        response = run(items_query(len(chunk)), variables)
+        response = answer(reader, len(chunk), variables)
         unreadable: set[int] = set()
         for error in errors_of(response):
             index = unreadable_alias(error, len(chunk))
@@ -477,11 +538,11 @@ def read_items(run: Runner, refs: list[Ref]) -> dict[Key, Item]:
             elif node is None:
                 fail(f"gh: no item {ref} in the response and no error naming it")
             else:
-                found[ref.key] = parse_item(node)
+                found[ref.key] = parse_item(node, reader)
     return found
 
 
-def walk(run: Runner, starts: list[Ref]) -> tuple[list[Item], dict[Key, Item]]:
+def walk(reader: Reader, starts: list[Ref]) -> tuple[list[Item], dict[Key, Item]]:
     """The chain of starts, each item once in the order found, and every item read (by the
     key it was asked by and by its own): the chain's, and the holds of the issues that wait
     on a start, read for their states only"""
@@ -489,7 +550,7 @@ def walk(run: Runner, starts: list[Ref]) -> tuple[list[Item], dict[Key, Item]]:
 
     def read(refs: list[Ref]) -> None:
         missing = {r.key: r for r in refs if r.key not in items}
-        for key, item in read_items(run, list(missing.values())).items():
+        for key, item in read_items(reader, list(missing.values())).items():
             items[key] = item
             items.setdefault(item.ref.key, item)  # a renamed repo answers under its new name
 
@@ -497,7 +558,7 @@ def walk(run: Runner, starts: list[Ref]) -> tuple[list[Item], dict[Key, Item]]:
     for ref in starts:
         if items[ref.key].kind == UNREADABLE:
             fail(f"can't read {ref}: no such issue, or no access to it")
-        if items[ref.key].kind != "Issue":
+        if items[ref.key].kind == "PullRequest":
             fail(f"{ref} is a pull request, not an issue")
     chain: dict[Key, Item] = {}
     up, down = list(starts), list(starts)
@@ -595,18 +656,18 @@ def show_rows(chain: list[Item], items: dict[Key, Item], contents: Contents) -> 
     gates: dict[str, bool] = {}
     rows: list[dict[str, Any]] = []
     for item in chain:
-        readable = item.kind != UNREADABLE
+        shown = item.kind not in (UNREADABLE, UNTRUSTED)  # neither's text is shown
         row: dict[str, Any] = {
             "ref": str(item.ref),
-            "title": item.title if readable else None,
-            "executor": item.executor if readable else None,
+            "title": item.title if shown else None,
+            "executor": item.executor if shown else None,
             "holds": [],
             "waits_on": [str(named(hold)) for hold, _ in item.holds],
             "waited_on_by": [str(ref) for ref in waiting.get(item.ref.key, {}).values()],
             "gate": None,
         }
-        if not readable:
-            row["state"] = UNREADABLE
+        if not shown:
+            row["state"] = item.kind
         elif item.kind == "PullRequest":
             row["state"] = "OPEN" if item.state == "OPEN" else "CLOSED"
         elif item.state != "OPEN":
@@ -625,14 +686,14 @@ def show_rows(chain: list[Item], items: dict[Key, Item], contents: Contents) -> 
 
 
 def show_line(row: dict[str, Any]) -> str:
-    if row["state"] == UNREADABLE:
-        return f"{row['ref']} {UNREADABLE}"
+    if row["state"] in (UNREADABLE, UNTRUSTED):
+        return f"{row['ref']} {row['state']}"
     state = row["state"] + (f" ({' '.join(row['holds'])})" if row["holds"] else "")
     return "  ".join([row["ref"], row["title"], row["executor"], state, *([row["gate"]] if row["gate"] else [])])
 
 
-def show(run: Runner, contents: Contents, starts: list[Ref], as_json: bool) -> int:
-    chain, items = walk(run, starts)
+def show(reader: Reader, contents: Contents, starts: list[Ref], as_json: bool) -> int:
+    chain, items = walk(reader, starts)
     rows = show_rows(chain, items, contents)
     if as_json:
         print(json.dumps({"rows": rows}, sort_keys=True))
@@ -652,9 +713,16 @@ def main(argv: Sequence[str] | None = None, run: Runner = gh_graphql, contents: 
     show_parser = commands.add_parser("show", help="print the chain an issue belongs to")
     show_parser.add_argument("issues", nargs="+", metavar="OWNER/REPO#N", help="the issue (or issues) to start from")
     show_parser.add_argument("--json", action="store_true", help="the rows as one JSON object")
+    show_parser.add_argument(
+        "--trusted-only", action="store_true", help="read an untrusted author's issue for its state alone (D-16)"
+    )
+    show_parser.add_argument("--bot-login", help="the login shipmill's sessions write as, such as <slug>[bot]")
     args = parser.parse_args(argv)
     if args.command == "show":
-        return show(run, contents, [parse_ref(issue) for issue in args.issues], args.json)
+        if args.bot_login is not None and not args.bot_login.strip():
+            parser.error("--bot-login must not be empty")
+        reader = Reader(run, args.trusted_only, args.bot_login)
+        return show(reader, contents, [parse_ref(issue) for issue in args.issues], args.json)
     target = parse_ref(args.issue)
     other = parse_ref(args.child if args.child is not None else args.blocked_by)
     return link(run, target, other, child=args.child is not None)
