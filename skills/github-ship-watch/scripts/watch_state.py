@@ -85,7 +85,8 @@ Intake (github-issue-triage's triage_state.py):
   ISSUES          issues needing triage action, counted by state
   ISSUES_OPEN     the other open issues, by state: in progress, blocked, triaged, or
                   postponed, less the ones NEEDS_DECISION and UNTRUSTED list (reported,
-                  never an action by itself)
+                  never an action by itself). A person's item waiting on its assignees
+                  (WITH_PERSON, spec 017) names them: WITH_PERSON #N (@login ...)
   PRS_OPEN        open non-draft pull requests (reported, never an action by itself),
                   less the ones NEEDS_DECISION and UNTRUSTED list
   NEEDS_DECISION  issues and pull requests labelled needs-decision whose question has no
@@ -249,6 +250,8 @@ TRIAGE_ACTION = {
     "VERIFY_CLOSED",
 }
 POLICY = Path(".github/shipmill.toml")
+# a GitHub login, as a WITH_PERSON line's assignees name them: the row shows nothing else (D-16)
+LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\[bot\])?$")
 # Where uvx gets shipmill for a skill script's writes as the App, the form the skills use (#286)
 SHIPMILL_SOURCE = "git+https://github.com/shipmill/shipmill@v0"
 # an app_id key anywhere in the config, bare or as agents.app_id: only [agents] has one
@@ -1560,6 +1563,7 @@ def intake(
     nothing else: an unattended session never starts for it (D-16)"""
     owned = upgrades.owned if upgrades is not None else frozenset()
     counts: dict[str, list[int]] = {}
+    waits_on: dict[int, list[str]] = {}  # a WITH_PERSON issue's assignees (spec 017)
     untrusted_upgrades = set()
     for line in triage.splitlines():
         row = json.loads(line)
@@ -1568,6 +1572,8 @@ def intake(
             untrusted_upgrades.add(number)
         elif number in owned:
             continue
+        if row["state"] == "WITH_PERSON":
+            waits_on[number] = person_logins(row)
         counts.setdefault(row["state"], []).append(number)
     held_back = {f"#{n}" for n in untrusted_upgrades}
     rows = [r for r in (upgrades.rows if upgrades is not None else []) if r.subject not in held_back]
@@ -1578,7 +1584,9 @@ def intake(
         rows.append(Row("ISSUES", repo, detail, skill_fix("github-issue-triage", repo)))
     elsewhere = TRIAGE_ACTION | {"NEEDS_DECISION", "UNTRUSTED"}  # rows of their own
     rest = "; ".join(
-        f"{s} {' '.join(f'#{n}' for n in numbers)}" for s, numbers in sorted(counts.items()) if s not in elsewhere
+        f"{s} {' '.join(open_issue(n, waits_on) for n in numbers)}"
+        for s, numbers in sorted(counts.items())
+        if s not in elsewhere
     )
     if rest:
         rows.append(Row("ISSUES_OPEN", repo, rest))
@@ -1607,6 +1615,21 @@ def intake(
         )
         rows.append(Row("UNTRUSTED", repo, " ".join(f"#{n}" for n in sorted(set(untrusted))), review))
     return rows
+
+
+def person_logins(row: dict[str, Any]) -> list[str]:
+    """A WITH_PERSON line's assignees, the logins it waits on; a line without a list of
+    them is malformed"""
+    found = row.get("assignees")
+    if not isinstance(found, list) or not found or not all(isinstance(p, str) and LOGIN.match(p) for p in found):
+        raise Refused(f"error: triage_state.py printed a WITH_PERSON line without its assignees: {row!r}")
+    return found
+
+
+def open_issue(number: int, waits_on: dict[int, list[str]]) -> str:
+    """An ISSUES_OPEN issue as #N, a person's item with the logins it waits on: #N (@a @b)"""
+    people = waits_on.get(number)
+    return f"#{number}" if people is None else f"#{number} ({' '.join(f'@{p}' for p in people)})"
 
 
 def lands_prs(table: dict[str, str] | None) -> bool:

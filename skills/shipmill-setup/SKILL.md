@@ -315,8 +315,8 @@ or the tags are wrong; fix those, not the version.
 3. Run the checklist: `uv run --no-project python <skill>/scripts/setup_state.py <owner/repo>`.
    It reports releases, the `[agents]` section, the plugin in `.claude/settings.json`, and
    the labels (`postponed`, `blocked`, `shipmill-hold`, the blocker label, and with an
-   `[agents]` section, in either mode, `needs-decision` and `shipmill-upgrade-later`, a
-   config upgrade's "not now"), and
+   `[agents]` section, in either mode, `needs-decision`, `human`, a person's item in a
+   chain (spec 017), and `shipmill-upgrade-later`, a config upgrade's "not now"), and
    whether GitHub deletes a pull request's branch when it merges (`BRANCH_DELETE_ON` or
    `BRANCH_DELETE_OFF`, the repo setting `delete_branch_on_merge`). That setting matters
    because github-pr-triage's stacked merges rely on GitHub retargeting a stacked PR when
@@ -563,8 +563,9 @@ worktree as REMOVABLE or KEPT with why it is kept (`--json` for a record, `--pru
      the repo. The rest read UNTRUSTED (`watch_state.py --trusted-only`), start no session,
      and wait for an interactive one; github-ship-watch reports them
    - **The label:** `setup_state.py --fix` creates `needs-decision` whenever the config
-     has an `[agents]` section, interactive or headless (D-21); it reads `LABELS_MISSING`
-     until then. Without `[agents]` it isn't wanted
+     has an `[agents]` section, interactive or headless (D-21), and `human` with it (a
+     person's item, spec 017); it reads `LABELS_MISSING` until then. Without `[agents]`
+     neither is wanted
    - **Notifications:** with `app_id`, the question is `<slug>[bot]`'s, so its mention
      notifies the user on GitHub and the gate sends no desktop notification. Without it,
      the comment is the user's own and GitHub doesn't notify anyone of their own mention:

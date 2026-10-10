@@ -1,6 +1,7 @@
 """Spec 017, #342: a person's item (labelled human) reads HANDOFF_DUE, WITH_PERSON,
 VERIFY_DUE, NO_ASSIGNEE, and, closed by hand, VERIFY_CLOSED, without gh or the network"""
 
+import datetime as dt
 import importlib.util
 import json
 import os
@@ -11,6 +12,8 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+
+from shipmill.gate import Action, decide, parse_findings
 
 from .test_triage_state import FakeGitHub, backward, first_page, forward, open_issue
 
@@ -327,3 +330,76 @@ def test_s017_16_with_person_is_no_action_and_wip_counts_no_person_item(tmp_path
     rows = [json.loads(line) for line in proc.stdout.splitlines()]
     assert rows[0]["state"] == "WITH_PERSON"
     assert rows[1] == {"in_progress": 0, "ready": [], "room": 1, "wip": 1}
+
+
+# github-ship-watch's watch_state.py reads triage_state.py's --json lines (S-017-17)
+WATCH = SCRIPT.parents[2] / "github-ship-watch" / "scripts" / "watch_state.py"
+NOW = dt.datetime(2026, 10, 6, 12, 0, tzinfo=dt.UTC)
+DAY = dt.timedelta(hours=24)
+
+
+@pytest.fixture(scope="module")
+def ws() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("watch_state_human", WATCH)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses look their module up by name
+    spec.loader.exec_module(module)
+    return module
+
+
+def no_comments(number: int) -> list[tuple[str, str, str]]:
+    raise AssertionError(f"read the comments of #{number}")
+
+
+def line(number: int, state: str, **extra: Any) -> str:
+    return json.dumps({"number": number, "state": state, "title": "t", "note": "", **extra})
+
+
+@pytest.mark.parametrize("state", ["HANDOFF_DUE", "VERIFY_DUE", "NO_ASSIGNEE", "VERIFY_CLOSED"])
+def test_s017_17_the_watch_counts_each_person_action_as_a_triage_action(ws: ModuleType, state: str) -> None:
+    assert state in ws.TRIAGE_ACTION
+    found = {r.state: r for r in ws.intake("o/r", 1, line(7, state), [], no_comments)}
+    assert set(found) == {"ISSUES"}
+    assert found["ISSUES"].detail == f"{state} #7"
+    assert found["ISSUES"].json()["agent"] is True  # the gate starts a session for it
+    findings = parse_findings(json.dumps(found["ISSUES"].json()))
+    assert decide(findings, [], None, NOW, DAY).action is Action.LAUNCH
+
+
+def test_s017_17_the_watch_lists_with_person_with_its_assignees(ws: ModuleType) -> None:
+    out = "\n".join(
+        [
+            line(7, "WITH_PERSON", assignees=["ana", "bo-b"]),
+            line(9, "WITH_PERSON", assignees=["cy"]),
+            line(5, "BLOCKED"),
+            line(3, "TRIAGED"),
+        ]
+    )
+    found = ws.intake("o/r", 0, out, [], no_comments)
+    assert [(r.state, r.detail, r.fix) for r in found] == [
+        ("ISSUES_OPEN", "BLOCKED #5; TRIAGED #3; WITH_PERSON #7 (@ana @bo-b) #9 (@cy)", None)
+    ]
+    # report-only: no agent row, so the gate starts nothing and its fingerprint holds
+    findings = parse_findings("\n".join(json.dumps(r.json()) for r in found))
+    assert decide(findings, [], None, NOW, DAY).action is Action.QUIET
+
+
+@pytest.mark.parametrize("assignees", [None, [], ["ana", ""], ["@ana"], ["ana bo"], "ana"])
+def test_s017_17_a_with_person_line_without_its_assignees_is_refused(ws: ModuleType, assignees: Any) -> None:
+    extra = {} if assignees is None else {"assignees": assignees}
+    with pytest.raises(ws.Refused, match="WITH_PERSON line without its assignees"):
+        ws.intake("o/r", 0, line(7, "WITH_PERSON", **extra), [], no_comments)
+
+
+def test_s017_17_the_script_prints_the_assignees_on_a_with_person_line_only(tmp_path: Path, ws: ModuleType) -> None:
+    waiting = person([handoff()], people=("ana", "bo"))
+    due = person(people=("cy",))
+    due["number"] = 8
+    proc = run_script(tmp_path, first_page([waiting, due]))
+    assert proc.returncode == 1, proc.stderr
+    rows = {json.loads(out)["number"]: json.loads(out) for out in proc.stdout.splitlines()}
+    assert rows[7]["assignees"] == ["ana", "bo"]
+    assert set(rows[8]) == {"number", "state", "title", "note"}  # every other line keeps its keys
+    found = {r.state: r.detail for r in ws.intake("o/r", proc.returncode, proc.stdout, [], no_comments)}
+    assert found == {"ISSUES": "HANDOFF_DUE #8", "ISSUES_OPEN": "WITH_PERSON #7 (@ana @bo)"}
