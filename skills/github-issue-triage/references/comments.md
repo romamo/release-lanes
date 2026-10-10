@@ -196,4 +196,10 @@ A child closed as not planned doesn't stop the close; say so in its line. A feat
 - A PR was replaced: "Update: #{old} was replaced by #{new}, {rebased with review fixes}. This issue closes when #{new} merges."
 - The plan changed after review, e.g. main already had part of the fix: "Update after rebasing: {what main already does}; #{PR} now only {what remains}." Also update the PR's title and body.
 - A wrong auto-close: `gh issue reopen <n> --comment "Reopening: commit {sha} closed this because its message quotes {text}. The fix is in #{PR}, which hasn't merged yet."`
+- A right close that reads SUSPECT_CLOSE: post the close-confirmed comment through `--body-file`. Its first line is the marker exactly, and only one by an OWNER, MEMBER, or COLLABORATOR or the App counts:
+
+  ```markdown
+  <!-- shipmill:close-confirmed -->
+  The close is right: {why, such as "done by hand: the drill ran on 2026-10-08, see the run log" or "the fix is on main in {sha}"}.
+  ```
 - A manual close after a merge: `gh issue close <n> --comment "Fixed by #{PR}{, merged with every CI job green}. {What's still unconfirmed, and how to reopen with evidence.}"`

@@ -302,6 +302,7 @@ def test_a_merged_pr_past_50_references_clears_a_hand_close(ts: ModuleType) -> N
         "title": "issue 8",
         "stateReason": "COMPLETED",
         "labels": {"pageInfo": {"hasNextPage": False}, "nodes": []},
+        "comments": {"nodes": []},
         "refs": forward([mention(100 + i) for i in range(50)], "r1"),
         "timelineItems": {"nodes": [{"closer": None}]},
     }
@@ -323,6 +324,7 @@ def hand_closed(*labels: str, reason: str = "COMPLETED") -> dict[str, Any]:
         "title": "Rollback drill",
         "stateReason": reason,
         "labels": {"pageInfo": {"hasNextPage": False}, "nodes": [{"name": n} for n in labels]},
+        "comments": {"nodes": []},
         "refs": {"pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": []},
         "timelineItems": {"nodes": [{"closer": None}]},
     }
@@ -689,3 +691,101 @@ def test_309_the_documented_hold_lines_still_hold(ts: ModuleType, line: str, hel
 def test_309_the_feature_templates_hold_line_still_holds(ts: ModuleType) -> None:
     item = issue(("2026-09-01T10:00:00Z", template("Feature")))
     assert ts.upstream_refs(item, REPO) == [("o", "r", 41)]
+
+
+# A right close says so (#332, D-29): a trusted comment after the last close whose first
+# line is the close-confirmed marker ends SUSPECT_CLOSE
+
+CONFIRMED = "<!-- shipmill:close-confirmed -->"
+CLOSED_AT = "2026-10-08T10:00:00Z"
+
+
+def said(body: str, at: str, who: str = "maria", association: str = "OWNER", bot: bool = False) -> dict[str, Any]:
+    author = {"__typename": "Bot" if bot else "User", "login": who}
+    return {"body": body, "createdAt": at, "author": author, "authorAssociation": association}
+
+
+def confirmed_close(*comments: dict[str, Any], closed: str = CLOSED_AT) -> dict[str, Any]:
+    """#81 closed by hand, last at ``closed``, with its comments oldest first"""
+    item = hand_closed("bug")
+    item["comments"] = {"nodes": list(comments)}
+    item["timelineItems"] = {"nodes": [{"createdAt": closed, "actor": None, "closer": None}]}
+    return item
+
+
+SUSPECT = ("SUSPECT_CLOSE", "closed as completed by hand, and no merged PR mentions it")
+
+
+def test_a_trusted_close_confirmed_comment_after_the_close_ends_suspect_close(ts: ModuleType) -> None:
+    for association in ("OWNER", "MEMBER", "COLLABORATOR"):
+        item = confirmed_close(
+            said(f"{CONFIRMED}\nDone by hand: the drill ran", "2026-10-09T10:00:00Z", "ann", association)
+        )
+        assert ts.classify_closed(item, "release-blocker") is None, association
+    # leading blank lines are not a first line, as with every other marker
+    item = confirmed_close(said(f"\n\n{CONFIRMED}\nDone", "2026-10-09T10:00:00Z"))
+    assert ts.classify_closed(item, "release-blocker") is None
+
+
+def test_the_bot_logins_close_confirmed_comment_ends_suspect_close(ts: ModuleType) -> None:
+    item = confirmed_close(said(f"{CONFIRMED}\nRight close", "2026-10-09T10:00:00Z", "shipmill-app", "NONE", bot=True))
+    assert ts.classify_closed(item, "release-blocker", bot_login="shipmill-app[bot]") is None
+    # without --bot-login the App is just another author with no association
+    assert ts.classify_closed(item, "release-blocker") == SUSPECT
+
+
+def test_an_outsiders_close_confirmed_comment_never_counts(ts: ModuleType) -> None:
+    for association in ("CONTRIBUTOR", "FIRST_TIMER", "NONE"):
+        item = confirmed_close(said(f"{CONFIRMED}\nTrust me", "2026-10-09T10:00:00Z", "eve", association))
+        assert ts.classify_closed(item, "release-blocker", bot_login="shipmill-app[bot]") == SUSPECT, association
+
+
+def test_a_close_confirmed_comment_before_the_last_close_is_rearmed(ts: ModuleType) -> None:
+    # confirmed, then reopened and closed again on 2026-10-10: the old marker is stale
+    item = confirmed_close(said(f"{CONFIRMED}\nRight close", "2026-10-09T10:00:00Z"), closed="2026-10-10T10:00:00Z")
+    assert ts.classify_closed(item, "release-blocker") == SUSPECT
+
+
+def test_a_close_confirmed_marker_off_the_first_line_never_counts(ts: ModuleType) -> None:
+    item = confirmed_close(said(f"The close was right\n{CONFIRMED}", "2026-10-09T10:00:00Z"))
+    assert ts.classify_closed(item, "release-blocker") == SUSPECT
+    item = confirmed_close(said(f"Confirmed: {CONFIRMED}", "2026-10-09T10:00:00Z"))
+    assert ts.classify_closed(item, "release-blocker") == SUSPECT
+
+
+def test_a_close_confirmed_comment_ends_a_commit_closers_suspect_close(ts: ModuleType) -> None:
+    item = confirmed_close(said(f"{CONFIRMED}\nThe fix is on main", "2026-10-09T10:00:00Z"))
+    item["timelineItems"]["nodes"][0]["closer"] = {
+        "__typename": "Commit",
+        "abbreviatedOid": "abc1234",
+        "message": 'Test the quote --body="Fixes #81"',
+    }
+    assert ts.classify_closed(item, "release-blocker") is None
+    item["comments"]["nodes"] = []
+    assert ts.classify_closed(item, "release-blocker")[0] == "SUSPECT_CLOSE"
+
+
+def test_a_closed_issues_comments_page_back_only_when_all_came_after_the_close(ts: ModuleType) -> None:
+    def closed(comments: list[dict[str, Any]]) -> dict[str, Any]:
+        item = confirmed_close(*comments)
+        item["refs"] = forward([])
+        return item
+
+    marker = said(f"{CONFIRMED}\nRight close", "2026-10-09T09:00:00Z")
+    after = [said(f"+1 ({i})", f"2026-10-09T1{i}:00:00Z", "eve", "NONE") for i in range(ts.CLOSED_COMMENTS_CAP)]
+    # five comments, all after the close: the marker may be older, so read back to the close
+    gh = FakeGitHub(
+        ts,
+        {
+            ("QUERY", None, None): first_page([], closed_nodes=[closed(after)]),
+            ("COMMENTS_PAGE", 81, None): {"issue": {"comments": backward([marker, *after])}},
+        },
+    )
+    item = ts.fetch("o/r", 20, run=gh)["closed"]["nodes"][0]
+    assert gh.calls == [("QUERY", None, None), ("COMMENTS_PAGE", 81, None)]
+    assert ts.classify_closed(item, "release-blocker") is None
+    # one older than the close: the first query's page already reaches it
+    before = said("Closing", "2026-10-07T10:00:00Z")
+    gh = FakeGitHub(ts, {("QUERY", None, None): first_page([], closed_nodes=[closed([before, *after[1:]])])})
+    ts.fetch("o/r", 20, run=gh)
+    assert gh.calls == [("QUERY", None, None)]

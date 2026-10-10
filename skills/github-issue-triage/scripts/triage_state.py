@@ -98,7 +98,11 @@ For the N most recently closed issues (default 20):
                    script can't read the shipmill config: pass [operate]
                    incident_label here when it isn't "incident". An issue labelled
                    human closed as completed never reads SUSPECT_CLOSE: a person
-                   closes their own item by hand
+                   closes their own item by hand. Nor does a close someone confirmed:
+                   a comment after its last close whose first line is
+                   <!-- shipmill:close-confirmed --> by an OWNER, MEMBER, or
+                   COLLABORATOR or the --bot-login (D-29); a marker comment by anyone
+                   else never counts, and a reopen and a new close re-arm it
   VERIFY_CLOSED    labelled human, closed as completed by someone other than the
                    --bot-login, with a "## Check" section and no comment after its close
                    whose first line is <!-- shipmill:verified --> by an OWNER, MEMBER, or
@@ -254,6 +258,9 @@ CLOSED_AND_TAGS = (
       nodes {
         number title stateReason body
         labels(first: 100) { pageInfo { hasNextPage } nodes { name } }
+        comments(last: 5) { nodes { """
+    + COMMENT
+    + """ } }
         refs: timelineItems(itemTypes: [CROSS_REFERENCED_EVENT], first: 50) {
           pageInfo { hasNextPage endCursor }"""
     + CLOSED_REFS
@@ -347,6 +354,7 @@ query($owner: String!, $name: String!, $size: Int!, $cursor: String!) {
 )
 
 COMMENTS_CAP = 50  # comments(last: 50) in OPEN_ISSUE
+CLOSED_COMMENTS_CAP = 5  # comments(last: 5) of a closed issue in CLOSED_AND_TAGS
 # Each query's first page size, and what a page holds, for the error line. Older open
 # issues carry more history: a page of 100 tripped GitHub's resource limits on
 # astral-sh/uv, so later open-issue pages start at 50
@@ -428,6 +436,8 @@ TRUSTED = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 HUMAN_LABEL = "human"
 HANDOFF_MARKER = "<!-- shipmill:handoff -->"
 VERIFIED_MARKER = "<!-- shipmill:verified -->"
+# A trusted comment after a close saying it was right: SUSPECT_CLOSE stops reading it (D-29)
+CLOSE_CONFIRMED_MARKER = "<!-- shipmill:close-confirmed -->"
 CHECK = re.compile(r"^[ \t]*##[ \t]+Check[ \t]*$", re.MULTILINE)  # how a person's result is checked
 ACTION = {
     "NEW",
@@ -617,9 +627,9 @@ def closed_at(issue: dict[str, Any]) -> dt.datetime:
 
 
 def comments_since_close(run: Runner, base: Variables, sizes: Sizes, issue: dict[str, Any]) -> None:
-    """A closed issue's comments, oldest first, back to its close: the first query doesn't
-    ask a closed issue for comments, and only the ones after its close tell whether a
-    session verified it"""
+    """A closed issue's comments, oldest first, back to its close: the first query asks a
+    closed issue for its last few comments only, and the ones after its close tell whether
+    a session verified it or someone confirmed it"""
     since = closed_at(issue)
     comments = issue_page(run, COMMENTS_PAGE, base, sizes, issue["number"], "comments", None)
     seen: set[str] = set()
@@ -633,6 +643,24 @@ def comments_since_close(run: Runner, base: Variables, sizes: Sizes, issue: dict
         comments["nodes"] = page["nodes"] + comments["nodes"]
         comments["pageInfo"] = page["pageInfo"]
     issue["comments"] = comments
+
+
+def complete_closed_comments(run: Runner, base: Variables, sizes: Sizes, issue: dict[str, Any]) -> None:
+    """Every comment after a closed issue's last close: a person's item may owe a check,
+    and any close may have been confirmed. The first query's last few comments are enough
+    unless they fill the page and all came after the close"""
+    if checkable(issue):
+        comments_since_close(run, base, sizes, issue)
+        return
+    nodes = issue["comments"]["nodes"]
+    events = issue["timelineItems"]["nodes"]
+    if (
+        len(nodes) >= CLOSED_COMMENTS_CAP
+        and events
+        and events[0].get("createdAt")
+        and timestamp(nodes[0]["createdAt"]) > closed_at(issue)
+    ):
+        comments_since_close(run, base, sizes, issue)
 
 
 def fetch(repo: str, closed: int, stable_pattern: re.Pattern[str] = STABLE, run: Runner = gh_graphql) -> dict[str, Any]:
@@ -676,8 +704,7 @@ def fetch_pages(
     for issue in data["closed"]["nodes"]:
         check_labels(issue)
         complete_refs(run, REFS_PAGE, base, sizes, issue, "refs")
-        if checkable(issue):
-            comments_since_close(run, base, sizes, issue)
+        complete_closed_comments(run, base, sizes, issue)
 
     # Only the newest stable tag is used: page back until one is in hand, not through every tag
     tags = data["tags"]
@@ -1091,6 +1118,21 @@ def verify_closed(issue: dict[str, Any], bot_login: str | None) -> tuple[str, st
     return "VERIFY_CLOSED", f"closed by @{actor}: run its ## Check"
 
 
+def close_confirmed(issue: dict[str, Any], bot_login: str | None) -> bool:
+    """Whether a comment after the issue's last close has the close-confirmed marker as its
+    first line and comes from an OWNER, MEMBER, or COLLABORATOR or the --bot-login (D-29).
+    An outsider's marker never counts, and one before the last close (a reopen and a new
+    close) is stale; with no dated close event, no marker can be dated after it"""
+    events = issue["timelineItems"]["nodes"]
+    if not events or not events[0].get("createdAt"):
+        return False
+    since = closed_at(issue)
+    return any(
+        timestamp(c["createdAt"]) > since and marked(c["body"], CLOSE_CONFIRMED_MARKER) and by_trusted(c, bot_login)
+        for c in issue["comments"]["nodes"]
+    )
+
+
 def classify_closed(
     issue: dict[str, Any], hold: str, incident: str = INCIDENT_LABEL, bot_login: str | None = None
 ) -> tuple[str, str] | None:
@@ -1100,6 +1142,8 @@ def classify_closed(
     if HUMAN_LABEL in labels and issue["stateReason"] == "COMPLETED":
         # A person closes their own item by hand by design: never SUSPECT_CLOSE (spec 017)
         return verify_closed(issue, bot_login)
+    if close_confirmed(issue, bot_login):
+        return None  # every path below reads None or SUSPECT_CLOSE, which the marker ends (D-29)
     events = issue["timelineItems"]["nodes"]
     closer = events[0].get("closer") if events else None
     number = issue["number"]
