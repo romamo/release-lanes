@@ -235,3 +235,19 @@ entry that supersedes it, never by editing an old one.
 - Why: A local reusable workflow resolves at the commit that started the run, so a promotion's CI is main's while its tree is the rc's; a CI change that pairs with code fails every promotion of an older rc and, retried hourly, starves rc. Restarting the soak was chosen over promoting without a fresh CI run
 - Applies to: src/shipmill/planner.py, release lanes, stable promotion
 - Enforced by: review
+
+## D-29: A trusted marker comment confirms a close
+
+- Decided: 2026-10-10, in shipmill/shipmill#332
+- Rule: A closed issue stops reading SUSPECT_CLOSE once a comment posted after its last close has `<!-- shipmill:close-confirmed -->` as its first line and comes from an OWNER, MEMBER, or COLLABORATOR or from the `--bot-login` App; an outsider's marker never counts, and a reopen and a new close re-arm it
+- Why: A correct close with no merged closer had no way to say so, and the gate started a session for it every retry_hours; a marker carries its reason in the comment and counts only from the authors D-16 trusts, where a label would carry no reason, could be added by anyone with triage rights, and would survive a reopen
+- Applies to: skills/github-issue-triage/scripts/triage_state.py, skills/github-ship-watch/scripts/watch_state.py, SUSPECT_CLOSE, comment markers
+- Enforced by: the triage_state.py tests (with the implementing PR)
+
+## D-30: An unattended gate trusts shipmill's own upgrade issues
+
+- Decided: 2026-10-10, in shipmill/shipmill#314
+- Rule: Extending D-16, an unattended gate session also takes up an issue authored by `github-actions[bot]` when it carries both the `shipmill-upgrade` label and a first line `<!-- shipmill-upgrade: <id> <version> -->` marker; any other `github-actions[bot]` issue stays untrusted
+- Why: Only a workflow running in the repo can author as github-actions[bot], and the label plus marker narrow that to shipmill's own config-upgrade proposals; without this a headless gate never asked the upgrade question (S-014-10), and answered upgrades had to be applied by hand. Merging still waits on the maintainer's accepting answer (S-014-13)
+- Applies to: skills/github-issue-triage/scripts/triage_state.py, skills/github-ship-watch/scripts/watch_state.py, src/shipmill/gate.py, --trusted-only, [agents] mode
+- Enforced by: the triage_state.py and watch_state.py tests (with the implementing PR)
