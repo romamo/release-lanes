@@ -46,9 +46,14 @@ show prints the chain an issue belongs to, one row per item, each once (by owner
       READY issue. An item that can't be read (no access, no such issue) is one row,
       owner/repo#N UNREADABLE, and the chain goes on past what could be read. Several
       references print the union of their chains, each item once, the GitHub reads shared.
-      With --trusted-only, an issue whose author is neither an OWNER, MEMBER, or
-      COLLABORATOR nor the --bot-login is one row, owner/repo#N UNTRUSTED: its state
-      still holds what waits on it, but nothing it says is read or followed (D-16). When
+      With --trusted-only, an issue whose author is neither the --bot-login nor trusted by
+      an origin, the repo of one of the references the walk starts from, is one row,
+      owner/repo#N UNTRUSTED: its state still holds what waits on it, but nothing it says
+      is read or followed (D-16). An origin trusts the author of one of its own issues who
+      is an OWNER, MEMBER, or COLLABORATOR there; an issue in any other repo, where an
+      outsider may own their own, is trusted only when its author is an origin's owner or
+      its collaborator (one "gh api repos/<origin>/collaborators/<login>" per origin and
+      login, 204 trusted, 404 not; a deleted author or another App's bot never). When
       the forge refuses the relation fields (a GitHub Enterprise Server without issue
       dependencies or sub-issues), the walk reads "Depends on" lines alone and prints one
       "note: native relations unavailable: <first error line>" line to stderr.
@@ -57,9 +62,10 @@ show prints the chain an issue belongs to, one row per item, each once (by owner
       linked to, open or closed), and gate ("NO_GATE" or null).
 
       Exit 1 when any row is NO_GATE, else 0; 2 on a malformed reference, a starting
-      reference that can't be read or is a pull request, an issue with more than 100
-      labels, assignees, or relations of one kind (not paged), a config that can't be
-      parsed, or any gh failure other than an unreadable item or a missing config.
+      reference that can't be read or is a pull request, an issue it follows with more
+      than 100 labels, assignees, or relations of one kind (not paged; an UNTRUSTED one's
+      are never read), a config that can't be parsed, or any gh failure other than an
+      unreadable item, a missing config, or a 404 from the collaborator check.
 
 Needs the gh CLI, authenticated. Python 3.10+, standard library only.
 """
@@ -74,14 +80,14 @@ import re
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 from typing import Any, NoReturn
 
 # What a "Depends on" line is and the issues it names, and the holds GitHub records, as
 # triage_state.py reads them
-from triage_state import DEPENDENCY, DEPENDS, dependency_refs, login, native_holds, ref_state, trusted
+from triage_state import DEPENDENCY, DEPENDS, TRUSTED, dependency_refs, login, native_holds, ref_state, same_login
 
 Variables = dict[str, str | int]
 # Runs one GraphQL query with its variables and returns the parsed response, errors and
@@ -90,9 +96,13 @@ Runner = Callable[[str, Variables], dict[str, Any]]
 # Reads a repo's .github/shipmill.toml on its default branch: its text, or None when there
 # is no such file; any other failure exits 2
 Contents = Callable[[str], str | None]
+# Whether a login is a collaborator of a repo (owner/name): True or False, exit 2 on any
+# failure other than GitHub's answer
+Standing = Callable[[str, str], bool]
 Execute = Callable[[list[str]], subprocess.CompletedProcess[str]]
 
 REFERENCE = re.compile(r"^(?P<owner>[\w.-]+)/(?P<name>[\w.-]+)#(?P<num>[1-9]\d*)$")
+LOGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}")  # a user's login, as a URL path segment
 # GraphQL errors that are no refusal of the relation: the run fails instead
 TRANSIENT = frozenset({"RATE_LIMITED"})
 # The forge refusing the relation: a schema without the field or mutation (GitHub
@@ -403,15 +413,46 @@ OPEN_HOLDS = frozenset({"OPEN", UNREADABLE})  # a hold that can't be read may st
 
 @dataclass
 class Reader:
-    """How the walk reads items: the runner; with trusted_only, an issue whose author is
-    neither an OWNER, MEMBER, or COLLABORATOR nor the bot_login is read for its state alone
-    and never followed (D-16); native turns False, for the rest of the run, once the forge
-    refuses the relation fields"""
+    """How the walk reads items: the runner; with trusted_only, an issue whose author the
+    origins (the repos of the references the walk starts from, owner/name) don't trust is
+    read for its state alone and never followed (D-16, see trusts); standing looks up an
+    author's standing in an origin, each (origin, login) once; native turns False, for the
+    rest of the run, once the forge refuses the relation fields"""
 
     run: Runner
+    standing: Standing
     trusted_only: bool = False
     bot_login: str | None = None
+    origins: tuple[str, ...] = ()
     native: bool = True
+    standings: dict[tuple[str, str], bool] = field(default_factory=dict)
+
+    def trusts(self, ref: Ref, author: str, association: str) -> bool:
+        """D-16 against the origins, not the item's own repo, where an outsider owns their
+        own: the bot_login, or an author trusted by any origin. In an origin, the item's
+        authorAssociation answers; elsewhere the author's login is the origin's owner or
+        the origin's collaborator (one standing lookup, cached). A deleted author, or an
+        App's bot other than bot_login, is trusted by no other repo"""
+        if self.bot_login is not None and same_login(author, self.bot_login):
+            return True
+        home = [o for o in self.origins if ref.same_repo(*o.split("/"))]
+        if home and association in TRUSTED:
+            return True
+        if author == "ghost" or author.endswith("[bot]"):
+            return False
+        for origin in self.origins:
+            if origin in home:
+                continue
+            if same_login(author, origin.split("/")[0]):
+                return True
+            if LOGIN.fullmatch(author) is None:
+                fail(f"{ref}: GitHub gave its author as no login it can check")  # the text not echoed
+            known = (origin.lower(), author.lower())
+            if known not in self.standings:
+                self.standings[known] = self.standing(origin, author)
+            if self.standings[known]:
+                return True
+        return False
 
 
 @dataclass(frozen=True)
@@ -451,7 +492,7 @@ def parse_item(node: dict[str, Any], reader: Reader) -> Item:
     if node["__typename"] == "PullRequest":
         return Item(ref, "PullRequest", title, ref_state(node), "pull request")
     association = str(node.get("authorAssociation") or "NONE")
-    if reader.trusted_only and not trusted(login(node.get("author")), association, reader.bot_login):
+    if reader.trusted_only and not reader.trusts(ref, login(node.get("author")), association):
         return Item(ref, UNTRUSTED, state=ref_state(node))  # nothing it says is read or followed
     labels = {n["name"] for n in connection(node, "labels", ref)}
     logins = [str(n["login"]) for n in connection(node, "assignees", ref)]
@@ -462,9 +503,9 @@ def parse_item(node: dict[str, Any], reader: Reader) -> Item:
     for owner, name, number in dependency_refs(node, (ref.owner, ref.name)):
         hold = Ref(owner, name, number)
         holds.setdefault(hold.key, (hold, None))
-    for field in ("blockedBy", "subIssues"):
-        if field in node:  # absent when the forge refused the relations
-            connection(node, field, ref)  # fails past a page; native_holds reads them
+    for relation in ("blockedBy", "subIssues"):
+        if relation in node:  # absent when the forge refused the relations
+            connection(node, relation, ref)  # fails past a page; native_holds reads them
     for (owner, name, number), (_, state, _) in native_holds(node).items():
         hold = Ref(owner, name, number)
         holds[hold.key] = (holds.get(hold.key, (hold, None))[0], state)  # the text's spelling, GitHub's state
@@ -605,6 +646,19 @@ def gh_contents(repo: str, execute: Execute = capture) -> str | None:
         fail(f"reading {CONFIG} of {repo}: {exc}")
 
 
+def gh_collaborator(repo: str, user: str, execute: Execute = capture) -> bool:
+    """Whether user is a collaborator of repo, through the REST check (an owner, an outside
+    collaborator, or an org member with access to it): True on GitHub's 204, False on its
+    404, exit 2 on any other failure (no access to the check, a rate limit, the network)"""
+    proc = execute(["gh", "api", f"repos/{repo}/collaborators/{user}"])
+    if proc.returncode == 0:
+        return True
+    if re.search(r"\bHTTP 404\b", proc.stderr):
+        return False
+    why = proc.stderr.strip() or f"gh api exited {proc.returncode}"
+    fail(f"reading whether {user} is a collaborator of {repo}: {why}")
+
+
 _watch: list[ModuleType] = []
 
 
@@ -702,7 +756,12 @@ def show(reader: Reader, contents: Contents, starts: list[Ref], as_json: bool) -
     return 1 if any(row["gate"] == "NO_GATE" for row in rows) else 0
 
 
-def main(argv: Sequence[str] | None = None, run: Runner = gh_graphql, contents: Contents = gh_contents) -> int:
+def main(
+    argv: Sequence[str] | None = None,
+    run: Runner = gh_graphql,
+    contents: Contents = gh_contents,
+    standing: Standing = gh_collaborator,
+) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     commands = parser.add_subparsers(dest="command", required=True)
     link_parser = commands.add_parser("link", help="write a link as a native relation and a Depends on line")
@@ -714,15 +773,21 @@ def main(argv: Sequence[str] | None = None, run: Runner = gh_graphql, contents: 
     show_parser.add_argument("issues", nargs="+", metavar="OWNER/REPO#N", help="the issue (or issues) to start from")
     show_parser.add_argument("--json", action="store_true", help="the rows as one JSON object")
     show_parser.add_argument(
-        "--trusted-only", action="store_true", help="read an untrusted author's issue for its state alone (D-16)"
+        "--trusted-only",
+        action="store_true",
+        help="read an issue the starting repos don't trust the author of for its state alone (D-16)",
     )
     show_parser.add_argument("--bot-login", help="the login shipmill's sessions write as, such as <slug>[bot]")
     args = parser.parse_args(argv)
     if args.command == "show":
         if args.bot_login is not None and not args.bot_login.strip():
             parser.error("--bot-login must not be empty")
-        reader = Reader(run, args.trusted_only, args.bot_login)
-        return show(reader, contents, [parse_ref(issue) for issue in args.issues], args.json)
+        starts = [parse_ref(issue) for issue in args.issues]
+        origins: dict[str, str] = {}
+        for ref in starts:
+            origins.setdefault(ref.repo.lower(), ref.repo)  # each repo once, as first spelled
+        reader = Reader(run, standing, args.trusted_only, args.bot_login, tuple(origins.values()))
+        return show(reader, contents, starts, args.json)
     target = parse_ref(args.issue)
     other = parse_ref(args.child if args.child is not None else args.blocked_by)
     return link(run, target, other, child=args.child is not None)
