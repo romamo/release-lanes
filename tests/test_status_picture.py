@@ -20,6 +20,8 @@ from shipmill.errors import ReleaseError
 from shipmill.gate import skills_dir
 from shipmill.launchd import label
 from shipmill.status import (
+    CLOSED_STATES,
+    ISSUE_LINES,
     Described,
     Facts,
     Gate,
@@ -31,6 +33,7 @@ from shipmill.status import (
     Report,
     Row,
     Verdict,
+    parse_issues,
     parse_job,
     parse_waketime,
     read_gate,
@@ -777,3 +780,81 @@ def test_s009_26_pull_requests_the_gate_lands_are_work_not_waiting() -> None:
     assert found.verdict is Verdict.WORKING
     assert (found.reasons, found.working) == ([], ["pull request #409 #408 to land"])
     assert report(facts(gate=gate(agents=NO_PRS))).verdict is Verdict.IDLE
+
+
+@pytest.mark.parametrize("state", ["HANDOFF_DUE", "VERIFY_DUE", "NO_ASSIGNEE"])
+def test_a_person_items_session_work_is_listed_to_triage(state: str) -> None:
+    # spec 017: a hand-off to post, a done report to check, an assignee to ask for: a session's to do
+    found = facts(issues=[Issue(7, state, "labelled human")])
+    assert f"  to triage      #7 {URL}/issues/7" in lines(found)
+    assert f"  open issues    1 {URL}/issues" in lines(found)
+    assert report(found).verdict is Verdict.IDLE
+
+
+def test_a_person_item_with_its_person_is_parked_with_the_logins_it_waits_on() -> None:
+    issue = Issue(7, "WITH_PERSON", "with @ann since 2026-10-09T10:00:00Z", ("ann", "bo-b"))
+    found = facts(issues=[issue, Issue(4, "TRIAGED")])
+    text = lines(found)
+    assert text[1:4] == [
+        "  repo           in sync at v0.26.0, release ok",
+        f"  parked         #7 {URL}/issues/7 (@ann @bo-b)",
+        f"                 #4 {URL}/issues/4 triaged",
+    ]
+    assert f"  open issues    2 {URL}/issues" in text
+    assert report(found).verdict is Verdict.IDLE  # never an action, never waits on you
+
+
+def test_a_person_items_close_to_check_is_listed_with_suspect_close_and_not_open() -> None:
+    issues = [Issue(9, "VERIFY_CLOSED", "closed by @ann: run its ## Check"), Issue(1, "SUSPECT_CLOSE"), Issue(5, "NEW")]
+    text = lines(facts(issues=issues))
+    assert text[1:5] == [
+        "  repo           in sync at v0.26.0, release ok",
+        f"  suspect close  #1 {URL}/issues/1",
+        f"  verify close   #9 {URL}/issues/9: run its ## Check",
+        f"  to triage      #5 {URL}/issues/5",
+    ]
+    assert f"  open issues    1 {URL}/issues" in text
+
+
+def test_a_chain_item_without_a_gate_waits_on_you_with_its_fix() -> None:
+    detail = "ready in o/x, whose .github/shipmill.toml has no [agents] table: no gate takes it up, so its chain stalls"
+    fix = "set up a gate on o/x (/shipmill:shipmill-setup o/x), or do o/x#3 by hand"
+    found = facts(Row("CHAIN_NO_GATE", "o/x#3", detail, False, fix))
+    assert report(found).verdict is Verdict.WAITS
+    assert texts(report(found)) == [f"CHAIN_NO_GATE o/x#3: {detail}"]
+    text = lines(found)
+    assert text[2:4] == [
+        f"  chain          CHAIN_NO_GATE o/x#3 https://github.com/o/x/issues/3: {detail}",
+        f"                 fix: {fix}",
+    ]
+    assert not any(line.startswith("  other") for line in text)
+
+
+def test_a_chain_walk_that_fails_waits_on_you_with_its_fix() -> None:
+    fix = f"see why: uv run --no-project python chains.py show --trusted-only {REPO}#4"
+    found = facts(Row("CHAIN_UNREADABLE", REPO, "error: gh api graphql failed", False, fix))
+    assert report(found).verdict is Verdict.WAITS
+    text = lines(found)
+    assert text[2:4] == [
+        f"  chain          CHAIN_UNREADABLE {REPO}: error: gh api graphql failed",
+        f"                 fix: {fix}",
+    ]
+    assert not any(line.startswith("  other") for line in text)
+
+
+def test_status_reads_a_with_person_lines_assignees_and_refuses_one_without() -> None:
+    line = {"number": 7, "state": "WITH_PERSON", "title": "@evil text", "note": "with @ann", "assignees": ["ann"]}
+    assert parse_issues(json.dumps(line) + "\n") == [Issue(7, "WITH_PERSON", "with @ann", ("ann",))]
+    other = {"number": 4, "state": "NEW", "title": "t", "note": ""}
+    assert parse_issues(json.dumps(other) + "\n") == [Issue(4, "NEW", "", ())]
+    malformed: list[dict[str, object]] = [{}, {"assignees": []}, {"assignees": ["ann", "a b"]}, {"assignees": "ann"}]
+    for bad in malformed:
+        raw = {"number": 7, "state": "WITH_PERSON", "title": "t", "note": "", **bad}
+        with pytest.raises(ReleaseError, match="WITH_PERSON line without its assignees"):
+            parse_issues(json.dumps(raw) + "\n")
+
+
+def test_status_places_every_state_triage_state_acts_on() -> None:
+    placed = {s for _, states in ISSUE_LINES for s in states} | CLOSED_STATES
+    assert placed >= triage_state().ACTION
+    assert "WITH_PERSON" in placed
