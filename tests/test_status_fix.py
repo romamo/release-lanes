@@ -320,6 +320,24 @@ def test_s011_18_in_progress_names_its_pull_requests_and_parked_says_why() -> No
     ]
 
 
+def test_a_parked_issues_native_marks_and_parent_progress_read_plainly() -> None:
+    # triage_state.py's note marks a forge-only hold (native) and a sub-issue (child), and
+    # a parent's starts with its children's progress (#340)
+    issues = [
+        Issue(31, "BLOCKED", "children 1/2 closed acme/web#4:closed(child) acme/web#5:open(child)"),
+        Issue(32, "BLOCKED", "acme/web#2:open other/lib#7:not_planned(native)"),
+    ]
+    text = lines(facts(issues=issues))
+    at = text.index(
+        f"  parked         #32 {URL}/issues/32 waits on acme/web#2 (open), other/lib#7 (not_planned, native); "
+        "unblocks when they close or merge"
+    )
+    assert text[at + 1] == (
+        f"                 #31 {URL}/issues/31 waits on acme/web#4 (closed, child), acme/web#5 (open, child); "
+        "children 1/2 closed; unblocks when they close or merge"
+    )
+
+
 def test_s011_18_no_title_reaches_the_summary() -> None:
     marker = "MARKER-TITLE"
     printed = [

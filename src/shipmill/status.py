@@ -849,11 +849,15 @@ def issue_value(repo: str, issue: Issue) -> str:
         opened = [int(n) for n in re.findall(r"(?<![\w/])#(\d+):open\b", issue.note)]
         return f"{shown} → {', '.join(item(repo, n, True) for n in opened)}" if opened else shown
     if issue.state == "BLOCKED":
-        waits = re.findall(r"([\w.-]+/[\w.-]+#\d+):(\S+)", issue.note)
+        # A hold may carry a mark, (native) or (child), and a parent's note starts with
+        # "children K/N closed" (spec 017)
+        waits = re.findall(r"([\w.-]+/[\w.-]+#\d+):(\w+)(?:\((\w+)\))?", issue.note)
         if waits:
-            named = ", ".join(f"{ref} ({state})" for ref, state in waits)
+            named = ", ".join(f"{ref} ({state}{f', {mark}' if mark else ''})" for ref, state, mark in waits)
+            children = re.match(r"children \d+/\d+ closed\b", issue.note)
+            progress = f"; {children.group()}" if children else ""
             when = "it closes or merges" if len(waits) == 1 else "they close or merge"
-            return f"{shown} waits on {named}; unblocks when {when}"
+            return f"{shown} waits on {named}{progress}; unblocks when {when}"
         if issue.note == "labelled blocked":
             remove = f"gh issue edit {issue.number} -R {repo} --remove-label blocked"
             return f"{shown} labelled blocked: {remove} once it can go on"
