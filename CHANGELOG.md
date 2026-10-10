@@ -7,6 +7,21 @@ bot.
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-10-10
+
+### Changed
+
+- A headless gate now asks the config-upgrade question: with `--trusted-only`, `triage_state.py` trusts an issue the release workflow opened as the Bot `github-actions[bot]` when it carries both the `shipmill-upgrade` label and the `<!-- shipmill-upgrade: <id> <version> -->` marker as its first line, so `watch_state.py` reports it as UPGRADE_PENDING instead of UNTRUSTED; any other `github-actions[bot]` issue stays UNTRUSTED (D-30) (#314)
+- shipmill.dev: the tab icon is the gear mark from the page and its preview image, and the preview's source, `site/og.html`, sits next to `og.png` to redraw it (#361)
+
+### Added
+
+- Triage: a right close can end SUSPECT_CLOSE. `triage_state.py` reads each recently closed issue's last 5 comments (paging back to the close only when all 5 came after it) and drops the SUSPECT_CLOSE row when a comment after the last close has `<!-- shipmill:close-confirmed -->` as its first line and comes from an OWNER, MEMBER, or COLLABORATOR or the `--bot-login` App; an outsider's marker never counts, and a reopen and a new close re-arm it. The skill's step 7 and `references/comments.md` give the comment (#332)
+
+### Fixed
+
+- Triage: `triage_state.py` no longer reads SUSPECT_CLOSE for an issue closed by a commit that names it only mid-line when a same-repo merged pull request closes it, by GitHub's link or a closing keyword in its title or body; a commit with no such pull request, or one that only mentions the issue or never merged, still reads SUSPECT_CLOSE (#363)
+
 ## [0.47.0] - 2026-10-10
 
 ### Added
@@ -1438,7 +1453,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.47.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.48.0...HEAD
+[0.48.0]: https://github.com/shipmill/shipmill/compare/v0.47.0...v0.48.0
 [0.47.0]: https://github.com/shipmill/shipmill/compare/v0.46.0...v0.47.0
 [0.46.0]: https://github.com/shipmill/shipmill/compare/v0.45.0...v0.46.0
 [0.45.0]: https://github.com/shipmill/shipmill/compare/v0.44.0...v0.45.0
