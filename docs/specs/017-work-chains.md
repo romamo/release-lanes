@@ -224,8 +224,12 @@ an action row, CHAIN_NO_GATE, naming the item and the repo.
 
 ## Issues
 
-The build issues, filled in once they are filed: one `- owner/repo#N: S-NNN-1, S-NNN-2` per
-line, naming the criteria that issue delivers. Each criterion belongs to exactly one.
+- shipmill/shipmill#340: S-017-1, S-017-2, S-017-3, S-017-4, S-017-5
+- shipmill/shipmill#341: S-017-6, S-017-7, S-017-8, S-017-9
+- shipmill/shipmill#342: S-017-10, S-017-11, S-017-12, S-017-13, S-017-14, S-017-15, S-017-16
+- shipmill/shipmill#344: S-017-17, S-017-21
+- shipmill/shipmill#343: S-017-18, S-017-19, S-017-20
+- shipmill/shipmill#345: S-017-22, S-017-23
 
 ## Verification
 
