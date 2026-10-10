@@ -164,14 +164,14 @@ Checked after @{login} closed this: `{the check}` returned {what came back}.
 Reply `done` here when it's fixed, or close the issue.
 ```
 
-**NO_ASSIGNEE**, and a check the session can't run: a question through the [needs-decision protocol](needs-decision.md), in its format, with its marker and the `needs-decision` label. For NO_ASSIGNEE, ask who does the item. For a check, say what the report claims and why the check can't run here, and give two options, the one the evidence supports first:
+**NO_ASSIGNEE**, and a check the session can't run: a question through the [needs-decision protocol](needs-decision.md), in its format, with its marker and the `needs-decision` label. For NO_ASSIGNEE, ask who does the item, and assign whoever the answer names. For a check, say what the report claims and why the check can't run here, and give two options, the recommended one first, as the protocol asks: close it on the report when other evidence backs the report (a log line, a page that changed), it isn't done when nothing but the report does (then it comes first, with the `(recommended)` mark and why):
 
 ```markdown
 <!-- shipmill:needs-decision -->
 @{maintainer} Decision needed: @{login} reported this done, and I can't run its check here (`{the check}`: {why, such as "the host isn't reachable from this machine"}).
 
-1. Close it on the report: what waits on it starts
-2. It isn't done: I hand it back to @{assignee}
+1. Close it on the report (recommended): {the evidence beyond the report}; what waits on it starts now, unchecked
+2. It isn't done: I hand it back to @{assignee}, and what waits on it keeps waiting
 
 Reply here with a number or your own answer; shipmill takes this up on the tick after your reply.
 ```

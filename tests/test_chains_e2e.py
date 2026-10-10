@@ -60,6 +60,9 @@ def test_s017_22_the_triage_docs_document_links_a_person_s_item_and_parents() ->
     for text in (rubric, comments):
         assert "needs-decision" in text and "close it on the report" in text.lower()
         assert "it isn't done" in text.lower()
+    # the question follows needs-decision.md: its marker, and the recommended option first
+    question = comments.split("<!-- shipmill:needs-decision -->", 1)[1].split("```", 1)[0]
+    assert "\n1. " in question and "(recommended)" in question.split("\n2. ", 1)[0]
     # parents
     assert "children K/N closed" in skill and "children K/N closed" in rubric and "children K/N closed" in gate
     assert "## A parent's close" in comments
