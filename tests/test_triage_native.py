@@ -152,8 +152,13 @@ def test_native_holds_leave_in_progress_and_postponed_alone(ts: ModuleType) -> N
     ("error", "native"),
     [
         ({"message": "Field 'blockedBy' doesn't exist on type 'Issue'"}, True),
-        ({"extensions": {"fieldName": "subIssues"}, "message": "undefined"}, True),
-        ({"path": ["query", "repository", "open", "nodes", 0, "subIssues"], "message": "Forbidden"}, True),
+        ({"extensions": {"code": "undefinedField", "fieldName": "subIssues"}, "message": "undefined"}, True),
+        ({"message": "Argument 'subIssues' isn't a defined input type"}, True),
+        # The forge has the fields: an error on one issue's relations is real, not a refusal
+        ({"extensions": {"fieldName": "subIssues"}, "message": "undefined"}, False),
+        ({"path": ["query", "repository", "open", "nodes", 0, "subIssues"], "message": "Forbidden"}, False),
+        ({"type": "FORBIDDEN", "path": ["repository", "open", "nodes", 0, "blockedBy", "nodes", 0]}, False),
+        ({"extensions": {"code": "undefinedField", "fieldName": "labels"}, "message": "undefined"}, False),
         ({"message": "Field 'blockedByNope' doesn't exist on type 'Issue'"}, False),
         ({"type": "NOT_FOUND", "message": "Could not resolve to a Repository"}, False),
     ],
@@ -220,9 +225,18 @@ def run_script(tmp_path: Path, errors: list[dict[str, Any]]) -> subprocess.Compl
 
 
 def test_s017_5_the_script_classifies_on_text_holds_and_notes_it_once(tmp_path: Path) -> None:
+    undefined = {"code": "undefinedField", "typeName": "Issue"}
     errors = [
-        {"path": ["query", "repository", "open", "nodes", "blockedBy"], "message": "Field 'blockedBy' doesn't exist"},
-        {"path": ["query", "repository", "open", "nodes", "subIssues"], "message": "Field 'subIssues' doesn't exist"},
+        {
+            "path": ["query", "repository", "open", "nodes", "blockedBy"],
+            "extensions": {**undefined, "fieldName": "blockedBy"},
+            "message": "Field 'blockedBy' doesn't exist",
+        },
+        {
+            "path": ["query", "repository", "open", "nodes", "subIssues"],
+            "extensions": {**undefined, "fieldName": "subIssues"},
+            "message": "Field 'subIssues' doesn't exist",
+        },
     ]
     proc = run_script(tmp_path, errors)
     assert proc.returncode == 0, proc.stderr
@@ -232,7 +246,33 @@ def test_s017_5_the_script_classifies_on_text_holds_and_notes_it_once(tmp_path: 
     assert proc.stderr.splitlines() == ["note: native relations unavailable: Field 'blockedBy' doesn't exist"]
 
 
+def test_s017_5_a_forge_without_the_fields_falls_back_by_its_message_alone(tmp_path: Path) -> None:
+    # GitHub Enterprise Server's schema refusal, as a message with no extensions
+    errors = [{"message": "Field 'subIssues' doesn't exist on type 'Issue'"}]
+    proc = run_script(tmp_path, errors)
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stderr.splitlines() == [
+        "note: native relations unavailable: Field 'subIssues' doesn't exist on type 'Issue'"
+    ]
+
+
 def test_s017_5_any_other_gh_error_still_exits_2(tmp_path: Path) -> None:
     proc = run_script(tmp_path, [{"type": "NOT_FOUND", "message": "Could not resolve to a Repository"}])
     assert proc.returncode == 2
     assert "native relations unavailable" not in proc.stderr
+
+
+def test_s017_5_an_error_on_one_blocker_exits_2_rather_than_dropping_every_native_hold(tmp_path: Path) -> None:
+    # The forge has the fields but one issue's blocker can't be read: classifying on text
+    # holds alone would read an issue held only natively as ready, so it fails like any error
+    errors = [
+        {
+            "type": "FORBIDDEN",
+            "path": ["repository", "open", "nodes", 0, "blockedBy", "nodes", 0],
+            "message": "Resource not accessible by integration",
+        }
+    ]
+    proc = run_script(tmp_path, errors)
+    assert proc.returncode == 2
+    assert "native relations unavailable" not in proc.stderr
+    assert proc.stdout == ""

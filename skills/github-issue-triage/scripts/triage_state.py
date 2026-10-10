@@ -91,10 +91,11 @@ labels) or a gh failure. It pages past 100 open issues and an issue's 50 comment
 cross-references, 50 blocking issues, or 50 sub-issues, and back through tags to the
 newest stable one, with one query when nothing is capped. A page GitHub rejects for its
 resource limits is asked again at half the size, down to 10 items; one rejected at 10
-fails with one error line. When GitHub refuses blockedBy or subIssues (an error naming
-one, such as a GitHub Enterprise Server without issue dependencies), it classifies on
-the text holds alone and prints one "note: native relations unavailable: <first error
-line>" line to stderr; any other gh error still exits 2. Needs the gh
+fails with one error line. When GitHub's schema has no blockedBy or subIssues (an
+undefinedField error naming one, such as a GitHub Enterprise Server without issue
+dependencies), it classifies on the text holds alone and prints one "note: native
+relations unavailable: <first error line>" line to stderr; any other gh error, an error
+on one issue's relations too, still exits 2. Needs the gh
 CLI, authenticated. Python 3.10+, standard library only.
 """
 
@@ -351,30 +352,31 @@ def resource_limited(response: dict[str, Any]) -> bool:
 
 
 class NativeUnavailable(Exception):
-    """The forge or token can't read blockedBy or subIssues: classify on text holds alone"""
+    """The forge has no blockedBy or subIssues: classify on text holds alone"""
 
 
 NATIVE_NAME = re.compile(r"\b(?:" + "|".join(NATIVE_FIELDS) + r")\b")
+UNDEFINED = re.compile(r"doesn't exist on type|isn't a defined input type")
 
 
 def names_native(error: object) -> bool:
-    """Whether a GraphQL error is about blockedBy or subIssues: its field, its path, or its
-    message names one ("Field 'blockedBy' doesn't exist on type 'Issue'")"""
+    """Whether a GraphQL error is the schema refusing blockedBy or subIssues: an
+    undefinedField naming one, or a message saying one "doesn't exist on type". An error on
+    one issue's relations (a blocker the token can't read) is not: falling back then would
+    read an issue held only natively as ready, so it fails like any other error"""
     if not isinstance(error, dict):
         return False
     extensions = error.get("extensions")
-    if isinstance(extensions, dict) and extensions.get("fieldName") in NATIVE_FIELDS:
-        return True
-    path = error.get("path")
-    if isinstance(path, list) and any(part in NATIVE_FIELDS for part in path):
-        return True
-    return NATIVE_NAME.search(str(error.get("message", ""))) is not None
+    message = str(error.get("message", ""))
+    if isinstance(extensions, dict) and extensions.get("code") == "undefinedField":
+        return extensions.get("fieldName") in NATIVE_FIELDS or NATIVE_NAME.search(message) is not None
+    return UNDEFINED.search(message) is not None and NATIVE_NAME.search(message) is not None
 
 
 def native_refused(response: dict[str, Any]) -> str | None:
-    """The first error's first line when every error names blockedBy or subIssues (a
-    GitHub Enterprise Server without issue dependencies, a token that can't read them);
-    None for any other response, whose errors are real"""
+    """The first error's first line when every error is the schema refusing blockedBy or
+    subIssues (a GitHub Enterprise Server without issue dependencies); None for any other
+    response, whose errors are real"""
     errors = response.get("errors")
     if not errors or not isinstance(errors, list) or not all(names_native(e) for e in errors):
         return None
