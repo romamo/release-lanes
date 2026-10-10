@@ -195,7 +195,7 @@ fix the bump lists or the tags, not the version.
    ```
 
 3. Create the labels the skills and gates read (`postponed`, `blocked`, `shipmill-hold`,
-   the blocker label, and with an `[agents]` section `needs-decision`). The setup checklist reports what's missing, and `--fix` creates
+   the blocker label, and with an `[agents]` section `needs-decision` and `human`). The setup checklist reports what's missing, and `--fix` creates
    it:
 
    ```bash

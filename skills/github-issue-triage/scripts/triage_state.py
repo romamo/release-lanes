@@ -79,7 +79,9 @@ REVISIT, or POSTPONED as any issue would, else, with every hold closed, one of:
                    COLLABORATOR or the --bot-login; a marker comment by anyone else never
                    counts
   WITH_PERSON      a hand-off came after its newest hold closed and no done report
-                   followed it: it waits on the person, however long (not an action)
+                   followed it: it waits on the person, however long (not an action).
+                   With --json, its line has an "assignees" list of the logins it waits
+                   on too, and no other state's line has one
   VERIFY_DUE       a done report came after the newest hand-off: run its ## Check. A
                    done report is a comment whose first line (past leading blank lines)
                    starts with "done" in any case, by one of its assignees or an OWNER,
@@ -1192,7 +1194,10 @@ def main() -> int:
         state, note = gated(issue, args.bot_login, args.trusted_only) or classify_open(
             issue, args.marker, args.postponed_label, states, stable, (owner, name), args.bot_login, closes
         )
-        rows.append({"number": issue["number"], "state": state, "title": issue["title"], "note": note})
+        row: dict[str, Any] = {"number": issue["number"], "state": state, "title": issue["title"], "note": note}
+        if state == "WITH_PERSON":  # whom it waits on, for github-ship-watch's ISSUES_OPEN row
+            row["assignees"] = assignees(issue)
+        rows.append(row)
     for issue in data["closed"]["nodes"][: args.closed]:
         verdict = classify_closed(issue, args.hold_label, args.incident_label, args.bot_login)
         if verdict is not None:
