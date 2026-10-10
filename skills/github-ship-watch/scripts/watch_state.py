@@ -227,6 +227,10 @@ TRIAGE_ACTION = {
     "DONE_NOT_CLOSED",
     "DECIDED",
     "SUSPECT_CLOSE",
+    "HANDOFF_DUE",
+    "VERIFY_DUE",
+    "NO_ASSIGNEE",
+    "VERIFY_CLOSED",
 }
 POLICY = Path(".github/shipmill.toml")
 # Where uvx gets shipmill for a skill script's writes as the App, the form the skills use (#286)
