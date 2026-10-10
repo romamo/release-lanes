@@ -862,6 +862,8 @@ REPORT_ROWS = [
     "RUNS_ACTIVE",
     "BRANCH_DELETE_OFF",
     "GATE_NO_APP",
+    "CHAIN_NO_GATE",
+    "CHAIN_UNREADABLE",
     "SHIPMILL_VERSION",
     "SHIPMILL_OUTDATED",
     "SKILL_SHADOWED",
@@ -1440,6 +1442,10 @@ def fixed_rows(ws: ModuleType, home: Path) -> dict[str, list[Any]]:
         *ws.settings_rows(REPO, False),
         *[r for r in outdated if r.state == "SHIPMILL_OUTDATED"],
         *ws.gate_app_rows({"prompt": '"/github-issue-triage {repo}"'}),
+        *ws.chain_no_gate_rows(
+            {"rows": [{"ref": "x/b#2", "gate": "NO_GATE", "waits_on": [], "waited_on_by": ["o/r#3"]}]}
+        ),
+        ws.chain_unreadable_row(REPO, ["o/r#3"], "error: x/b#2 has more than 100 labels"),
         *ws.shadow_rows(home, SHIPMILL_SKILLS),
         *ws.hold_rows([issue(ws, 7, ("shipmill-hold",), title=TITLE)], NOW, REPO),
         *ws.stale_rows(stale, CHECKOUT, "main"),
@@ -1477,6 +1483,8 @@ FIXES = {
     "BRANCH_DELETE_OFF": ["gh repo edit o/r --delete-branch-on-merge"],
     "SHIPMILL_OUTDATED": ["in /work/r: claude plugin update shipmill@shipmill --scope project"],
     "GATE_NO_APP": ["run shipmill-setup's step 3 (app-create), then set app_id in [agents]"],
+    "CHAIN_NO_GATE": ["set up a gate on x/b (/shipmill:shipmill-setup x/b), or do x/b#2 by hand"],
+    "CHAIN_UNREADABLE": ["see why: uv run --no-project python {chains} show --trusted-only x/b#2"],
     "SKILL_SHADOWED": ["remove it (rm -r {copy}) or call the skill as /shipmill:github-pr-triage"],
     "HOLD": ["close #7 when the factory may go on: gh issue close 7 -R o/r"],
     "WORKTREE_STALE": [
@@ -1530,7 +1538,7 @@ def test_s011_2_every_action_state_is_fixed_and_a_fixed_row_needs_its_fix(ws: Mo
 def test_s011_3_each_fixed_state_carries_the_fix_behaviour_names(ws: ModuleType, tmp_path: Path, state: str) -> None:
     found = fixed_rows(ws, tmp_path)
     copy = tmp_path / ".agents" / "skills" / "github-pr-triage"
-    assert [r.fix for r in found[state]] == [f.format(copy=copy) for f in FIXES[state]]
+    assert [r.fix for r in found[state]] == [f.format(copy=copy, chains=ws.CHAINS) for f in FIXES[state]]
 
 
 def test_s011_4_a_failed_runs_fix_reruns_the_run_its_detail_links(ws: ModuleType) -> None:
