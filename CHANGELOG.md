@@ -7,6 +7,21 @@ bot.
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-10-10
+
+### Added
+
+- Triage: an issue labelled `human` is a person's item, triaged from the start and never dispatched; with every hold closed it reads HANDOFF_DUE until a trusted `<!-- shipmill:handoff -->` comment, WITH_PERSON until an assignee or trusted author replies `done`, then VERIFY_DUE, and NO_ASSIGNEE with no assignee; one closed as completed by a person with a `## Check` section reads VERIFY_CLOSED (never SUSPECT_CLOSE) until a trusted `<!-- shipmill:verified -->` comment, and `--wip` never counts a person's item (#342)
+- Triage: `chains.py show <owner/repo#N>` prints the chain an issue belongs to, every issue it waits on and every issue that waits on it (natively or as its parent), recursively and each once across repos, with its executor (`agent`, or `person: @login` for a `human` item) and its state (CLOSED, BLOCKED with the open holds, READY); a READY item in a repo whose `.github/shipmill.toml` has no `[agents]` table reads NO_GATE and the command exits 1. With `--trusted-only` it never reads or follows an untrusted author's issue, and on a forge without issue relations it walks the `Depends on` lines alone. github-ship-watch reports each such item in a chain of the repo's open issues as a `CHAIN_NO_GATE` row, and a walk that fails as one `CHAIN_UNREADABLE` row, both actions for a person (#343)
+- Watch and setup: github-ship-watch lists a person's item waiting on its assignees in ISSUES_OPEN as `WITH_PERSON #N (@login ...)` (triage_state.py's `--json` line for WITH_PERSON now carries an `assignees` list), and shipmill-setup's `setup_state.py` wants the `human` label wherever it wants `needs-decision` and `--fix` creates both (#344)
+- Triage: the skill documents chains of work, in a Chains section and its references: the two link forms (`Depends on` lines and GitHub's blocked-by and sub-issue relations) and `chains.py link`, a person's item (the `human` label, each of its states, and what a session does for it, from the hand-off comment to checking the done report against its `## Check`, with the needs-decision question when the check can't run), a parent's close, and `chains.py show`; the spec gate links build issues with `chains.py link`, and `docs/flow.md` walks a chain across three repos with a person's step in it (#345)
+- shipmill.dev: a link preview image (`og.png`, 1200×630) with `og:image` and `twitter:card`, so a shared link shows the page's headline and conveyor instead of text only (#351)
+
+### Fixed
+
+- `chains.py show --trusted-only`, the watch's chain walk, judges an issue's author by the repo the walk started from (D-16), not by the issue's own repo, where an outsider owns their own: an issue in another repo is followed only when its author is the starting repo's owner or collaborator (one `gh api repos/<repo>/collaborators/<login>` per login, cached) or the `--bot-login`, so an outsider's issue linked to a public one no longer makes every watch tick report CHAIN_UNREADABLE (#355)
+- `shipmill status` knows spec 017's person's-item states: HANDOFF_DUE, VERIFY_DUE, and NO_ASSIGNEE are listed to triage, WITH_PERSON is parked with the logins it waits on (`(@login ...)`), and VERIFY_CLOSED is a closed item to check on its own `verify close` line, no longer counted among the open issues; CHAIN_NO_GATE and CHAIN_UNREADABLE wait on you on a `chain` line with their fix instead of under "other" (#358)
+
 ## [0.46.0] - 2026-10-10
 
 ### Added
@@ -1423,7 +1438,8 @@ bot.
   commit before tagging, then sync a stable release made off main back into main
 - `init` and `doctor` commands, and a setup skill for agents
 
-[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.46.0...HEAD
+[Unreleased]: https://github.com/shipmill/shipmill/compare/v0.47.0...HEAD
+[0.47.0]: https://github.com/shipmill/shipmill/compare/v0.46.0...v0.47.0
 [0.46.0]: https://github.com/shipmill/shipmill/compare/v0.45.0...v0.46.0
 [0.45.0]: https://github.com/shipmill/shipmill/compare/v0.44.0...v0.45.0
 [0.44.0]: https://github.com/shipmill/shipmill/compare/v0.43.0...v0.44.0

@@ -1,3 +1,0 @@
-### Added
-
-- Triage: the skill documents chains of work, in a Chains section and its references: the two link forms (`Depends on` lines and GitHub's blocked-by and sub-issue relations) and `chains.py link`, a person's item (the `human` label, each of its states, and what a session does for it, from the hand-off comment to checking the done report against its `## Check`, with the needs-decision question when the check can't run), a parent's close, and `chains.py show`; the spec gate links build issues with `chains.py link`, and `docs/flow.md` walks a chain across three repos with a person's step in it (#345)
